@@ -19,14 +19,14 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 
 # Install Claude Code CLI
 ARG CLAUDE_CODE_VERSION=latest
-RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent
 
 # Copy scripts
 COPY scripts/ /opt/agent/
-RUN chmod +x /opt/agent/entrypoint.sh
+RUN chmod +x /opt/agent/entrypoint.sh /opt/agent/git-askpass.sh
 
 # Run as agent user
 USER agent

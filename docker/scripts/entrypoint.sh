@@ -53,7 +53,8 @@ setup_repo() {
     gh repo clone "$GITHUB_REPO" "$WORK_DIR"
     cd "$WORK_DIR"
 
-    git config --local credential.helper '!f() { echo "password=${GH_TOKEN}"; echo "username=x-access-token"; }; f'
+    # Use GIT_ASKPASS to provide credentials without writing the token to disk
+    export GIT_ASKPASS="${SCRIPTS_DIR}/git-askpass.sh"
 }
 
 # -----------------------------------------------------------------------------
@@ -146,6 +147,7 @@ action_respond_review() {
     log "Fetching review comments"
     REVIEW_COMMENTS="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json reviews --jq '.reviews[] | "\(.author.login) (\(.state)): \(.body)"')"
     PR_COMMENTS="$(gh api "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/comments" --jq '.[] | "\(.user.login): \(.body) (at \(.path):\(.line))"' 2>/dev/null || true)"
+    CONVERSATION_COMMENTS="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json comments --jq '.comments[] | "\(.author.login): \(.body)"' 2>/dev/null || true)"
 
     log "Running Claude to address review feedback"
     run_claude "respond-to-review.md" \
@@ -156,6 +158,9 @@ ${REVIEW_COMMENTS}
 
 Inline comments:
 ${PR_COMMENTS}
+
+Conversation comments:
+${CONVERSATION_COMMENTS}
 
 Address the feedback, commit changes, and reply to the comments using the gh CLI."
 
