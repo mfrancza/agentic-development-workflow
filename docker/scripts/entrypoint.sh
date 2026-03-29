@@ -101,7 +101,7 @@ This PR was created by the developer agent to address the linked issue.
 
 Closes #${GITHUB_ISSUE_NUMBER}")"
 
-    PR_NUMBER="$(echo "$PR_URL" | grep -oE '[0-9]+$')"
+    PR_NUMBER="$(gh pr view "$PR_URL" --json number --jq .number)"
     log "Created PR #${PR_NUMBER}: ${PR_URL}"
 
     if [ -n "$REVIEWERS" ]; then
