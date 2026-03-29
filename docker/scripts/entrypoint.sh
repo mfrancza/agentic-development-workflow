@@ -14,7 +14,7 @@ set -euo pipefail
 : "${AGENT_ACTION:?AGENT_ACTION is required (implement|fix-checks|respond-review|fix-deployment)}"
 
 # Optional configuration
-CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-20250514}"
+CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
 CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-100}"
 REVIEWERS="${REVIEWERS:-}"
 
@@ -55,6 +55,7 @@ setup_repo() {
 
     # Use GIT_ASKPASS to provide credentials without writing the token to disk
     export GIT_ASKPASS="${SCRIPTS_DIR}/git-askpass.sh"
+    export GIT_TERMINAL_PROMPT=0
 }
 
 # -----------------------------------------------------------------------------

@@ -4,4 +4,5 @@
 case "$1" in
     *Username*) echo "x-access-token" ;;
     *Password*) echo "$GH_TOKEN" ;;
+    *) exit 1 ;;
 esac
