@@ -18,7 +18,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+ARG CLAUDE_CODE_VERSION=latest
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent

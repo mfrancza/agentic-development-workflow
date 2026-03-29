@@ -15,7 +15,7 @@ set -euo pipefail
 
 # Optional configuration
 CLAUDE_MODEL="${CLAUDE_MODEL:-claude-sonnet-4-20250514}"
-CLAUDE_BUDGET="${CLAUDE_BUDGET:-10}"
+CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-100}"
 REVIEWERS="${REVIEWERS:-}"
 
 SCRIPTS_DIR="/opt/agent"
@@ -39,7 +39,7 @@ run_claude() {
     claude --print \
         --dangerously-skip-permissions \
         --model "$CLAUDE_MODEL" \
-        --max-turns 100 \
+        --max-turns "$CLAUDE_MAX_TURNS" \
         --system-prompt "$(cat "${SCRIPTS_DIR}/prompts/${prompt_file}")" \
         "$user_prompt"
 }
@@ -52,7 +52,7 @@ setup_repo() {
     gh repo clone "$GITHUB_REPO" "$WORK_DIR"
     cd "$WORK_DIR"
 
-    git config credential.helper '!f() { echo "password=${GH_TOKEN}"; echo "username=x-access-token"; }; f'
+    git config --local credential.helper '!f() { echo "password=${GH_TOKEN}"; echo "username=x-access-token"; }; f'
 }
 
 # -----------------------------------------------------------------------------
