@@ -26,7 +26,7 @@ This project builds a system for integrating coding agents into an issue-based s
 When interacting with GitHub (PRs, comments, API calls), use the Claude Code app identity:
 
 ```sh
-GH_TOKEN=$(~/.claude-code/get-token.sh) gh <command>
+GH_TOKEN="$(~/.claude-code/get-token.sh)" gh <command>
 ```
 
 ## Key Design Constraints
