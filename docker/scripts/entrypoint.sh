@@ -48,14 +48,14 @@ setup_repo() {
     git config --global user.name "claude-dev-agent[bot]"
     git config --global user.email "claude-dev-agent[bot]@users.noreply.github.com"
 
+    # Set up credential handling before any git operations
+    export GIT_ASKPASS="${SCRIPTS_DIR}/git-askpass.sh"
+    export GIT_TERMINAL_PROMPT=0
+
     log "Cloning ${GITHUB_REPO}"
     rm -rf "$WORK_DIR"
     gh repo clone "$GITHUB_REPO" "$WORK_DIR"
     cd "$WORK_DIR"
-
-    # Use GIT_ASKPASS to provide credentials without writing the token to disk
-    export GIT_ASKPASS="${SCRIPTS_DIR}/git-askpass.sh"
-    export GIT_TERMINAL_PROMPT=0
 }
 
 # -----------------------------------------------------------------------------
