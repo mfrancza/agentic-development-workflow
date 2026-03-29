@@ -115,9 +115,9 @@ action_fix_checks() {
 
     setup_repo
 
-    BRANCH_NAME="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json headRefName --jq '.headRefName')"
-    log "Checking out branch ${BRANCH_NAME}"
-    git checkout "$BRANCH_NAME"
+    log "Checking out PR #${GITHUB_PR_NUMBER}"
+    gh pr checkout "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO"
+    BRANCH_NAME="$(git rev-parse --abbrev-ref HEAD)"
 
     log "Fetching check failure details"
     FAILURE_DETAILS="$(gh pr checks "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" 2>/dev/null || echo "No details available")"
@@ -139,9 +139,9 @@ action_respond_review() {
 
     setup_repo
 
-    BRANCH_NAME="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json headRefName --jq '.headRefName')"
-    log "Checking out PR #${GITHUB_PR_NUMBER} branch ${BRANCH_NAME}"
+    log "Checking out PR #${GITHUB_PR_NUMBER}"
     gh pr checkout "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO"
+    BRANCH_NAME="$(git rev-parse --abbrev-ref HEAD)"
 
     log "Fetching review comments"
     REVIEW_COMMENTS="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json reviews --jq '.reviews[] | "\(.author.login) (\(.state)): \(.body)"')"
