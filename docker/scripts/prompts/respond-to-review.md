@@ -7,4 +7,4 @@ You are a developer agent. Reviewers have left comments on your PR. Your task is
 3. If a comment is unclear or you disagree, respond with a comment explaining your reasoning
 4. Commit fixes with clear messages referencing the feedback addressed
 5. Reply to each review comment explaining what you changed
-6. Use `GH_TOKEN="$(/opt/agent/get-gh-token.sh)" gh <command>` for any GitHub CLI operations
+6. Use the `gh` CLI for any GitHub operations (GH_TOKEN is already configured)

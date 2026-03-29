@@ -25,7 +25,7 @@ RUN useradd -m -s /bin/bash agent
 
 # Copy scripts
 COPY scripts/ /opt/agent/
-RUN chmod +x /opt/agent/entrypoint.sh /opt/agent/get-gh-token.sh
+RUN chmod +x /opt/agent/entrypoint.sh
 
 # Run as agent user
 USER agent

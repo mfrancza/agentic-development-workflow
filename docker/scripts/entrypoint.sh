@@ -8,9 +8,7 @@ set -euo pipefail
 
 # Required environment variables
 : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
-: "${GITHUB_APP_ID:?GITHUB_APP_ID is required}"
-: "${GITHUB_INSTALLATION_ID:?GITHUB_INSTALLATION_ID is required}"
-: "${GITHUB_APP_PEM_PATH:?GITHUB_APP_PEM_PATH is required}"
+: "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GITHUB_REPO:?GITHUB_REPO is required}"
 : "${GITHUB_ISSUE_NUMBER:?GITHUB_ISSUE_NUMBER is required}"
 
@@ -27,12 +25,14 @@ REVIEWERS="${REVIEWERS:-}"
 SCRIPTS_DIR="/opt/agent"
 WORK_DIR="/home/agent/work"
 
+export GH_TOKEN
+
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
 
 gh_cmd() {
-    GH_TOKEN="$("${SCRIPTS_DIR}/get-gh-token.sh")" gh "$@"
+    gh "$@"
 }
 
 log() {
@@ -63,9 +63,6 @@ log "Starting developer agent for ${GITHUB_REPO}#${GITHUB_ISSUE_NUMBER}"
 git config --global user.name "claude-dev-agent[bot]"
 git config --global user.email "claude-dev-agent[bot]@users.noreply.github.com"
 
-# Configure gh to use our token script
-export GH_TOKEN_SCRIPT="${SCRIPTS_DIR}/get-gh-token.sh"
-
 # Fetch issue details
 log "Fetching issue #${GITHUB_ISSUE_NUMBER}"
 ISSUE_JSON="$(gh_cmd issue view "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --json title,body)"
@@ -79,8 +76,8 @@ log "Cloning ${GITHUB_REPO}"
 gh_cmd repo clone "$GITHUB_REPO" "$WORK_DIR"
 cd "$WORK_DIR"
 
-# Reconfigure git credentials for push using the token script
-git config credential.helper '!f() { echo "password=$("'"${SCRIPTS_DIR}/get-gh-token.sh"'")"; echo "username=x-access-token"; }; f'
+# Configure git credentials for push using GH_TOKEN
+git config credential.helper '!f() { echo "password=${GH_TOKEN}"; echo "username=x-access-token"; }; f'
 
 # -----------------------------------------------------------------------------
 # Phase 2: Implement
@@ -198,8 +195,7 @@ ${REVIEW_COMMENTS}
 Inline comments:
 ${PR_COMMENTS}
 
-Address the feedback, commit changes, and reply to the comments using:
-GH_TOKEN=\"\$(/opt/agent/get-gh-token.sh)\" gh <command>"
+Address the feedback, commit changes, and reply to the comments using the gh CLI."
 
             git push origin "$BRANCH_NAME"
             log "Pushed review feedback fixes"
