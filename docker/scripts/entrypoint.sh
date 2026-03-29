@@ -140,8 +140,8 @@ action_respond_review() {
     setup_repo
 
     BRANCH_NAME="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json headRefName --jq '.headRefName')"
-    log "Checking out branch ${BRANCH_NAME}"
-    git checkout "$BRANCH_NAME"
+    log "Checking out PR #${GITHUB_PR_NUMBER} branch ${BRANCH_NAME}"
+    gh pr checkout "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO"
 
     log "Fetching review comments"
     REVIEW_COMMENTS="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json reviews --jq '.reviews[] | "\(.author.login) (\(.state)): \(.body)"')"
