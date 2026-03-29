@@ -36,14 +36,12 @@ run_claude() {
     shift
     local user_prompt="$*"
 
-    claude --print \
+    printf '%s\n' "$user_prompt" | claude --print \
         --dangerously-skip-permissions \
         --model "$CLAUDE_MODEL" \
         --max-turns "$CLAUDE_MAX_TURNS" \
-        --system-prompt "$(cat "${SCRIPTS_DIR}/prompts/${prompt_file}")" \
-        "$user_prompt"
+        --system-prompt-file "${SCRIPTS_DIR}/prompts/${prompt_file}"
 }
-
 setup_repo() {
     git config --global user.name "claude-dev-agent[bot]"
     git config --global user.email "claude-dev-agent[bot]@users.noreply.github.com"
