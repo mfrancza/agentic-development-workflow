@@ -49,6 +49,7 @@ setup_repo() {
     git config --global user.email "claude-dev-agent[bot]@users.noreply.github.com"
 
     log "Cloning ${GITHUB_REPO}"
+    rm -rf "$WORK_DIR"
     gh repo clone "$GITHUB_REPO" "$WORK_DIR"
     cd "$WORK_DIR"
 
