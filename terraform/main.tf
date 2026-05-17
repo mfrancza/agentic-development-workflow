@@ -22,9 +22,9 @@ resource "github_repository" "this" {
   description = "Agentic development workflow — AI agents in an issue-based SDLC"
   visibility  = "public"
 
-  has_issues    = true
-  has_wiki      = false
-  has_projects  = false
+  has_issues   = true
+  has_wiki     = false
+  has_projects = false
 
   allow_merge_commit     = false
   allow_squash_merge     = true
@@ -46,13 +46,7 @@ resource "github_branch_protection" "main" {
     dismiss_stale_reviews           = true
   }
 
-  required_status_checks {
-    strict = true
-    # Populate with check names once Actions workflows exist.
-    contexts = []
-  }
-
-  enforce_admins          = false
+  enforce_admins          = true
   require_signed_commits  = false
   allows_deletions        = false
   allows_force_pushes     = false

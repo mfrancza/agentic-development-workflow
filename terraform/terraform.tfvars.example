@@ -4,19 +4,12 @@ repo_name  = "agentic-development-workflow"
 developer_app = {
   app_id          = "123456"
   installation_id = "98765432"
-  private_key_pem = <<-EOT
-    -----BEGIN RSA PRIVATE KEY-----
-    ...paste contents of the .pem downloaded from the App settings page...
-    -----END RSA PRIVATE KEY-----
-  EOT
 }
 
 reviewer_app = {
   app_id          = "234567"
   installation_id = "87654321"
-  private_key_pem = <<-EOT
-    -----BEGIN RSA PRIVATE KEY-----
-    ...paste contents of the .pem downloaded from the App settings page...
-    -----END RSA PRIVATE KEY-----
-  EOT
 }
+
+# App private keys are NOT managed by Terraform. After `terraform apply`, set
+# them as repo Actions secrets directly from the .pem files (see README).

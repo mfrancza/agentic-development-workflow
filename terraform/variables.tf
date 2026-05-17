@@ -10,21 +10,17 @@ variable "repo_name" {
 }
 
 variable "developer_app" {
-  description = "GitHub App acting as the developer agent."
+  description = "Identifiers for the developer agent GitHub App."
   type = object({
     app_id          = string
     installation_id = string
-    private_key_pem = string
   })
-  sensitive = true
 }
 
 variable "reviewer_app" {
-  description = "GitHub App acting as the AI code reviewer."
+  description = "Identifiers for the AI code reviewer GitHub App."
   type = object({
     app_id          = string
     installation_id = string
-    private_key_pem = string
   })
-  sensitive = true
 }

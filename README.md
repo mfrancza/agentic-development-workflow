@@ -28,12 +28,16 @@ Capture the **App ID** and **installation ID** for each (the installation ID is 
 ```bash
 cd terraform
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your App IDs, installation IDs, and PEM contents.
+# Edit terraform.tfvars with your App IDs and installation IDs (no PEMs).
 
 export GITHUB_TOKEN=<a PAT with `repo` scope on your account>
 
 terraform init
-terraform import github_repository.this agentic-development-workflow
+
+# Import the repo. The ID is the plain repo name — whatever you set for
+# var.repo_name in terraform.tfvars (default: agentic-development-workflow).
+terraform import github_repository.this "$(terraform console <<<'var.repo_name' | tr -d '"')"
+
 terraform plan
 terraform apply
 ```
@@ -42,9 +46,23 @@ Terraform will:
 - Codify repo settings (squash-merge only, delete branch on merge, etc.).
 - Apply branch protection on `main` (PR review required, no force pushes, no direct pushes — agents must go through PRs).
 - Scope each App installation to this repo only.
-- Store App ID + private key as repo Actions secrets so workflows can mint installation tokens at runtime.
 
-### 3. Build the developer agent container
+App private keys are deliberately **not** managed by Terraform — keeping them out of `terraform.tfstate` is the whole point. Set them as repo Actions secrets out of band (next step).
+
+### 3. Set App credentials as Actions secrets
+
+Run once after `terraform apply`, and again whenever you rotate a key:
+
+```bash
+gh secret set DEVELOPER_APP_ID         --body "<developer App ID>"
+gh secret set DEVELOPER_APP_PRIVATE_KEY < ~/.config/agentic-agents/developer-agent.pem
+gh secret set REVIEWER_APP_ID          --body "<reviewer App ID>"
+gh secret set REVIEWER_APP_PRIVATE_KEY < ~/.config/agentic-agents/reviewer-agent.pem
+```
+
+Workflows (not yet built) will use these to mint short-lived installation tokens at runtime.
+
+### 4. Build the developer agent container
 
 See [docker/](docker/) for the agent runtime. GitHub Actions workflows (not yet built) will invoke this container per event.
 
