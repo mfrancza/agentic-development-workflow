@@ -1,0 +1,14 @@
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+
+# Secrets — never commit real values
+*.tfvars
+!*.tfvars.example
+
+# Agent App private keys (PEM downloads from GitHub)
+*.pem
