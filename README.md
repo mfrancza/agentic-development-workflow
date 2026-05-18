@@ -13,12 +13,13 @@ Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **S
 **developer-agent**
 - Repository permissions: Contents (R/W), Issues (R/W), Pull requests (R/W), Workflows (R/W), Metadata (R), Checks (R), Deployments (R)
 - Subscribe to events: Issues, Pull request, Pull request review, Check run, Deployment status
-- Webhook URL: not needed (workflow_dispatch is used)
+- Webhook: **uncheck "Active"** — the GitHub UI otherwise requires a Webhook URL, and this project uses `workflow_dispatch` rather than webhooks.
 - After creation: note the **App ID**, generate and download a **private key** (`.pem`), and install the App on this repository.
 
 **reviewer-agent**
 - Repository permissions: Contents (R), Issues (R/W), Pull requests (R/W), Metadata (R), Checks (R)
 - Subscribe to events: Pull request, Pull request review, Issue comment
+- Webhook: **uncheck "Active"** (same reason as above).
 - After creation: note the App ID, download the private key, and install on this repository.
 
 Capture the **App ID** and **installation ID** for each (the installation ID is in the URL after you install: `https://github.com/settings/installations/<INSTALLATION_ID>`).

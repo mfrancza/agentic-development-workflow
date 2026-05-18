@@ -9,18 +9,12 @@ variable "repo_name" {
   default     = "agentic-development-workflow"
 }
 
-variable "developer_app" {
-  description = "Identifiers for the developer agent GitHub App."
-  type = object({
-    app_id          = string
-    installation_id = string
-  })
+variable "developer_app_installation_id" {
+  description = "Installation ID for the developer agent GitHub App on this repo."
+  type        = string
 }
 
-variable "reviewer_app" {
-  description = "Identifiers for the AI code reviewer GitHub App."
-  type = object({
-    app_id          = string
-    installation_id = string
-  })
+variable "reviewer_app_installation_id" {
+  description = "Installation ID for the AI code reviewer GitHub App on this repo."
+  type        = string
 }

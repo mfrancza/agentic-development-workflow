@@ -1,15 +1,8 @@
 repo_owner = "your-github-username"
 repo_name  = "agentic-development-workflow"
 
-developer_app = {
-  app_id          = "123456"
-  installation_id = "98765432"
-}
+developer_app_installation_id = "98765432"
+reviewer_app_installation_id  = "87654321"
 
-reviewer_app = {
-  app_id          = "234567"
-  installation_id = "87654321"
-}
-
-# App private keys are NOT managed by Terraform. After `terraform apply`, set
-# them as repo Actions secrets directly from the .pem files (see README).
+# App IDs and private keys are NOT managed by Terraform. After `terraform apply`,
+# set them as repo Actions secrets directly with `gh secret set` (see README).

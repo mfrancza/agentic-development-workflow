@@ -5,10 +5,10 @@ output "repo_full_name" {
 
 output "developer_app_installation_id" {
   description = "Installation ID for the developer agent App on this repo."
-  value       = var.developer_app.installation_id
+  value       = var.developer_app_installation_id
 }
 
 output "reviewer_app_installation_id" {
   description = "Installation ID for the reviewer agent App on this repo."
-  value       = var.reviewer_app.installation_id
+  value       = var.reviewer_app_installation_id
 }
