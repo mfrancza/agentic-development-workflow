@@ -14,24 +14,24 @@ Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **S
 - Repository permissions: Contents (R/W), Issues (R/W), Pull requests (R/W), Workflows (R/W), Metadata (R), Checks (R), Deployments (R)
 - Subscribe to events: Issues, Pull request, Pull request review, Check run, Deployment status
 - Webhook: **uncheck "Active"** — the GitHub UI otherwise requires a Webhook URL, and this project uses `workflow_dispatch` rather than webhooks.
-- After creation: note the **App ID**, generate and download a **private key** (`.pem`), and install the App on this repository.
+- After creation: note the **App ID** and generate + download a **private key** (`.pem`).
 
 **reviewer-agent**
 - Repository permissions: Contents (R), Issues (R/W), Pull requests (R/W), Metadata (R), Checks (R)
 - Subscribe to events: Pull request, Pull request review, Issue comment
 - Webhook: **uncheck "Active"** (same reason as above).
-- After creation: note the App ID, download the private key, and install on this repository.
+- After creation: note the App ID and download the private key.
 
-Capture the **App ID** and **installation ID** for each (the installation ID is in the URL after you install: `https://github.com/settings/installations/<INSTALLATION_ID>`).
+Then install each App on this repository (sidebar → **Install App** → **Install** next to your username → **Only select repositories** → pick `agentic-development-workflow`). That per-repo selection is what scopes the App to this repo; Terraform deliberately does not manage App installations (the GitHub API endpoints for it reject OAuth user tokens, which is what `gh auth token` issues).
 
 ### 2. Run Terraform
 
 ```bash
 cd terraform
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your App IDs and installation IDs (no PEMs).
+# Edit terraform.tfvars with your repo owner/name.
 
-export GITHUB_TOKEN=<a PAT with `repo` scope on your account>
+export GITHUB_TOKEN=$(gh auth token)  # or any token with `repo` scope
 
 terraform init
 
@@ -45,8 +45,7 @@ terraform apply
 
 Terraform will:
 - Codify repo settings (squash-merge only, delete branch on merge, etc.).
-- Apply branch protection on `main` (PR review required, no force pushes, no direct pushes — agents must go through PRs).
-- Scope each App installation to this repo only.
+- Apply branch protection on `main` (PR review required, no force pushes, no direct pushes — agents must go through PRs, admins included).
 
 App private keys are deliberately **not** managed by Terraform — keeping them out of `terraform.tfstate` is the whole point. Set them as repo Actions secrets out of band (next step).
 
