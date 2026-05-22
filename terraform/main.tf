@@ -20,7 +20,7 @@ provider "github" {
 resource "github_repository" "this" {
   name        = var.repo_name
   description = "Agentic development workflow — AI agents in an issue-based SDLC"
-  visibility  = "public"
+  visibility  = "private"
 
   has_issues   = true
   has_wiki     = false
