@@ -17,8 +17,10 @@ RUN curl -fsSL -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
     && apt-get install -y --no-install-recommends gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Claude Code CLI
-ARG CLAUDE_CODE_VERSION=latest
+# Install Claude Code CLI. Pin to a specific version so workflow runs are
+# reproducible; override at build time with --build-arg if you want a different
+# release.
+ARG CLAUDE_CODE_VERSION=2.1.150
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
 # Create non-root agent user
