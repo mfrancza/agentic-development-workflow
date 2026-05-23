@@ -7,14 +7,26 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: agent-implement-issue-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   implement:
-    if: github.event.label.name == 'agent:developer' && github.event.issue.state == 'open'
+    # Gate on the user who applied the label, not who opened the issue. Until
+    # this becomes a list, only the repo owner can trigger the agent — anyone
+    # else applying the label (e.g., a future triage collaborator) is a no-op.
+    if: >
+      github.event.label.name == 'agent:developer' &&
+      github.event.issue.state == 'open' &&
+      github.event.sender.login == github.repository_owner
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Mint installation token for developer-agent
         id: app-token
