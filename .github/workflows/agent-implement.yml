@@ -21,17 +21,17 @@ jobs:
       github.event.label.name == 'agent:developer' &&
       github.event.issue.state == 'open' &&
       contains(fromJSON('["mfrancza"]'), github.event.sender.login)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
           persist-credentials: false
 
       - name: Mint installation token for developer-agent
         id: app-token
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547  # v1.12.0
         with:
           app-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
