@@ -80,34 +80,9 @@ action_implement() {
 
 Repository: ${GITHUB_REPO}
 Issue #${GITHUB_ISSUE_NUMBER}: ${ISSUE_TITLE}
+Branch: ${BRANCH_NAME}
 
 ${ISSUE_BODY}"
-
-    log "Pushing branch"
-    git push origin "$BRANCH_NAME"
-
-    log "Creating PR"
-    PR_URL="$(gh pr create \
-        --repo "$GITHUB_REPO" \
-        --head "$BRANCH_NAME" \
-        --title "Fix #${GITHUB_ISSUE_NUMBER}: ${ISSUE_TITLE}" \
-        --body "Automated implementation for #${GITHUB_ISSUE_NUMBER}.
-
-## Issue
-${ISSUE_TITLE}
-
-## Summary
-This PR was created by the developer agent to address the linked issue.
-
-Closes #${GITHUB_ISSUE_NUMBER}")"
-
-    PR_NUMBER="$(gh pr view "$PR_URL" --json number --jq .number)"
-    log "Created PR #${PR_NUMBER}: ${PR_URL}"
-
-    if [ -n "$REVIEWERS" ]; then
-        log "Requesting reviewers: ${REVIEWERS}"
-        gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPO" --add-reviewer "$REVIEWERS"
-    fi
 }
 
 action_fix_checks() {
