@@ -83,6 +83,14 @@ Issue #${GITHUB_ISSUE_NUMBER}: ${ISSUE_TITLE}
 Branch: ${BRANCH_NAME}
 
 ${ISSUE_BODY}"
+
+    log "Verifying PR was opened for ${BRANCH_NAME}"
+    PR_URL="$(gh pr list --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --state open --json url --jq '.[0].url // empty')"
+    if [ -z "$PR_URL" ]; then
+        log "ERROR: no open PR found for ${BRANCH_NAME} — agent did not complete the issue→PR flow"
+        exit 1
+    fi
+    log "Verified PR: ${PR_URL}"
 }
 
 action_fix_checks() {
