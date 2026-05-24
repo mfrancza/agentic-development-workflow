@@ -36,10 +36,28 @@ jobs:
           app-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
+      - name: Preflight: skip if PR already exists
+        id: preflight
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          BRANCH="agent/issue-${{ github.event.issue.number }}"
+          HEAD="${{ github.repository_owner }}:${BRANCH}"
+          PR_NUMBER="$(gh pr list --repo "${{ github.repository }}" --head "$HEAD" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+          if [ -n "$PR_NUMBER" ]; then
+            echo "Found existing open PR #$PR_NUMBER for $HEAD; skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build agent image
+        if: steps.preflight.outputs.skip != 'true'
         run: docker build -t agent-developer:ci ./docker
 
       - name: Run agent
+        if: steps.preflight.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
