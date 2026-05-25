@@ -1,0 +1,88 @@
+name: agent-fix-deployment
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-fix-deployment-${{ github.event.deployment.sha }}
+  cancel-in-progress: false
+
+jobs:
+  fix-deployment:
+    if: github.event.deployment_status.state == 'failure'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+        with:
+          persist-credentials: false
+
+      # Resolve the failed deployment to (a) the workflow run that produced
+      # the deploy (so the agent can read its failed-job logs), and (b) the
+      # originating issue number (parsed out of the merged PR's "Closes #N").
+      # Skip cleanly if either lookup fails — better than handing the agent
+      # incomplete context.
+      - name: Resolve deployment to workflow run + issue
+        id: lookup
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          SHA='${{ github.event.deployment.sha }}'
+
+          RUN_ID="$(gh api "repos/${{ github.repository }}/actions/runs?head_sha=$SHA&status=failure" --jq '.workflow_runs[0].id // empty')"
+          if [ -z "$RUN_ID" ]; then
+            echo "No failed workflow run found for $SHA; skipping."
+            exit 0
+          fi
+
+          PR_NUM="$(gh api "repos/${{ github.repository }}/commits/$SHA/pulls" --jq '.[0].number // empty')"
+          if [ -z "$PR_NUM" ]; then
+            echo "No PR found for commit $SHA; skipping."
+            exit 0
+          fi
+
+          ISSUE_NUM="$(gh pr view "$PR_NUM" --repo '${{ github.repository }}' --json body --jq '.body' | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+')"
+          if [ -z "${ISSUE_NUM:-}" ]; then
+            echo "PR #$PR_NUM did not reference an issue with 'Closes #N'; skipping."
+            exit 0
+          fi
+
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
+          echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
+          echo "issue_number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
+
+      - name: Mint installation token for developer-agent
+        if: steps.lookup.outputs.proceed == 'true'
+        id: app-token
+        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547  # v1.12.0
+        with:
+          app-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Build agent image
+        if: steps.lookup.outputs.proceed == 'true'
+        run: docker build -t agent-developer:ci ./docker
+
+      - name: Run agent
+        if: steps.lookup.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_REPO: ${{ github.repository }}
+          AGENT_ACTION: fix-deployment
+          GITHUB_RUN_ID: ${{ steps.lookup.outputs.run_id }}
+          GITHUB_ISSUE_NUMBER: ${{ steps.lookup.outputs.issue_number }}
+        run: |
+          docker run --rm \
+            -e GH_TOKEN \
+            -e ANTHROPIC_API_KEY \
+            -e GITHUB_REPO \
+            -e AGENT_ACTION \
+            -e GITHUB_RUN_ID \
+            -e GITHUB_ISSUE_NUMBER \
+            agent-developer:ci
