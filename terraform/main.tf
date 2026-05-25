@@ -39,8 +39,9 @@ resource "github_repository" "this" {
 # github_branch_protection resource).
 #
 # Repository admins can bypass review on PR merges but NOT push directly to
-# main; this stops the legacy "delete protection → merge → reapply" dance for
-# the repo owner's own PRs while keeping push protection intact.
+# the default branch; this stops the legacy "delete protection → merge →
+# reapply" dance for the repo owner's own PRs while keeping push protection
+# intact.
 resource "github_repository_ruleset" "main" {
   name        = "main-protection"
   repository  = github_repository.this.name
