@@ -80,34 +80,20 @@ action_implement() {
 
 Repository: ${GITHUB_REPO}
 Issue #${GITHUB_ISSUE_NUMBER}: ${ISSUE_TITLE}
+Branch: ${BRANCH_NAME}
 
 ${ISSUE_BODY}"
 
-    log "Pushing branch"
-    git push origin "$BRANCH_NAME"
-
-    log "Creating PR"
-    PR_URL="$(gh pr create \
-        --repo "$GITHUB_REPO" \
-        --head "$BRANCH_NAME" \
-        --title "Fix #${GITHUB_ISSUE_NUMBER}: ${ISSUE_TITLE}" \
-        --body "Automated implementation for #${GITHUB_ISSUE_NUMBER}.
-
-## Issue
-${ISSUE_TITLE}
-
-## Summary
-This PR was created by the developer agent to address the linked issue.
-
-Closes #${GITHUB_ISSUE_NUMBER}")"
-
-    PR_NUMBER="$(gh pr view "$PR_URL" --json number --jq .number)"
-    log "Created PR #${PR_NUMBER}: ${PR_URL}"
-
-    if [ -n "$REVIEWERS" ]; then
-        log "Requesting reviewers: ${REVIEWERS}"
-        gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPO" --add-reviewer "$REVIEWERS"
+    log "Verifying PR was opened for ${BRANCH_NAME}"
+    # Qualify the head with the repo owner so a fork's same-named branch can't
+    # satisfy the check.
+    HEAD="${GITHUB_REPO%%/*}:${BRANCH_NAME}"
+    PR_URL="$(gh pr list --repo "$GITHUB_REPO" --head "$HEAD" --state open --json url --jq '.[0].url // empty')"
+    if [ -z "$PR_URL" ]; then
+        log "ERROR: no open PR found for ${HEAD} — agent did not complete the issue→PR flow"
+        exit 1
     fi
+    log "Verified PR: ${PR_URL}"
 }
 
 action_fix_checks() {
