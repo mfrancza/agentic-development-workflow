@@ -34,21 +34,43 @@ resource "github_repository" "this" {
   vulnerability_alerts = true
 }
 
-# Branch protection: require PR review, block direct pushes to main.
-# Agent App installations are NOT in bypass lists — they must go through PRs.
-resource "github_branch_protection" "main" {
-  repository_id = github_repository.this.node_id
-  pattern       = "main"
+# Protection for the default branch via a repository ruleset (the modern
+# primitive — supports granular bypass actors, unlike the legacy
+# github_branch_protection resource).
+#
+# Repository admins can bypass review on PR merges but NOT push directly to
+# main; this stops the legacy "delete protection → merge → reapply" dance for
+# the repo owner's own PRs while keeping push protection intact.
+resource "github_repository_ruleset" "main" {
+  name        = "main-protection"
+  repository  = github_repository.this.name
+  target      = "branch"
+  enforcement = "active"
 
-  required_pull_request_reviews {
-    required_approving_review_count = 1
-    require_code_owner_reviews      = false
-    dismiss_stale_reviews           = true
+  conditions {
+    ref_name {
+      include = ["~DEFAULT_BRANCH"]
+      exclude = []
+    }
   }
 
-  enforce_admins          = true
-  require_signed_commits  = false
-  allows_deletions        = false
-  allows_force_pushes     = false
-  required_linear_history = true
+  bypass_actors {
+    actor_id    = 5 # Repository Admin role
+    actor_type  = "RepositoryRole"
+    bypass_mode = "pull_request"
+  }
+
+  rules {
+    deletion                = true
+    non_fast_forward        = true
+    required_linear_history = true
+
+    pull_request {
+      required_approving_review_count   = 1
+      dismiss_stale_reviews_on_push     = true
+      require_code_owner_review         = false
+      require_last_push_approval        = false
+      required_review_thread_resolution = false
+    }
+  }
 }
