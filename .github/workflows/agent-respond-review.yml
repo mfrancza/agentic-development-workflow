@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read  # for `gh pr view` in potential future lookups; also documents intent
 
 concurrency:
   group: agent-respond-review-pr-${{ github.event.pull_request.number }}
@@ -13,10 +14,13 @@ concurrency:
 
 jobs:
   respond-review:
-    # Fire on reviews on any PR — author-scoping will be reintroduced later
-    # via a separate rules/config layer. Skip "pending" reviews (drafts the
-    # reviewer hasn't submitted yet).
-    if: github.event.review.state != 'pending'
+    # Trust gate: only react to reviews on PRs authored by the developer-agent
+    # bot. Skip "pending" reviews (drafts the reviewer hasn't submitted yet).
+    # github.event.pull_request.user.login carries the author directly from the
+    # event payload — no extra API call needed.
+    if: >
+      github.event.review.state != 'pending' &&
+      github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
