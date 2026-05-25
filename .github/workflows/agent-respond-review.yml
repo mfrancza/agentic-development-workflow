@@ -13,11 +13,10 @@ concurrency:
 
 jobs:
   respond-review:
-    # Only respond to reviews on PRs the developer agent itself opened. Skip
-    # "pending" reviews (drafts the reviewer hasn't submitted yet).
-    if: >
-      github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]' &&
-      github.event.review.state != 'pending'
+    # Fire on reviews on any PR — author-scoping will be reintroduced later
+    # via a separate rules/config layer. Skip "pending" reviews (drafts the
+    # reviewer hasn't submitted yet).
+    if: github.event.review.state != 'pending'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 

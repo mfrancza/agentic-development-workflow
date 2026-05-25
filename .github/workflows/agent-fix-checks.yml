@@ -6,9 +6,12 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read  # for `gh pr view` in the trust-gate step
 
 concurrency:
-  group: agent-fix-checks-pr-${{ github.event.check_run.pull_requests[0].number }}
+  # Fall back to check_run.id when the check isn't tied to a PR — otherwise
+  # unrelated PR-less check_runs all collide on `agent-fix-checks-pr-`.
+  group: agent-fix-checks-pr-${{ github.event.check_run.pull_requests[0].number || github.event.check_run.id }}
   cancel-in-progress: false
 
 jobs:

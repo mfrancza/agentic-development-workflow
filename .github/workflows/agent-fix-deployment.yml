@@ -5,6 +5,8 @@ on:
 
 permissions:
   contents: read
+  actions: read         # for `gh api .../actions/runs`
+  pull-requests: read   # for `gh api .../commits/.../pulls` and `gh pr view`
 
 concurrency:
   group: agent-fix-deployment-${{ github.event.deployment.sha }}
@@ -46,7 +48,9 @@ jobs:
             exit 0
           fi
 
-          ISSUE_NUM="$(gh pr view "$PR_NUM" --repo '${{ github.repository }}' --json body --jq '.body' | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+')"
+          # Allow the grep pipeline to come back empty under `set -e`; the
+          # explicit -z check below is what handles the no-match case.
+          ISSUE_NUM="$(gh pr view "$PR_NUM" --repo '${{ github.repository }}' --json body --jq '.body' | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
           if [ -z "${ISSUE_NUM:-}" ]; then
             echo "PR #$PR_NUM did not reference an issue with 'Closes #N'; skipping."
             exit 0
