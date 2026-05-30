@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read  # respond-review action posts inline reply comments via `gh api`
 
 concurrency:
   group: agent-respond-review-pr-${{ github.event.pull_request.number }}
@@ -15,9 +14,9 @@ concurrency:
 jobs:
   respond-review:
     # Only respond to submitted reviews on PRs authored by the developer agent.
-    if: >
-      github.event.review.state != 'pending' &&
-      github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]'
+    # The pull_request_review: submitted trigger already excludes pending/draft
+    # reviews, so no need to repeat that check here.
+    if: github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
