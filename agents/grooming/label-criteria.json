@@ -1,0 +1,32 @@
+{
+  "question": {
+    "description": "The issue lacks sufficient detail to understand requirements, reproduce a bug, or determine scope.",
+    "criteria": "Apply when the issue is ambiguous, missing steps to reproduce, or leaves key questions unanswered that block understanding or implementation.",
+    "action": "Post a comment listing the clarifying questions, then apply this label."
+  },
+  "bug": {
+    "description": "The issue reports incorrect or unexpected behavior in an existing feature.",
+    "criteria": "Apply when the issue describes something broken or not working as intended. Look for indicators like 'broken', 'error', 'fails', 'wrong', 'crash', \"doesn't work\", stack traces, or unexpected output.",
+    "action": "Apply this label when the issue is a bug report."
+  },
+  "enhancement": {
+    "description": "The issue requests new functionality or an improvement to existing behavior.",
+    "criteria": "Apply when the issue asks for a new feature, capability, or improvement to something that already works. Look for indicators like 'add', 'feature request', 'improve', 'new', 'support for', 'would like', 'could we'.",
+    "action": "Apply this label when the issue is a feature or enhancement request."
+  },
+  "dependency upgrade": {
+    "description": "The issue requests upgrading a library, package, tool version, or other external dependency.",
+    "criteria": "Apply when the issue is specifically about bumping or updating a dependency to a newer version, whether for security, compatibility, or access to new upstream features.",
+    "action": "Apply this label when the issue is a dependency upgrade request."
+  },
+  "do": {
+    "description": "The issue is simple and well-defined enough to complete in a single, easy-to-review commit PR.",
+    "criteria": "Apply when the change is small, the scope is clear, and the implementation path is straightforward with no architectural decisions needed. Examples: fixing a typo, updating a config value, adding a small utility, correcting documentation, a one-line fix.",
+    "action": "Apply this label when the issue can be implemented cleanly in a single commit without prior planning. Mutually exclusive with 'plan'."
+  },
+  "plan": {
+    "description": "The issue is complex enough to require design or planning before implementation.",
+    "criteria": "Apply when the change spans multiple components, requires architectural decisions, involves coordination between systems, or cannot be done cleanly in a single commit. Examples: new multi-step workflows, refactors, new agent types, cross-cutting infrastructure changes.",
+    "action": "Apply this label when the issue requires a plan before implementation begins. Mutually exclusive with 'do'."
+  }
+}

@@ -13,6 +13,9 @@ See `requirements.md` for the full project specification and `AGENTS.md` for exi
 ├── requirements.md                   # Project specification and MVP requirements
 ├── README.md                         # Project readme (minimal)
 ├── LICENSE                           # Apache 2.0
+├── agents/
+│   └── grooming/
+│       └── label-criteria.json       # Label-indexed grooming criteria (used by groom prompt)
 ├── docker/
 │   ├── Dockerfile                    # Developer agent container image (node:22-bookworm)
 │   └── scripts/
@@ -22,7 +25,8 @@ See `requirements.md` for the full project specification and `AGENTS.md` for exi
 │           ├── implement.md          # System prompt for issue implementation
 │           ├── respond-to-checks.md  # System prompt for CI failure fixes
 │           ├── respond-to-review.md  # System prompt for PR review responses
-│           └── fix-deployment.md     # System prompt for deployment failure fixes
+│           ├── fix-deployment.md     # System prompt for deployment failure fixes
+│           └── groom.md              # System prompt for issue grooming (labels + notes)
 ├── terraform/
 │   ├── main.tf                       # GitHub repo, branch protection ruleset
 │   ├── variables.tf                  # Input variables (repo_owner, repo_name)
@@ -31,17 +35,22 @@ See `requirements.md` for the full project specification and `AGENTS.md` for exi
 └── .github/
     ├── copilot-instructions.md       # This file
     └── workflows/
-        └── agent-implement.yml       # Triggers the developer agent on issue labeling
+        ├── agent-implement.yml       # Triggers the developer agent on issue labeling
+        ├── agent-fix-checks.yml      # Re-invokes the agent on workflow_run failures (fix-checks)
+        ├── agent-respond-review.yml  # Re-invokes the agent on pull_request_review (respond-review)
+        ├── agent-fix-deployment.yml  # Re-invokes the agent on deployment_status failures
+        └── agent-groom.yml           # Runs the grooming agent on new issues
 ```
 
 ## MVP Workflow
 
-1. User creates a GitHub issue and assigns it to the developer agent.
-2. A container runs with the issue as a parameter (`AGENT_ACTION=implement`).
-3. The agent reads the issue, creates a branch (`agent/issue-{N}`), implements a solution, and opens a PR.
-4. On CI failures, the agent is re-invoked with `AGENT_ACTION=fix-checks`.
-5. On review comments, the agent is re-invoked with `AGENT_ACTION=respond-review`.
-6. After merge, deployment failures trigger `AGENT_ACTION=fix-deployment`.
+1. User creates a GitHub issue; the grooming agent runs automatically (`AGENT_ACTION=groom`) to apply labels and add clarifying notes.
+2. User assigns the issue to the developer agent.
+3. A container runs with the issue as a parameter (`AGENT_ACTION=implement`).
+4. The agent reads the issue, creates a branch (`agent/issue-{N}`), implements a solution, and opens a PR.
+5. On CI failures, the agent is re-invoked with `AGENT_ACTION=fix-checks`.
+6. On review comments, the agent is re-invoked with `AGENT_ACTION=respond-review`.
+7. After merge, deployment failures trigger `AGENT_ACTION=fix-deployment`.
 
 ## Expected Deliverables (Not Yet Complete)
 
