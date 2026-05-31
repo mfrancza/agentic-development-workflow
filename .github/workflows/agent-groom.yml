@@ -13,9 +13,12 @@ concurrency:
 
 jobs:
   groom:
-    # Run on every newly opened issue; the grooming agent is non-destructive
-    # (labels + comments only) so no allowlist gate is needed here.
-    if: github.event.issue.state == 'open'
+    # Gate on the sender allowlist to prevent arbitrary users from triggering
+    # paid Anthropic API calls and Actions minutes. Mirrors the same gate used
+    # in agent-implement.yml.
+    if: >
+      github.event.issue.state == 'open' &&
+      contains(fromJSON('["mfrancza"]'), github.event.sender.login)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 

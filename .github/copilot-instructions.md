@@ -74,7 +74,7 @@ The project is still being built. Planned deliverables include:
 - All agent-human and agent-agent interaction happens via **GitHub issue/PR comments**.
 - Branch protection must require **independent PR approval** and prevent agents from pushing directly to main.
 - The entrypoint script requires these environment variables: `ANTHROPIC_API_KEY`, `GH_TOKEN`, `GITHUB_REPO`, `AGENT_ACTION`.
-- Additional variables per action: `GITHUB_ISSUE_NUMBER` (implement, fix-deployment), `GITHUB_PR_NUMBER` (fix-checks, respond-review), `GITHUB_RUN_ID` (fix-deployment).
+- Additional variables per action: `GITHUB_ISSUE_NUMBER` (implement, groom, fix-deployment), `GITHUB_PR_NUMBER` (fix-checks, respond-review), `GITHUB_RUN_ID` (fix-deployment).
 
 ## Development Guidance
 
