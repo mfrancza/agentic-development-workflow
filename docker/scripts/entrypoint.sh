@@ -129,25 +129,36 @@ action_respond_review() {
     gh pr checkout "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO"
     BRANCH_NAME="$(git rev-parse --abbrev-ref HEAD)"
 
-    log "Fetching review comments"
-    REVIEW_COMMENTS="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json reviews --jq '.reviews[] | "\(.author.login) (\(.state)): \(.body)"')"
-    PR_COMMENTS="$(gh api "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/comments" --jq '.[] | "\(.user.login): \(.body) (at \(.path):\(.line))"' 2>/dev/null || true)"
-    CONVERSATION_COMMENTS="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json comments --jq '.comments[] | "\(.author.login): \(.body)"' 2>/dev/null || true)"
+    log "Resolving merge-base against the PR's base branch"
+    BASE_REF="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json baseRefName --jq '.baseRefName')"
+    git fetch origin "$BASE_REF"
+    BASE_SHA="$(git merge-base "origin/${BASE_REF}" HEAD)"
+    COMMITS_SINCE_BASE="$(git log --pretty='format:%h %s' "${BASE_SHA}..HEAD")"
+
+    log "Fetching reviews and comments (IDs preserved for replies)"
+    REVIEWS_JSON="$(gh api "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" --jq '[.[] | {id, user: .user.login, state, body, submitted_at}]')"
+    INLINE_COMMENTS_JSON="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/comments" --jq '[.[] | {id, in_reply_to_id, pull_request_review_id, user: .user.login, path, line, body, created_at}]')"
+    ISSUE_COMMENTS_JSON="$(gh api --paginate "repos/${GITHUB_REPO}/issues/${GITHUB_PR_NUMBER}/comments" --jq '[.[] | {id, user: .user.login, body, created_at}]')"
 
     log "Running Claude to address review feedback"
     run_claude "respond-to-review.md" \
-        "Review feedback on PR #${GITHUB_PR_NUMBER} in ${GITHUB_REPO}:
+        "Address review feedback on PR #${GITHUB_PR_NUMBER} in ${GITHUB_REPO}.
 
-Reviews:
-${REVIEW_COMMENTS}
+Branch: ${BRANCH_NAME}
+Base ref: ${BASE_REF}
+Base SHA (merge-base): ${BASE_SHA}
 
-Inline comments:
-${PR_COMMENTS}
+Commits already on this branch since base:
+${COMMITS_SINCE_BASE}
 
-Conversation comments:
-${CONVERSATION_COMMENTS}
+Reviews (top-level review submissions):
+${REVIEWS_JSON}
 
-Address the feedback, commit changes, and reply to the comments using the gh CLI."
+Inline review comments (each has an \`id\` for replying):
+${INLINE_COMMENTS_JSON}
+
+PR conversation comments:
+${ISSUE_COMMENTS_JSON}"
 
     log "Pushing changes"
     git push origin "$BRANCH_NAME"
