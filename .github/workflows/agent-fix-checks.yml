@@ -2,6 +2,12 @@ name: agent-fix-checks
 
 on:
   workflow_run:
+    # `workflows:` is required by the GitHub Actions schema — without it the
+    # file fails validation with "on.workflow_run does not reference any
+    # workflows". No real CI workflow exists in this repo yet; "CI" is a
+    # placeholder. Update this list (or add the CI workflow with this name)
+    # when CI lands so fix-checks actually fires on its failures.
+    workflows: ["CI"]
     types: [completed]
 
 permissions:
