@@ -34,6 +34,15 @@ resource "github_repository" "this" {
   vulnerability_alerts = true
 }
 
+# Expose the sender allowlist as a repository Actions variable so workflow
+# `if` conditions can use `fromJSON(vars.AGENT_ALLOWLIST)` instead of
+# hardcoding usernames in YAML files.
+resource "github_actions_variable" "agent_allowlist" {
+  repository    = github_repository.this.name
+  variable_name = "AGENT_ALLOWLIST"
+  value         = jsonencode(var.agent_allowlist)
+}
+
 # Protection for the default branch via a repository ruleset (the modern
 # primitive — supports granular bypass actors, unlike the legacy
 # github_branch_protection resource).

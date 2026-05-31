@@ -14,13 +14,14 @@ concurrency:
 jobs:
   implement:
     # Gate on the user who applied the label, not who opened the issue. The
-    # allowlist is the source of truth for "who may trigger the agent" —
+    # allowlist is managed as a Terraform parameter (vars.AGENT_ALLOWLIST) so
+    # usernames are not hardcoded in YAML — run `terraform apply` to update it.
     # GitHub has no per-label permission model and `repository_owner` doesn't
     # work in org repos (it's the org login, not a user).
     if: >
       github.event.label.name == 'agent:developer' &&
       github.event.issue.state == 'open' &&
-      contains(fromJSON('["mfrancza"]'), github.event.sender.login)
+      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 

@@ -14,11 +14,12 @@ concurrency:
 jobs:
   groom:
     # Gate on the sender allowlist to prevent arbitrary users from triggering
-    # paid Anthropic API calls and Actions minutes. Mirrors the same gate used
-    # in agent-implement.yml.
+    # paid Anthropic API calls and Actions minutes. The allowlist is managed
+    # as a Terraform parameter (vars.AGENT_ALLOWLIST) so usernames are not
+    # hardcoded in YAML — run `terraform apply` to update it.
     if: >
       github.event.issue.state == 'open' &&
-      contains(fromJSON('["mfrancza"]'), github.event.sender.login)
+      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
