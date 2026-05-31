@@ -13,16 +13,25 @@ See `requirements.md` for the full project specification and `AGENTS.md` for exi
 ├── requirements.md                   # Project specification and MVP requirements
 ├── README.md                         # Project readme (minimal)
 ├── LICENSE                           # Apache 2.0
-└── docker/
-    ├── Dockerfile                    # Developer agent container image (node:22-bookworm)
-    └── scripts/
-        ├── entrypoint.sh             # Container entrypoint — dispatches AGENT_ACTION
-        ├── git-askpass.sh            # GIT_ASKPASS helper for token-based auth
-        └── prompts/
-            ├── implement.md          # System prompt for issue implementation
-            ├── respond-to-checks.md  # System prompt for CI failure fixes
-            ├── respond-to-review.md  # System prompt for PR review responses
-            └── fix-deployment.md     # System prompt for deployment failure fixes
+├── docker/
+│   ├── Dockerfile                    # Developer agent container image (node:22-bookworm)
+│   └── scripts/
+│       ├── entrypoint.sh             # Container entrypoint — dispatches AGENT_ACTION
+│       ├── git-askpass.sh            # GIT_ASKPASS helper for token-based auth
+│       └── prompts/
+│           ├── implement.md          # System prompt for issue implementation
+│           ├── respond-to-checks.md  # System prompt for CI failure fixes
+│           ├── respond-to-review.md  # System prompt for PR review responses
+│           └── fix-deployment.md     # System prompt for deployment failure fixes
+├── terraform/
+│   ├── main.tf                       # GitHub repo, branch protection ruleset
+│   ├── variables.tf                  # Input variables (repo_owner, repo_name)
+│   ├── outputs.tf                    # Output values
+│   └── terraform.tfvars.example      # Example variable values
+└── .github/
+    ├── copilot-instructions.md       # This file
+    └── workflows/
+        └── agent-implement.yml       # Triggers the developer agent on issue labeling
 ```
 
 ## MVP Workflow
@@ -39,7 +48,7 @@ See `requirements.md` for the full project specification and `AGENTS.md` for exi
 The project is still being built. Planned deliverables include:
 
 - **Dockerfile** for the development agent container — **exists** at `docker/Dockerfile`
-- **Terraform** for GitHub repo setup, branch protection rules, agent identities, and GitHub Actions triggers — **not yet created**
+- **Terraform** for GitHub repo setup, branch protection rules, agent identities, and GitHub Actions triggers — **exists** at `terraform/` (repo and branch protection implemented; agent identities and full Actions trigger infrastructure not yet complete)
 - **Local development guide** for running developer and code reviewer agents locally — **not yet created**
 
 ## Key Technologies
@@ -47,7 +56,7 @@ The project is still being built. Planned deliverables include:
 - **Shell scripting (Bash):** The entrypoint and helper scripts are POSIX-compatible Bash (`set -euo pipefail`). Follow this convention for any new scripts.
 - **Docker:** The agent container is based on `node:22-bookworm` and installs `git`, `curl`, `jq`, `gh` (GitHub CLI), and `@anthropic-ai/claude-code`.
 - **GitHub CLI (`gh`):** Used throughout for cloning, creating PRs, checking PR status, and posting comments. Always use `gh` for GitHub API operations.
-- **Terraform (planned):** Infrastructure-as-code for GitHub resources.
+- **Terraform:** Infrastructure-as-code for GitHub resources — exists at `terraform/`.
 
 ## Key Design Constraints
 
@@ -96,14 +105,27 @@ To add a new action:
 
 ### Adding Terraform
 
-When creating Terraform configurations:
-- Place them in a new top-level `terraform/` directory.
+When extending the Terraform configuration:
+- The `terraform/` directory manages the repository and branch protection via the GitHub provider.
 - Target GitHub provider resources for repo setup, branch protection, and agent identities.
 - Follow the constraints in `requirements.md` for branch protection rules.
 
+### Applying Terraform
+
+```sh
+cd terraform
+cp terraform.tfvars.example terraform.tfvars   # fill in repo_owner (and optionally repo_name)
+terraform init
+terraform import github_repository.this <repo_name>   # first time only
+terraform plan
+terraform apply
+```
+
+Authentication uses a GitHub PAT exported as `GITHUB_TOKEN` (needs `repo` scope for personal repos).
+
 ## Build and Test
 
-There are currently **no automated tests, linters, or CI pipelines** in this repository. If you add any:
+There are currently **no automated tests or linters** in this repository. The CI pipeline (`agent-implement.yml`) triggers the developer agent on issue labeling. If you add tests or linters:
 - Prefer standard tooling for the language/framework in use.
 - Document how to run them in this file.
 - Ensure the Docker image builds successfully: `docker build -t dev-agent docker/`
@@ -111,5 +133,8 @@ There are currently **no automated tests, linters, or CI pipelines** in this rep
 ## Errors and Workarounds
 
 - **No `.github/` directory existed initially.** It was created as part of adding this instructions file.
-- **No CI/CD workflows exist yet.** GitHub Actions workflows for triggering agent containers on issue assignment are a planned deliverable. When adding them, place workflow files in `.github/workflows/`.
 - **Shallow clone limitations:** The repository may be a shallow clone. If you need full history or other branches, run `git fetch --unshallow origin` before attempting operations that require full git history.
+
+## Review Comment Handling
+
+When responding to pull request reviews, mark any review thread comments that were previously created by Copilot (the `github-copilot[bot]` user or similar bot identities) as **resolved** after addressing them. Use the GitHub API via `gh api` to resolve review threads by their node ID.
