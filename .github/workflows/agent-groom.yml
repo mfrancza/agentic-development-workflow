@@ -2,7 +2,7 @@ name: agent-groom
 
 on:
   issues:
-    types: [opened]
+    types: [labeled]
 
 permissions:
   contents: read
@@ -13,11 +13,13 @@ concurrency:
 
 jobs:
   groom:
-    # Gate on the sender allowlist to prevent arbitrary users from triggering
-    # paid Anthropic API calls and Actions minutes. The allowlist is managed
+    # Gate on the agent:groom label name and sender allowlist. Triggering on
+    # label application (rather than issue open) mirrors agent-implement.yml
+    # and lets users control which issues get groomed. The allowlist is managed
     # as a Terraform parameter (vars.AGENT_ALLOWLIST) so usernames are not
     # hardcoded in YAML — run `terraform apply` to update it.
     if: >
+      github.event.label.name == 'agent:groom' &&
       github.event.issue.state == 'open' &&
       contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
     runs-on: ubuntu-24.04

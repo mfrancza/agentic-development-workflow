@@ -39,12 +39,12 @@ See `requirements.md` for the full project specification and `AGENTS.md` for exi
         ├── agent-fix-checks.yml      # Re-invokes the agent on workflow_run failures (fix-checks)
         ├── agent-respond-review.yml  # Re-invokes the agent on pull_request_review (respond-review)
         ├── agent-fix-deployment.yml  # Re-invokes the agent on deployment_status failures
-        └── agent-groom.yml           # Runs the grooming agent on new issues
+        └── agent-groom.yml           # Runs the grooming agent when agent:groom label is applied
 ```
 
 ## MVP Workflow
 
-1. User creates a GitHub issue; the grooming agent runs automatically (`AGENT_ACTION=groom`) to apply labels and add clarifying notes.
+1. User creates a GitHub issue and applies the `agent:groom` label; the grooming agent runs (`AGENT_ACTION=groom`) to apply additional labels and add clarifying notes.
 2. User assigns the issue to the developer agent.
 3. A container runs with the issue as a parameter (`AGENT_ACTION=implement`).
 4. The agent reads the issue, creates a branch (`agent/issue-{N}`), implements a solution, and opens a PR.
