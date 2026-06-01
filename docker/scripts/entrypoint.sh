@@ -11,7 +11,7 @@ set -euo pipefail
 : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GITHUB_REPO:?GITHUB_REPO is required}"
-: "${AGENT_ACTION:?AGENT_ACTION is required (implement|fix-checks|respond-review|fix-deployment)}"
+: "${AGENT_ACTION:?AGENT_ACTION is required (implement|fix-checks|respond-review|fix-deployment|groom)}"
 
 # Optional configuration
 CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
@@ -201,6 +201,33 @@ Related issue: #${GITHUB_ISSUE_NUMBER}"
     log "Created deployment fix PR"
 }
 
+
+action_groom() {
+    : "${GITHUB_ISSUE_NUMBER:?GITHUB_ISSUE_NUMBER is required for groom}"
+
+    setup_repo
+    cd "$WORK_DIR"
+
+    log "Fetching issue #${GITHUB_ISSUE_NUMBER}"
+    ISSUE_JSON="$(gh issue view "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --json title,body,labels)"
+    ISSUE_TITLE="$(echo "$ISSUE_JSON" | jq -r '.title')"
+    ISSUE_BODY="$(echo "$ISSUE_JSON" | jq -r '.body')"
+    EXISTING_LABELS="$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(", ")')"
+
+    log "Running Claude to groom issue"
+    run_claude "groom.md" \
+        "Groom GitHub issue #${GITHUB_ISSUE_NUMBER} in ${GITHUB_REPO}.
+
+Issue title: ${ISSUE_TITLE}
+
+Issue body:
+${ISSUE_BODY}
+
+Existing labels: ${EXISTING_LABELS:-none}
+
+Label criteria are defined in: agents/grooming/label-criteria.json (already checked out in your working directory at ${WORK_DIR})"
+}
+
 # -----------------------------------------------------------------------------
 # Dispatch
 # -----------------------------------------------------------------------------
@@ -220,9 +247,12 @@ case "$AGENT_ACTION" in
     fix-deployment)
         action_fix_deployment
         ;;
+    groom)
+        action_groom
+        ;;
     *)
         log "ERROR: Unknown action '${AGENT_ACTION}'"
-        echo "Usage: AGENT_ACTION=(implement|fix-checks|respond-review|fix-deployment)" >&2
+        echo "Usage: AGENT_ACTION=(implement|fix-checks|respond-review|fix-deployment|groom)" >&2
         exit 1
         ;;
 esac

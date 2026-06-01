@@ -1,2 +1,3 @@
-repo_owner = "your-github-username"
-repo_name  = "agentic-development-workflow"
+repo_owner      = "your-github-username"
+repo_name       = "agentic-development-workflow"
+agent_allowlist = ["your-github-username"]
