@@ -61,16 +61,19 @@ jobs:
         run: |
           set -euo pipefail
           # Look for a label matching model:<name> (e.g. model:opus, model:haiku).
-          # If multiple model labels are present, the first one wins.
+          # Sort before selecting so the result is deterministic when multiple
+          # model labels are present (GitHub does not guarantee label ordering).
           MODEL="$(gh issue view "${{ github.event.issue.number }}" \
             --repo "${{ github.repository }}" \
             --json labels \
-            --jq '[.labels[].name | select(startswith("model:"))] | first // empty' \
+            --jq '[.labels[].name | select(startswith("model:"))] | sort | first // empty' \
             | sed 's/^model://')"
           if [ -z "$MODEL" ]; then
             MODEL="${{ vars.DEFAULT_CLAUDE_MODEL }}"
           fi
-          echo "claude_model=$MODEL" >> "$GITHUB_OUTPUT"
+          # Strip CR/LF to prevent output injection before writing to GITHUB_OUTPUT.
+          MODEL="$(printf '%s' "$MODEL" | tr -d '\r\n')"
+          printf 'claude_model=%s\n' "$MODEL" >> "$GITHUB_OUTPUT"
 
       - name: Build agent image
         if: steps.preflight.outputs.skip != 'true'
