@@ -1,3 +1,4 @@
-repo_owner      = "your-github-username"
-repo_name       = "agentic-development-workflow"
-agent_allowlist = ["your-github-username"]
+repo_owner           = "your-github-username"
+repo_name            = "agentic-development-workflow"
+agent_allowlist      = ["your-github-username"]
+default_claude_model = "sonnet"
