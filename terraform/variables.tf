@@ -15,7 +15,7 @@ variable "agent_allowlist" {
 }
 
 variable "default_claude_model" {
-  description = "Repo-wide default Claude model passed to all agent workflows via the DEFAULT_CLAUDE_MODEL Actions variable. The agent-implement workflow can override this on a per-issue basis using a model:<name> label (e.g. model:opus, model:haiku); all other workflows always use this value. Accepts any value supported by the claude --model flag."
+  description = "Repo-wide default Claude model passed to all agent workflows via the DEFAULT_CLAUDE_MODEL Actions variable. The agent-implement, agent-groom, and agent-fix-deployment workflows can override this on a per-issue basis using a model:<name> label (e.g. model:opus, model:haiku); all other workflows always use this value. Accepts any value supported by the claude --model flag."
   type        = string
   default     = "sonnet"
 }
