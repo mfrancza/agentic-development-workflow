@@ -85,12 +85,15 @@ Branch: ${BRANCH_NAME}
 ${ISSUE_BODY}"
 
     log "Verifying PR was opened for ${BRANCH_NAME}"
-    # Qualify the head with the repo owner so a fork's same-named branch can't
-    # satisfy the check.
-    HEAD="${GITHUB_REPO%%/*}:${BRANCH_NAME}"
-    PR_URL="$(gh pr list --repo "$GITHUB_REPO" --head "$HEAD" --state open --json url --jq '.[0].url // empty')"
+    # Query by branch name only (owner:branch is treated as a literal name by
+    # gh and never matches).  Use a jq filter on headRepositoryOwner to exclude
+    # PRs from forks with the same branch name.
+    OWNER="${GITHUB_REPO%%/*}"
+    PR_URL="$(gh pr list --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --state open \
+        --json url,headRepositoryOwner \
+        --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].url // empty")"
     if [ -z "$PR_URL" ]; then
-        log "ERROR: no open PR found for ${HEAD} — agent did not complete the issue→PR flow"
+        log "ERROR: no open PR found for ${BRANCH_NAME} (owner: ${OWNER}) — agent did not complete the issue→PR flow"
         exit 1
     fi
     log "Verified PR: ${PR_URL}"

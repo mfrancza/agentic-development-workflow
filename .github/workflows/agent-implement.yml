@@ -44,10 +44,16 @@ jobs:
         run: |
           set -euo pipefail
           BRANCH="agent/issue-${{ github.event.issue.number }}"
-          HEAD="${{ github.repository_owner }}:${BRANCH}"
-          PR_NUMBER="$(gh pr list --repo "${{ github.repository }}" --head "$HEAD" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+          OWNER="${{ github.repository_owner }}"
+          # gh pr list --head treats "owner:branch" as a literal branch name and
+          # never matches.  Query by branch name only and filter by owner via jq
+          # to exclude PRs from forks with the same branch name.
+          PR_NUMBER="$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open \
+            --json number,headRepositoryOwner \
+            --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].number // empty" \
+            2>/dev/null || true)"
           if [ -n "$PR_NUMBER" ]; then
-            echo "Found existing open PR #$PR_NUMBER for $HEAD; skipping."
+            echo "Found existing open PR #$PR_NUMBER for $BRANCH (owner: $OWNER); skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
