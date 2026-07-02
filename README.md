@@ -10,12 +10,12 @@ Once the repo is set up (steps below), day-to-day operation is driven entirely b
 
 - Apply **`agent:groom`** to an issue → the grooming agent classifies it and asks clarifying questions.
 - Apply **`agent:developer`** to an issue → the developer agent creates `agent/issue-{N}`, implements a solution, and opens a PR.
-- CI failure on an agent-authored PR → the agent is re-invoked to fix the checks.
+- CI failure on an agent-authored PR → the agent is re-invoked to fix the checks. (**Note:** `agent-fix-checks` is wired to a workflow named `CI`; this step won't fire until a workflow with that name exists in the repo.)
 - PR review submitted on an agent-authored PR → the agent addresses feedback and pushes.
 - Deployment failure after merge → the agent opens a follow-up fix-up PR.
 - Add a **`model:<name>`** label (e.g. `model:opus`, `model:haiku`) to override the default Claude model for that issue's run.
 
-Only usernames in the Terraform-managed `AGENT_ALLOWLIST` can trigger agent workflows.
+Only usernames in the Terraform-managed `AGENT_ALLOWLIST` can trigger the label-driven workflows (`agent:groom`, `agent:developer`). Event-driven workflows (`fix-checks`, `respond-review`, `fix-deployment`) gate on the PR/event author being the developer agent instead.
 
 See [AGENTS.md](AGENTS.md) for the full list of `AGENT_ACTION` values and their required env vars.
 
