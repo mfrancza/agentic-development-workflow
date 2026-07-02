@@ -106,7 +106,8 @@ resource "github_repository_ruleset" "main" {
 #  - agent:* trigger labels (the workflows in .github/workflows/ gate on
 #    these; applying one routes the issue to that agent).
 #  - model:<name> overrides (agent-implement / agent-groom /
-#    agent-fix-deployment prefer these over vars.DEFAULT_CLAUDE_MODEL; apply
+#    agent-fix-deployment prefer these over the GitHub Actions repository
+#    variable `vars.DEFAULT_CLAUDE_MODEL` (not a Terraform variable); apply
 #    at most one per issue).
 #  - grooming labels (the grooming agent applies these based on issue
 #    content — see agents/grooming/label-criteria.json).
