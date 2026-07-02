@@ -43,6 +43,18 @@ resource "github_actions_variable" "agent_allowlist" {
   value         = jsonencode(var.agent_allowlist)
 }
 
+# Expose the default Claude model as a repository Actions variable so all
+# workflows can pass it to the agent container via CLAUDE_MODEL. The
+# agent-implement, agent-groom, and agent-fix-deployment workflows can
+# additionally override this per-issue via a `model:<name>` label
+# (e.g. model:opus, model:haiku); other workflows always use this repo-wide
+# default.
+resource "github_actions_variable" "default_claude_model" {
+  repository    = github_repository.this.name
+  variable_name = "DEFAULT_CLAUDE_MODEL"
+  value         = var.default_claude_model
+}
+
 # Protection for the default branch via a repository ruleset (the modern
 # primitive — supports granular bypass actors, unlike the legacy
 # github_branch_protection resource).
