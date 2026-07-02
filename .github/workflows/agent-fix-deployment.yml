@@ -77,14 +77,19 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
           set -euo pipefail
-          # Look for a label matching model:<name> (e.g. model:opus, model:haiku).
-          # Sort before selecting so the result is deterministic when multiple
-          # model labels are present (GitHub does not guarantee label ordering).
-          MODEL="$(gh issue view "${{ steps.lookup.outputs.issue_number }}" \
+          # Look for labels matching model:<name> (e.g. model:opus, model:haiku).
+          # Fail with a clear error if more than one model:* label is present to
+          # avoid ambiguous model selection.
+          MODEL_LABELS="$(gh issue view "${{ steps.lookup.outputs.issue_number }}" \
             --repo "${{ github.repository }}" \
             --json labels \
-            --jq '[.labels[].name | select(startswith("model:"))] | sort | first // empty' \
-            | sed 's/^model://')"
+            --jq '[.labels[].name | select(startswith("model:"))]')"
+          MODEL_COUNT="$(printf '%s' "$MODEL_LABELS" | jq 'length')"
+          if [ "$MODEL_COUNT" -gt 1 ]; then
+            echo "::error::Multiple model:* labels found on issue: $(printf '%s' "$MODEL_LABELS" | jq -r '.[]' | tr '\n' ' '). Remove all but one before the next deployment."
+            exit 1
+          fi
+          MODEL="$(printf '%s' "$MODEL_LABELS" | jq -r 'first // empty' | sed 's/^model://')"
           if [ -z "$MODEL" ]; then
             MODEL="${{ vars.DEFAULT_CLAUDE_MODEL }}"
           fi
