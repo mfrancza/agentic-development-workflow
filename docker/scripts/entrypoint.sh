@@ -143,6 +143,11 @@ action_respond_review() {
     INLINE_COMMENTS_JSON="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/comments" --jq '[.[] | {id, in_reply_to_id, pull_request_review_id, user: .user.login, path, line, body, created_at}]')"
     ISSUE_COMMENTS_JSON="$(gh api --paginate "repos/${GITHUB_REPO}/issues/${GITHUB_PR_NUMBER}/comments" --jq '[.[] | {id, user: .user.login, body, created_at}]')"
 
+    # Capture HEAD before Claude runs so we can detect whether any commits were
+    # made in response to the review — we only re-request review when the agent
+    # actually pushed a code change.
+    HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
+
     log "Running Claude to address review feedback"
     run_claude "respond-to-review.md" \
         "Address review feedback on PR #${GITHUB_PR_NUMBER} in ${GITHUB_REPO}.
@@ -165,6 +170,65 @@ ${ISSUE_COMMENTS_JSON}"
 
     log "Pushing changes"
     git push origin "$BRANCH_NAME"
+
+    HEAD_AFTER_CLAUDE="$(git rev-parse HEAD)"
+    if [ "$HEAD_BEFORE_CLAUDE" != "$HEAD_AFTER_CLAUDE" ]; then
+        request_rereview "$GITHUB_PR_NUMBER"
+    else
+        log "No new commits from Claude; skipping re-review request"
+    fi
+}
+
+# Re-request review from every user and team currently assigned as a reviewer
+# on the PR. "Currently assigned" is the union of:
+#   - reviewers with a pending request (GitHub's `requested_reviewers` endpoint)
+#   - reviewers who have already submitted a review (from `reviews`)
+# GitHub removes a user from `requested_reviewers` once they submit a review, so
+# both sources are needed to cover reviewers who already responded to an earlier
+# round. Re-requesting a currently-pending reviewer is a harmless no-op.
+#
+# The PR author is excluded (an app cannot request a review from itself), and
+# any error from the GitHub API is logged but does not fail the run — the code
+# and replies have already been pushed at this point, so a failed re-review
+# request should not mask the successful work.
+request_rereview() {
+    local pr_number="$1"
+
+    log "Detected new commits; requesting re-review from all currently assigned reviewers on PR #${pr_number}"
+
+    local self_login pending_json reviewed_json users_json teams_json
+    self_login="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}" --jq '.user.login' 2>/dev/null || echo "")"
+
+    pending_json="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}/requested_reviewers" 2>/dev/null || echo '{"users":[],"teams":[]}')"
+    reviewed_json="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${pr_number}/reviews" 2>/dev/null || echo '[]')"
+
+    users_json="$(jq -nc \
+        --argjson pending "$pending_json" \
+        --argjson reviewed "$reviewed_json" \
+        --arg self "$self_login" \
+        '($pending.users // []) + ($reviewed // [])
+         | map(.user.login // .login)
+         | map(select(. != null and . != "" and . != $self))
+         | unique')"
+    teams_json="$(jq -nc --argjson pending "$pending_json" \
+        '($pending.teams // []) | map(.slug) | unique')"
+
+    local user_count team_count
+    user_count="$(echo "$users_json" | jq 'length')"
+    team_count="$(echo "$teams_json" | jq 'length')"
+
+    if [ "$user_count" -eq 0 ] && [ "$team_count" -eq 0 ]; then
+        log "No prior reviewers found; nothing to re-request"
+        return 0
+    fi
+
+    log "Re-requesting review from users=${users_json} teams=${teams_json}"
+    local payload
+    payload="$(jq -nc --argjson reviewers "$users_json" --argjson team_reviewers "$teams_json" \
+        '{reviewers: $reviewers, team_reviewers: $team_reviewers}')"
+    if ! echo "$payload" | gh api -X POST "repos/${GITHUB_REPO}/pulls/${pr_number}/requested_reviewers" --input -; then
+        log "WARNING: failed to request re-review; continuing"
+    fi
 }
 
 action_fix_deployment() {
