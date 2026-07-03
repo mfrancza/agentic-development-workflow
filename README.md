@@ -15,7 +15,7 @@ Once the repo is set up (steps below), day-to-day operation is driven entirely b
 - Deployment failure after merge → the agent opens a follow-up fix-up PR.
 - Add a **`model:<name>`** label (e.g. `model:opus`, `model:haiku`) to override the default Claude model for that issue's run.
 
-Only usernames in the Terraform-managed `AGENT_ALLOWLIST` can trigger the label-driven workflows (`agent:groom`, `agent:developer`). Event-driven workflows (`fix-checks`, `respond-review`, `fix-deployment`) gate on the PR/event author being the developer agent instead.
+Only usernames in the Terraform-managed `AGENT_ALLOWLIST` can trigger the label-driven workflows (`agent:groom`, `agent:developer`). Event-driven workflows then apply their own gates: `fix-checks`/`respond-review` run only for developer-agent PRs, and `fix-deployment` runs on failed deployment events when it can map the deployment back to an issue (`Closes #N` in the merged PR body).
 
 See [AGENTS.md](AGENTS.md) for the full list of `AGENT_ACTION` values and their required env vars.
 
@@ -66,6 +66,15 @@ Terraform will:
 - Codify repo settings (squash-merge only, delete branch on merge, etc.).
 - Apply branch protection on `main` via a repository ruleset (PR review required, no force pushes, no deletion, linear history — direct pushes to `main` blocked for everyone, admins included; admins can bypass review only via PR merges).
 - Publish `AGENT_ALLOWLIST` and `DEFAULT_CLAUDE_MODEL` as repo-level Actions variables so workflows reference them without hardcoding values in YAML.
+- Create the labels consumed by the agent workflows (`agent:developer`, `agent:groom`, `model:sonnet`/`opus`/`haiku`, and the grooming labels `question`/`bug`/`enhancement`/`dependency upgrade`/`do`/`plan`) so they show up in the GitHub label picker on issue creation.
+
+If `terraform apply` errors with `422 already_exists` on a default GitHub label (`bug`, `enhancement`, `question` — these ship pre-created on new repos), import them and re-apply:
+
+```bash
+terraform import 'github_issue_label.automation["bug"]'         "$(terraform console <<<'var.repo_name' | tr -d '"'):bug"
+terraform import 'github_issue_label.automation["enhancement"]' "$(terraform console <<<'var.repo_name' | tr -d '"'):enhancement"
+terraform import 'github_issue_label.automation["question"]'    "$(terraform console <<<'var.repo_name' | tr -d '"'):question"
+```
 
 App private keys are deliberately **not** managed by Terraform — keeping them out of `terraform.tfstate` is the whole point. Set them as repo Actions secrets out of band (next step).
 
