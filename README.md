@@ -25,26 +25,26 @@ The diagram below shows the end-to-end issue → merge → deploy lifecycle, inc
 
 ```mermaid
 flowchart TD
-    Start([User opens GitHub issue]):::human --> GroomLabel{{"Apply <code>agent:groom</code>?"}}:::human
+    Start([User opens GitHub issue]):::human --> GroomLabel{"Apply <code>agent:groom</code>?"}:::human
 
     GroomLabel -- "yes" --> Groom["<b>Grooming agent</b><br/>(AGENT_ACTION=groom)<br/>classifies issue, adds labels,<br/>asks clarifying questions"]:::agent
     GroomLabel -- "no" --> DevLabel
-    Groom --> DevLabel{{"Apply <code>agent:developer</code>?<br/>(user must be in AGENT_ALLOWLIST)"}}:::human
+    Groom --> DevLabel{"Apply <code>agent:developer</code>?<br/>(user must be in AGENT_ALLOWLIST)"}:::human
 
     DevLabel -- "no" --> Wait([Wait for user]):::human
     Wait -- "agent:developer applied later" --> DevLabel
     DevLabel -- "yes" --> Implement["<b>Developer agent</b><br/>(AGENT_ACTION=implement)<br/>creates <code>agent/issue-{N}</code>,<br/>implements solution, opens PR"]:::agent
 
-    Implement --> CI{{"CI checks pass?"}}:::system
+    Implement --> CI{"CI checks pass?"}:::system
     CI -- "no" --> FixChecks["<b>Developer agent</b><br/>(AGENT_ACTION=fix-checks)<br/>diagnoses failures,<br/>pushes fixes"]:::agent
     FixChecks --> CI
 
-    CI -- "yes" --> Review{{"PR review submitted"}}:::human
+    CI -- "yes" --> Review{"PR review submitted"}:::human
     Review -- "changes requested" --> Respond["<b>Developer agent</b><br/>(AGENT_ACTION=respond-review)<br/>addresses feedback,<br/>pushes updates"]:::agent
     Respond --> CI
 
     Review -- "approved (≥1 human approval required)" --> Merge["Human squash-merges PR to <code>main</code><br/>(issue auto-closed by <code>Closes #N</code> on merge)"]:::human
-    Merge --> Deploy{{"Deployment succeeds?"}}:::system
+    Merge --> Deploy{"Deployment succeeds?"}:::system
 
     Deploy -- "no" --> FixDeploy["<b>Developer agent</b><br/>(AGENT_ACTION=fix-deployment)<br/>diagnoses failure,<br/>opens fix-up PR"]:::agent
     FixDeploy --> Review
