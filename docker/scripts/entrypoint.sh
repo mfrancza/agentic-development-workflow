@@ -196,8 +196,9 @@ request_rereview() {
 
     log "Detected new commits; requesting re-review from all currently assigned reviewers on PR #${pr_number}"
 
-    local self_login pending_json reviewed_json users_json teams_json
-    self_login="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}" --jq '.user.login' 2>/dev/null || echo "")"
+    local pr_author_login auth_login pending_json reviewed_json users_json teams_json
+    pr_author_login="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}" --jq '.user.login' 2>/dev/null || echo "")"
+    auth_login="$(gh api user --jq '.login' 2>/dev/null || echo "")"
 
     pending_json="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}/requested_reviewers" 2>/dev/null || echo '{"users":[],"teams":[]}')"
     reviewed_json="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${pr_number}/reviews" 2>/dev/null | jq -s 'add // []')" || reviewed_json='[]'
@@ -205,10 +206,11 @@ request_rereview() {
     users_json="$(jq -nc \
         --argjson pending "$pending_json" \
         --argjson reviewed "$reviewed_json" \
-        --arg self "$self_login" \
+        --arg pr_author "$pr_author_login" \
+        --arg auth_user "$auth_login" \
         '($pending.users // []) + ($reviewed // [])
          | map(.user.login // .login)
-         | map(select(. != null and . != "" and . != $self))
+         | map(select(. != null and . != "" and . != $pr_author and . != $auth_user))
          | unique')"
     teams_json="$(jq -nc --argjson pending "$pending_json" \
         '($pending.teams // []) | map(.slug) | unique')"
