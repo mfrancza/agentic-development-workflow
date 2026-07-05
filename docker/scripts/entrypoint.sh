@@ -168,23 +168,26 @@ ${INLINE_COMMENTS_JSON}
 PR conversation comments:
 ${ISSUE_COMMENTS_JSON}"
 
-    log "Pushing changes"
-    # Use --force-with-lease when HEAD has been rewritten (amend/rebase), which
-    # produces a non-fast-forward branch tip that a plain push would reject.
-    # git merge-base --is-ancestor exits 0 when origin/$BRANCH_NAME is still an
-    # ancestor of HEAD (fast-forward), and exits 1 when history was rewritten.
-    if git merge-base --is-ancestor "origin/${BRANCH_NAME}" HEAD 2>/dev/null; then
-        git push origin "$BRANCH_NAME"
-    else
-        log "History rewrite detected; pushing with --force-with-lease"
-        git push --force-with-lease origin "$BRANCH_NAME"
-    fi
-
     HEAD_AFTER_CLAUDE="$(git rev-parse HEAD)"
-    if [ "$HEAD_BEFORE_CLAUDE" != "$HEAD_AFTER_CLAUDE" ]; then
-        request_rereview "$GITHUB_PR_NUMBER"
+    if [ "$HEAD_BEFORE_CLAUDE" = "$HEAD_AFTER_CLAUDE" ]; then
+        log "HEAD unchanged; skipping push and re-review request"
     else
-        log "HEAD unchanged; skipping re-review request"
+        log "Pushing changes"
+        # Fetch the latest remote tip before the ancestry check so that any
+        # concurrent pushes that landed during the Claude run are reflected;
+        # failure here is non-fatal — we'll still attempt the push.
+        git fetch origin "$BRANCH_NAME" 2>/dev/null || true
+        # Use --force-with-lease when HEAD has been rewritten (amend/rebase),
+        # which produces a non-fast-forward tip that a plain push would reject.
+        # git merge-base --is-ancestor exits 0 when origin/$BRANCH_NAME is
+        # still an ancestor of HEAD (fast-forward), 1 when history was rewritten.
+        if git merge-base --is-ancestor "origin/${BRANCH_NAME}" HEAD 2>/dev/null; then
+            git push origin "$BRANCH_NAME"
+        else
+            log "History rewrite detected; pushing with --force-with-lease"
+            git push --force-with-lease origin "$BRANCH_NAME"
+        fi
+        request_rereview "$GITHUB_PR_NUMBER"
     fi
 }
 
