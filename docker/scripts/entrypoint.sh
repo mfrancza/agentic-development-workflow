@@ -177,12 +177,18 @@ ${ISSUE_COMMENTS_JSON}"
         # concurrent pushes that landed during the Claude run are reflected;
         # failure here is non-fatal — we'll still attempt the push.
         git fetch origin "$BRANCH_NAME" 2>/dev/null || true
-        # Use --force-with-lease when HEAD has been rewritten (amend/rebase),
-        # which produces a non-fast-forward tip that a plain push would reject.
-        # git merge-base --is-ancestor exits 0 when origin/$BRANCH_NAME is
-        # still an ancestor of HEAD (fast-forward), 1 when history was rewritten.
+        # Determine the correct push strategy by examining the ancestry relationship
+        # between the local HEAD and origin/$BRANCH_NAME:
+        #   1. origin is ancestor of HEAD (fast-forward) → plain push
+        #   2. HEAD is ancestor of origin (remote advanced beyond local) → refuse
+        #      to push; force-with-lease would silently drop those remote commits
+        #   3. Neither is an ancestor of the other (diverged / history rewrite)
+        #      → --force-with-lease (safe because we own the branch and the lease
+        #      SHA matches exactly what we fetched above)
         if git merge-base --is-ancestor "origin/${BRANCH_NAME}" HEAD 2>/dev/null; then
             git push origin "$BRANCH_NAME"
+        elif git merge-base --is-ancestor HEAD "origin/${BRANCH_NAME}" 2>/dev/null; then
+            log "WARNING: remote branch has advanced beyond local HEAD; skipping push to avoid overwriting remote commits"
         else
             log "History rewrite detected; pushing with --force-with-lease"
             git push --force-with-lease origin "$BRANCH_NAME"
