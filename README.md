@@ -32,6 +32,7 @@ flowchart TD
     Groom --> DevLabel{{"Apply <code>agent:developer</code>?<br/>(user must be in AGENT_ALLOWLIST)"}}:::human
 
     DevLabel -- "no" --> Wait([Wait for user]):::human
+    Wait -- "agent:developer applied later" --> DevLabel
     DevLabel -- "yes" --> Implement["<b>Developer agent</b><br/>(AGENT_ACTION=implement)<br/>creates <code>agent/issue-N</code>,<br/>implements solution, opens PR"]:::agent
 
     Implement --> CI{{"CI checks pass?"}}:::system
@@ -42,13 +43,13 @@ flowchart TD
     Review -- "changes requested" --> Respond["<b>Developer agent</b><br/>(AGENT_ACTION=respond-review)<br/>addresses feedback,<br/>pushes updates"]:::agent
     Respond --> CI
 
-    Review -- "approved (≥1 human approval required)" --> Merge([Human squash-merges PR to <code>main</code>]):::human
+    Review -- "approved (≥1 human approval required)" --> Merge["Human squash-merges PR to <code>main</code><br/>(issue auto-closed by <code>Closes #N</code> on merge)"]:::human
     Merge --> Deploy{{"Deployment succeeds?"}}:::system
 
     Deploy -- "no" --> FixDeploy["<b>Developer agent</b><br/>(AGENT_ACTION=fix-deployment)<br/>diagnoses failure,<br/>opens fix-up PR"]:::agent
     FixDeploy --> Review
 
-    Deploy -- "yes" --> Done([Issue closed via <code>Closes #N</code>]):::human
+    Deploy -- "yes" --> Done([Deployment successful]):::system
 
     classDef human fill:#d4edda,stroke:#155724,color:#155724
     classDef agent fill:#cfe2ff,stroke:#084298,color:#084298
@@ -59,7 +60,7 @@ Notes on the diagram:
 
 - **Human gates** (green) are the only places a person is required: opening the issue, applying `agent:*` labels, submitting a PR review, and squash-merging. Branch protection on `main` requires at least one human review before merge — agents cannot self-approve.
 - **Agent steps** (blue) each run as a fresh container invocation of the developer agent image with a specific `AGENT_ACTION`. See [AGENTS.md](AGENTS.md#agent-actions) for the required env vars per action.
-- **System checks** (yellow) are automated (CI workflows, deployment status events) and drive the feedback loops back into the agent.
+- **System checks** (yellow) are automated (GitHub Actions workflow checks, deployment status events) and drive the feedback loops back into the agent. **Note:** the CI failure feedback loop (`fix-checks`) requires a workflow named `CI` to exist in the repo — see the caveat in the "How it works" section above.
 - `fix-deployment` re-enters the flow at the review stage because it opens a new PR that goes through the same review + merge gates as any other change.
 
 ## Setup
