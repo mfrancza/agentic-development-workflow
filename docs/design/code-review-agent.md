@@ -160,7 +160,7 @@ conflicts restarts the review; document this in `AGENTS.md`.
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#36](https://github.com/mfrancza/agentic-development-workflow/issues/36) | Create reviewer GitHub App identity + repo secrets, document setup | — |
+| [#36](https://github.com/mfrancza/agentic-development-workflow/issues/36) | Verify reviewer GitHub App permissions + document setup | — |
 | [#37](https://github.com/mfrancza/agentic-development-workflow/issues/37) | Terraform: `agent:review` label; add agent identities to allowlist | — |
 | [#38](https://github.com/mfrancza/agentic-development-workflow/issues/38) | AGENTS.md: Code Review Standards section | — |
 | [#39](https://github.com/mfrancza/agentic-development-workflow/issues/39) | Reviewer Docker image + initial-review behavior | #38 |
@@ -170,7 +170,7 @@ conflicts restarts the review; document this in `AGENTS.md`.
 
 ```mermaid
 graph TD
-  T36[#36 Reviewer App identity + secrets]
+  T36[#36 Verify reviewer App permissions + docs]
   T37[#37 Terraform label + allowlist]
   T38[#38 AGENTS.md review standards]
   T39[#39 Reviewer image + initial review]
@@ -187,3 +187,7 @@ graph TD
 
 Issues #36–#38 can proceed in parallel; #40 integrates them; #41 completes
 the acceptance criteria.
+
+Dependencies are also recorded natively on the issues themselves using
+GitHub's blocked-by relationships, so blocked work is visible directly in the
+issue UI without consulting this table.
