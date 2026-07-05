@@ -19,6 +19,49 @@ Only usernames in the Terraform-managed `AGENT_ALLOWLIST` can trigger the label-
 
 See [AGENTS.md](AGENTS.md) for the full list of `AGENT_ACTION` values and their required env vars.
 
+## SDLC diagram
+
+The diagram below shows the end-to-end issue → merge → deploy lifecycle, including which steps are performed by agents (blue) and which require a human decision (green). Label-driven triggers are shown on the edges.
+
+```mermaid
+flowchart TD
+    Start([User opens GitHub issue]):::human --> GroomLabel{{"Apply <code>agent:groom</code>?"}}:::human
+
+    GroomLabel -- "yes" --> Groom["<b>Grooming agent</b><br/>(AGENT_ACTION=groom)<br/>classifies issue, adds labels,<br/>asks clarifying questions"]:::agent
+    GroomLabel -- "no" --> DevLabel
+    Groom --> DevLabel{{"Apply <code>agent:developer</code>?<br/>(user must be in AGENT_ALLOWLIST)"}}:::human
+
+    DevLabel -- "no" --> Wait([Wait for user]):::human
+    DevLabel -- "yes" --> Implement["<b>Developer agent</b><br/>(AGENT_ACTION=implement)<br/>creates <code>agent/issue-N</code>,<br/>implements solution, opens PR"]:::agent
+
+    Implement --> CI{{"CI checks pass?"}}:::system
+    CI -- "no" --> FixChecks["<b>Developer agent</b><br/>(AGENT_ACTION=fix-checks)<br/>diagnoses failures,<br/>pushes fixes"]:::agent
+    FixChecks --> CI
+
+    CI -- "yes" --> Review{{"PR review submitted"}}:::human
+    Review -- "changes requested" --> Respond["<b>Developer agent</b><br/>(AGENT_ACTION=respond-review)<br/>addresses feedback,<br/>pushes updates"]:::agent
+    Respond --> CI
+
+    Review -- "approved (≥1 human approval required)" --> Merge([Human squash-merges PR to <code>main</code>]):::human
+    Merge --> Deploy{{"Deployment succeeds?"}}:::system
+
+    Deploy -- "no" --> FixDeploy["<b>Developer agent</b><br/>(AGENT_ACTION=fix-deployment)<br/>diagnoses failure,<br/>opens fix-up PR"]:::agent
+    FixDeploy --> Review
+
+    Deploy -- "yes" --> Done([Issue closed via <code>Closes #N</code>]):::human
+
+    classDef human fill:#d4edda,stroke:#155724,color:#155724
+    classDef agent fill:#cfe2ff,stroke:#084298,color:#084298
+    classDef system fill:#fff3cd,stroke:#664d03,color:#664d03
+```
+
+Notes on the diagram:
+
+- **Human gates** (green) are the only places a person is required: opening the issue, applying `agent:*` labels, submitting a PR review, and squash-merging. Branch protection on `main` requires at least one human review before merge — agents cannot self-approve.
+- **Agent steps** (blue) each run as a fresh container invocation of the developer agent image with a specific `AGENT_ACTION`. See [AGENTS.md](AGENTS.md#agent-actions) for the required env vars per action.
+- **System checks** (yellow) are automated (CI workflows, deployment status events) and drive the feedback loops back into the agent.
+- `fix-deployment` re-enters the flow at the review stage because it opens a new PR that goes through the same review + merge gates as any other change.
+
 ## Setup
 
 ### 1. Create the agent GitHub Apps (one-time, manual)
