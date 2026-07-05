@@ -143,9 +143,9 @@ action_respond_review() {
     INLINE_COMMENTS_JSON="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/comments" --jq '[.[] | {id, in_reply_to_id, pull_request_review_id, user: .user.login, path, line, body, created_at}]')"
     ISSUE_COMMENTS_JSON="$(gh api --paginate "repos/${GITHUB_REPO}/issues/${GITHUB_PR_NUMBER}/comments" --jq '[.[] | {id, user: .user.login, body, created_at}]')"
 
-    # Capture HEAD before Claude runs so we can detect whether any commits were
-    # made in response to the review — we only re-request review when the agent
-    # actually pushed a code change.
+    # Capture HEAD before Claude runs so we can detect whether HEAD changed
+    # (new commits, amends, rebases, or any other history rewrite) — we only
+    # re-request review when the agent actually changed the branch tip.
     HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
 
     log "Running Claude to address review feedback"
