@@ -187,13 +187,14 @@ ${ISSUE_COMMENTS_JSON}"
         #      SHA matches exactly what we fetched above)
         if git merge-base --is-ancestor "origin/${BRANCH_NAME}" HEAD 2>/dev/null; then
             git push origin "$BRANCH_NAME"
+            request_rereview "$GITHUB_PR_NUMBER"
         elif git merge-base --is-ancestor HEAD "origin/${BRANCH_NAME}" 2>/dev/null; then
             log "WARNING: remote branch has advanced beyond local HEAD; skipping push to avoid overwriting remote commits"
         else
             log "History rewrite detected; pushing with --force-with-lease"
             git push --force-with-lease origin "$BRANCH_NAME"
+            request_rereview "$GITHUB_PR_NUMBER"
         fi
-        request_rereview "$GITHUB_PR_NUMBER"
     fi
 }
 
