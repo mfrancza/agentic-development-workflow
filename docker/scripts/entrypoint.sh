@@ -212,7 +212,7 @@ request_rereview() {
     pr_author_login="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}" --jq '.user.login' 2>/dev/null || echo "")"
     auth_login="$(gh api user --jq '.login' 2>/dev/null || echo "")"
 
-    pending_json="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}/requested_reviewers" 2>/dev/null || echo '{"users":[],"teams":[]}')"
+    pending_json="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}/requested_reviewers" 2>/dev/null)" || pending_json='{"users":[],"teams":[]}'
     reviewed_json="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${pr_number}/reviews" 2>/dev/null | jq -s 'add // []')" || reviewed_json='[]'
 
     users_json="$(jq -nc \
