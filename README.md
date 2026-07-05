@@ -33,7 +33,7 @@ flowchart TD
 
     DevLabel -- "no" --> Wait([Wait for user]):::human
     Wait -- "agent:developer applied later" --> DevLabel
-    DevLabel -- "yes" --> Implement["<b>Developer agent</b><br/>(AGENT_ACTION=implement)<br/>creates <code>agent/issue-N</code>,<br/>implements solution, opens PR"]:::agent
+    DevLabel -- "yes" --> Implement["<b>Developer agent</b><br/>(AGENT_ACTION=implement)<br/>creates <code>agent/issue-{N}</code>,<br/>implements solution, opens PR"]:::agent
 
     Implement --> CI{{"CI checks pass?"}}:::system
     CI -- "no" --> FixChecks["<b>Developer agent</b><br/>(AGENT_ACTION=fix-checks)<br/>diagnoses failures,<br/>pushes fixes"]:::agent
