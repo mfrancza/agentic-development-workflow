@@ -21,9 +21,15 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Setup agent
+      # Checkout must precede the local agent-token action: the runner resolves
+      # ./.github/actions/* references from the workspace.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
         id: setup
-        uses: ./.github/actions/agent-setup
+        uses: ./.github/actions/agent-token
         with:
           app-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}

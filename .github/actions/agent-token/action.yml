@@ -1,8 +1,10 @@
-name: 'Agent Setup'
+name: 'Mint agent token'
 description: >
-  Checkout the repository and mint a GitHub App installation token for the
-  developer agent. Both action versions are pinned here so upgrading either
-  only requires a single change.
+  Mint a GitHub App installation token for an agent identity. Centralizes the
+  create-github-app-token version pin so upgrading it only requires a single
+  change. (actions/checkout cannot live here: a local action is resolved from
+  the workspace, so the repository must already be checked out before any
+  ./.github/actions/* reference works.)
 inputs:
   app-id:
     description: 'GitHub App ID'
@@ -17,9 +19,6 @@ outputs:
 runs:
   using: composite
   steps:
-    - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-      with:
-        persist-credentials: false
     - id: app-token
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
       with:

@@ -29,12 +29,11 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Setup agent
-        id: setup
-        uses: ./.github/actions/agent-setup
+      # Checkout must precede the local agent-token action: the runner resolves
+      # ./.github/actions/* references from the workspace.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
-          app-id: ${{ secrets.DEVELOPER_APP_ID }}
-          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+          persist-credentials: false
 
       # The workflow_run event payload doesn't include the PR author, so look it
       # up and only proceed if the PR was authored by the developer agent.
@@ -54,6 +53,15 @@ jobs:
           else
             echo "PR #$PR_NUM author '$AUTHOR' is not the developer agent; skipping"
           fi
+
+      # Mint only after the trust gate — no installation token for runs we skip.
+      - name: Mint installation token for developer-agent
+        if: steps.filter.outputs.proceed == 'true'
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          app-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
       - name: Build agent image
         if: steps.filter.outputs.proceed == 'true'

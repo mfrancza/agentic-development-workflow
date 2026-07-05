@@ -21,12 +21,11 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - name: Setup agent
-        id: setup
-        uses: ./.github/actions/agent-setup
+      # Checkout must precede the local agent-token action: the runner resolves
+      # ./.github/actions/* references from the workspace.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
-          app-id: ${{ secrets.DEVELOPER_APP_ID }}
-          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+          persist-credentials: false
 
       # Resolve the failed deployment to (a) the workflow run that produced
       # the deploy (so the agent can read its failed-job logs), and (b) the
@@ -64,6 +63,15 @@ jobs:
           echo "proceed=true" >> "$GITHUB_OUTPUT"
           echo "run_id=$RUN_ID" >> "$GITHUB_OUTPUT"
           echo "issue_number=$ISSUE_NUM" >> "$GITHUB_OUTPUT"
+
+      # Mint only after the lookup succeeds — no installation token for runs we skip.
+      - name: Mint installation token for developer-agent
+        if: steps.lookup.outputs.proceed == 'true'
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          app-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
       - name: Resolve Claude model from issue labels
         if: steps.lookup.outputs.proceed == 'true'
