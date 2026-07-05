@@ -33,18 +33,21 @@ responds to reviews on its PRs.
 
 ### Identity: `reviewer-agent` GitHub App
 
-A new GitHub App (suggested name: `mfrancza-reviewer-agent`, mirroring
-`mfrancza-developer-agent`) installed on this repository.
+A separate reviewer GitHub App already exists: the `REVIEWER_APP_ID` and
+`REVIEWER_APP_PRIVATE_KEY` repository secrets were provisioned alongside the
+developer app. Remaining identity work is verification and documentation, not
+creation.
 
-- **Permissions:** `contents: read` (clone), `pull_requests: write` (submit
-  reviews, reply to threads, approve), `issues: read` (context). No push
-  access to the repo contents — the reviewer never commits code.
-- **Secrets:** `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY` repository
-  secrets, minted into short-lived installation tokens with
-  `actions/create-github-app-token`, exactly like the developer app.
-- GitHub Apps cannot be created by Terraform; the app is created manually (as
-  the developer app was) and its setup steps are documented alongside the
-  existing bootstrap instructions.
+- **Permissions (to verify):** `contents: read` (clone), `pull_requests:
+  write` (submit reviews, reply to threads, approve), `issues: read`
+  (context). No push access to the repo contents — the reviewer never commits
+  code.
+- **Secrets:** `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY`, minted into
+  short-lived installation tokens with `actions/create-github-app-token`,
+  exactly like the developer app.
+- GitHub Apps cannot be created by Terraform; the app was created manually (as
+  the developer app was) and its setup steps should be documented alongside
+  the existing bootstrap instructions.
 
 Because reviews from the reviewer app satisfy the ruleset's
 `required_approving_review_count = 1`, an approval from the reviewer makes the
