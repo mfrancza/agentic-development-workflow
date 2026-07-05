@@ -83,14 +83,17 @@ App private keys are deliberately **not** managed by Terraform — keeping them 
 Run once after `terraform apply`, and again whenever you rotate a key:
 
 ```bash
+# Required — used by all current agent workflows
 gh secret set DEVELOPER_APP_ID         --body "<developer App ID>"
 gh secret set DEVELOPER_APP_PRIVATE_KEY < ~/.config/agentic-agents/developer-agent.pem
+gh secret set ANTHROPIC_API_KEY        --body "<anthropic api key>"
+
+# Optional — for the reviewer agent (not yet wired into any workflow)
 gh secret set REVIEWER_APP_ID          --body "<reviewer App ID>"
 gh secret set REVIEWER_APP_PRIVATE_KEY < ~/.config/agentic-agents/reviewer-agent.pem
-gh secret set ANTHROPIC_API_KEY        --body "<anthropic api key>"
 ```
 
-Workflows use `DEVELOPER_APP_ID` / `DEVELOPER_APP_PRIVATE_KEY` to mint short-lived installation tokens at runtime and pass `ANTHROPIC_API_KEY` through to the container.
+Workflows use `DEVELOPER_APP_ID` / `DEVELOPER_APP_PRIVATE_KEY` to mint short-lived installation tokens at runtime and pass `ANTHROPIC_API_KEY` through to the container. The `REVIEWER_APP_*` secrets are set here for completeness but are not consumed by any current workflow — set them when the reviewer agent lands.
 
 ### 4. Build the developer agent container
 
