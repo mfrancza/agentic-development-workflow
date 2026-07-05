@@ -172,7 +172,7 @@ ${ISSUE_COMMENTS_JSON}"
     if [ "$HEAD_BEFORE_CLAUDE" = "$HEAD_AFTER_CLAUDE" ]; then
         log "HEAD unchanged; skipping push and re-review request"
     else
-        log "Pushing changes"
+        log "HEAD changed; determining push strategy"
         # Fetch the latest remote tip before the ancestry check so that any
         # concurrent pushes that landed during the Claude run are reflected;
         # failure here is non-fatal — we'll still attempt the push.
@@ -180,8 +180,10 @@ ${ISSUE_COMMENTS_JSON}"
         # Determine the correct push strategy by examining the ancestry relationship
         # between the local HEAD and origin/$BRANCH_NAME:
         #   1. origin is ancestor of HEAD (fast-forward) → plain push
-        #   2. HEAD is ancestor of origin (remote advanced beyond local) → refuse
-        #      to push; force-with-lease would silently drop those remote commits
+        #   2. HEAD is ancestor of origin (remote advanced beyond local) → fail;
+        #      force-with-lease would silently drop those remote commits, and
+        #      silently skipping would lose the agent's local commits — exit so
+        #      the action can be retried after rebasing
         #   3. Neither is an ancestor of the other (diverged / history rewrite)
         #      → --force-with-lease (safe because we own the branch and the lease
         #      SHA matches exactly what we fetched above)
@@ -189,7 +191,8 @@ ${ISSUE_COMMENTS_JSON}"
             git push origin "$BRANCH_NAME"
             request_rereview "$GITHUB_PR_NUMBER"
         elif git merge-base --is-ancestor HEAD "origin/${BRANCH_NAME}" 2>/dev/null; then
-            log "WARNING: remote branch has advanced beyond local HEAD; skipping push to avoid overwriting remote commits"
+            log "ERROR: remote branch has advanced beyond local HEAD; cannot push without losing remote commits — rebase local changes onto the updated remote branch and retry"
+            exit 1
         else
             log "History rewrite detected; pushing with --force-with-lease"
             git push --force-with-lease origin "$BRANCH_NAME"
