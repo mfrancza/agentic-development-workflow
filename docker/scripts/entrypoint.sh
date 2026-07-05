@@ -169,13 +169,22 @@ PR conversation comments:
 ${ISSUE_COMMENTS_JSON}"
 
     log "Pushing changes"
-    git push origin "$BRANCH_NAME"
+    # Use --force-with-lease when HEAD has been rewritten (amend/rebase), which
+    # produces a non-fast-forward branch tip that a plain push would reject.
+    # git merge-base --is-ancestor exits 0 when origin/$BRANCH_NAME is still an
+    # ancestor of HEAD (fast-forward), and exits 1 when history was rewritten.
+    if git merge-base --is-ancestor "origin/${BRANCH_NAME}" HEAD 2>/dev/null; then
+        git push origin "$BRANCH_NAME"
+    else
+        log "History rewrite detected; pushing with --force-with-lease"
+        git push --force-with-lease origin "$BRANCH_NAME"
+    fi
 
     HEAD_AFTER_CLAUDE="$(git rev-parse HEAD)"
     if [ "$HEAD_BEFORE_CLAUDE" != "$HEAD_AFTER_CLAUDE" ]; then
         request_rereview "$GITHUB_PR_NUMBER"
     else
-        log "No new commits from Claude; skipping re-review request"
+        log "HEAD unchanged; skipping re-review request"
     fi
 }
 
@@ -194,7 +203,7 @@ ${ISSUE_COMMENTS_JSON}"
 request_rereview() {
     local pr_number="$1"
 
-    log "Detected new commits; requesting re-review from all currently assigned reviewers on PR #${pr_number}"
+    log "Detected HEAD change; requesting re-review from all currently assigned reviewers on PR #${pr_number}"
 
     local pr_author_login auth_login pending_json reviewed_json users_json teams_json
     pr_author_login="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}" --jq '.user.login' 2>/dev/null || echo "")"
