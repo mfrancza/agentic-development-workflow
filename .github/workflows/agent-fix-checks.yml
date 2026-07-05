@@ -29,7 +29,9 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      # Checkout must precede the local agent-token action: the runner resolves
+      # ./.github/actions/* references from the workspace.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
 
@@ -52,10 +54,11 @@ jobs:
             echo "PR #$PR_NUM author '$AUTHOR' is not the developer agent; skipping"
           fi
 
+      # Mint only after the trust gate — no installation token for runs we skip.
       - name: Mint installation token for developer-agent
         if: steps.filter.outputs.proceed == 'true'
-        id: app-token
-        uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547  # v1.12.0
+        id: setup
+        uses: ./.github/actions/agent-token
         with:
           app-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -67,7 +70,7 @@ jobs:
       - name: Run agent
         if: steps.filter.outputs.proceed == 'true'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_REPO: ${{ github.repository }}
           AGENT_ACTION: fix-checks

@@ -1,0 +1,26 @@
+name: 'Mint agent token'
+description: >
+  Mint a GitHub App installation token for an agent identity. Centralizes the
+  create-github-app-token version pin so upgrading it only requires a single
+  change. (actions/checkout cannot live here: a local action is resolved from
+  the workspace, so the repository must already be checked out before any
+  ./.github/actions/* reference works.)
+inputs:
+  app-id:
+    description: 'GitHub App ID'
+    required: true
+  private-key:
+    description: 'GitHub App private key'
+    required: true
+outputs:
+  token:
+    description: 'GitHub App installation token'
+    value: ${{ steps.app-token.outputs.token }}
+runs:
+  using: composite
+  steps:
+    - id: app-token
+      uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+      with:
+        app-id: ${{ inputs.app-id }}
+        private-key: ${{ inputs.private-key }}
