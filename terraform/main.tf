@@ -107,7 +107,8 @@ resource "github_repository_ruleset" "main" {
 #    these; applying one routes the issue or PR to that agent). Note that
 #    `agent:developer` and `agent:groom` are applied to issues, while
 #    `agent:review` is applied to PRs to request a review from the code
-#    review agent.
+#    review agent. Note: the reviewer-agent workflow does not yet exist;
+#    `agent:review` is a reserved placeholder until that workflow lands.
 #  - model:<name> overrides (agent-implement / agent-groom /
 #    agent-fix-deployment prefer these over the GitHub Actions repository
 #    variable `vars.DEFAULT_CLAUDE_MODEL` (not a Terraform variable); apply

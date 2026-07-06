@@ -58,7 +58,7 @@ Optional: `CLAUDE_MODEL` (default `sonnet`), `CLAUDE_MAX_TURNS` (default `100`).
 
 - `agent:groom` — triggers the grooming agent on the issue.
 - `agent:developer` — triggers the developer agent to implement the issue.
-- `agent:review` — applied to a PR to request a review from the code review agent.
+- `agent:review` — applied to a PR to request a review from the code review agent. (**Note:** the reviewer-agent workflow is not yet implemented; this label is reserved as a placeholder trigger until the workflow lands.)
 - `model:<name>` (e.g. `model:opus`, `model:haiku`, `model:sonnet`) — overrides the repo-wide default Claude model for `agent-implement`, `agent-groom`, and `agent-fix-deployment` runs on that issue. At most one `model:*` label is allowed per issue; workflows fail loudly if more than one is present. Other workflows always use `vars.DEFAULT_CLAUDE_MODEL`.
 - Classification labels applied by the grooming agent (`question`, `bug`, `enhancement`, `dependency upgrade`, `do`, `plan`) — defined in `agents/grooming/label-criteria.json`.
 
