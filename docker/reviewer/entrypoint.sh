@@ -82,18 +82,21 @@ PR_URL="$(echo "$PR_JSON"    | jq -r '.url')"
 PR_STATE="$(echo "$PR_JSON"  | jq -r '.state')"
 PR_IS_DRAFT="$(echo "$PR_JSON" | jq -r '.isDraft')"
 
-log "Checking out PR #${GITHUB_PR_NUMBER} head ${HEAD_SHA}"
+log "Checking out PR #${GITHUB_PR_NUMBER}"
 gh pr checkout "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO"
 BRANCH_NAME="$(git rev-parse --abbrev-ref HEAD)"
+# Re-derive HEAD_SHA from the checked-out git state so that any commits that
+# landed between `gh pr view` and `gh pr checkout` are reflected accurately.
+HEAD_SHA="$(git rev-parse HEAD)"
+log "Head SHA (from git): ${HEAD_SHA}"
 
 # --- Resolve merge-base against the PR's base branch. `origin/${BASE_REF}` is
-#     populated by the full clone above; no additional fetch is needed for
-#     same-repo PRs. For safety we still refresh it (via gh's git wrapper) so
-#     that the merge-base reflects any commits landed on the base branch
-#     between clone start and now.
+#     populated by the full clone above; we do one explicit fetch to ensure the
+#     merge-base reflects any commits that landed on the base branch between
+#     clone start and now. Fail loudly if the fetch cannot update the ref —
+#     a stale base would silently produce an incorrect diff.
 log "Refreshing origin/${BASE_REF} and resolving merge-base"
-gh repo sync --source "$GITHUB_REPO" --branch "$BASE_REF" >/dev/null 2>&1 || true
-git fetch origin "$BASE_REF" 2>/dev/null || true
+git fetch origin "$BASE_REF"
 BASE_SHA="$(git merge-base "origin/${BASE_REF}" HEAD)"
 
 # --- Gather the diff, changed files, and the commit series on the PR.
