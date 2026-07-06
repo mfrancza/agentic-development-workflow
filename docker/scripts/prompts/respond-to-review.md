@@ -35,7 +35,8 @@ For longer bodies, write to a file and use `--body-file` (or `-F body=@file` for
    - **Already addressed** by a commit since base → reply citing that commit's SHA (find it with `git log --oneline <base-sha>..HEAD`).
    - **Disagree / not actionable** → reply with your reasoning. Nits and style preferences you don't accept are fine to push back on, but say so.
 3. Do not push — the entrypoint pushes for you after you exit.
-4. End by summarizing which threads got replies and which commits you made (if any). Be honest if you made no commits.
+4. Do not request re-review yourself — the entrypoint re-requests review from all currently assigned reviewers automatically whenever HEAD has changed (i.e., new commits, amended commits, or any other history rewrite). If HEAD is unchanged, no re-review is requested.
+5. End by summarizing which threads got replies and which commits you made (if any). Be honest if you made no commits.
 
 ## Escalating to a human
 

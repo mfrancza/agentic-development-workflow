@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read   # for `gh api .../pulls/.../reviews/.../comments`
 
 concurrency:
   group: agent-respond-review-pr-${{ github.event.pull_request.number }}
@@ -27,7 +28,63 @@ jobs:
         with:
           persist-credentials: false
 
+      # Skip cleanly when there is nothing to respond to: an "approved" review
+      # with no body text and no inline review comments. Non-approval states
+      # (changes_requested, commented) always warrant a response even if the
+      # body is empty, since they signal the reviewer wants something changed
+      # or opened a discussion. Approvals with any body text or inline comments
+      # still warrant a response — the reviewer left feedback despite approving.
+      - name: Check for reviewer feedback
+        id: feedback
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEW_STATE: ${{ github.event.review.state }}
+          REVIEW_BODY: ${{ github.event.review.body }}
+          REVIEW_ID: ${{ github.event.review.id }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+
+          # Anything other than a bare approval is worth responding to.
+          if [ "$REVIEW_STATE" != "approved" ]; then
+            echo "Review state is '$REVIEW_STATE'; proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # A non-blank body counts as feedback even on an approval.
+          if [ -n "$(printf '%s' "${REVIEW_BODY:-}" | tr -d '[:space:]')" ]; then
+            echo "Approval carries a non-empty review body; proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Inline review comments also count as feedback.
+          # Fail open: if the API call errors or returns a non-numeric value
+          # (transient GitHub error, rate limit, permission regression), default
+          # to proceeding so a harmless approval doesn't block or alert noisily.
+          if ! COMMENT_COUNT="$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" --jq 'length' 2>/dev/null)"; then
+            echo "Failed to fetch inline comments; failing open and proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$COMMENT_COUNT" =~ ^[0-9]+$ ]]; then
+            echo "Inline comment count '$COMMENT_COUNT' is non-numeric; failing open and proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$COMMENT_COUNT" -gt 0 ]; then
+            echo "Approval carries $COMMENT_COUNT inline comment(s); proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Approval with no body and no inline comments; skipping respond-review."
+          echo "proceed=false" >> "$GITHUB_OUTPUT"
+
+      # Mint only after we've decided to proceed — no installation token for runs we skip.
       - name: Mint installation token for developer-agent
+        if: steps.feedback.outputs.proceed == 'true'
         id: setup
         uses: ./.github/actions/agent-token
         with:
@@ -35,9 +92,11 @@ jobs:
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
       - name: Build agent image
+        if: steps.feedback.outputs.proceed == 'true'
         run: docker build -t agent-developer:ci ./docker
 
       - name: Run agent
+        if: steps.feedback.outputs.proceed == 'true'
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

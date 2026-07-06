@@ -35,7 +35,7 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 1. User opens a GitHub issue. Applying the `agent:groom` label runs the grooming agent (`AGENT_ACTION=groom`), which adds classification labels and clarifying notes based on [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json).
 2. Applying the `agent:developer` label triggers the developer agent (`AGENT_ACTION=implement`), which creates the `agent/issue-{N}` branch, writes a solution, and opens a PR.
 3. On CI failures against an agent-authored PR, the `agent-fix-checks` workflow re-invokes the container with `AGENT_ACTION=fix-checks`. **Note:** `agent-fix-checks.yml` is currently wired to `on.workflow_run.workflows: ["CI"]`; it will not fire until a workflow named `CI` exists in the repo (the entry is a placeholder — update the workflow list or add a `CI` workflow when CI lands).
-4. On a submitted PR review, the `agent-respond-review` workflow runs `AGENT_ACTION=respond-review`, which addresses feedback and pushes updates.
+4. On a submitted PR review, the `agent-respond-review` workflow runs `AGENT_ACTION=respond-review`, which addresses feedback and pushes updates. The workflow skips cleanly when the review is a bare approval — state `approved`, no body text, and no inline review comments — since there is nothing to respond to.
 5. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
 
 Every workflow builds the container from [`docker/`](docker/) and mints a short-lived installation token from the `developer-agent` GitHub App.
@@ -58,11 +58,12 @@ Optional: `CLAUDE_MODEL` (default `sonnet`), `CLAUDE_MAX_TURNS` (default `100`).
 
 - `agent:groom` — triggers the grooming agent on the issue.
 - `agent:developer` — triggers the developer agent to implement the issue.
+- `agent:review` — applied to a PR to request a review from the code review agent. (**Note:** the reviewer-agent workflow is not yet implemented; this label is reserved as a placeholder trigger until the workflow lands.)
 - `model:<name>` (e.g. `model:opus`, `model:haiku`, `model:sonnet`) — overrides the repo-wide default Claude model for `agent-implement`, `agent-groom`, and `agent-fix-deployment` runs on that issue. At most one `model:*` label is allowed per issue; workflows fail loudly if more than one is present. Other workflows always use `vars.DEFAULT_CLAUDE_MODEL`.
 - Classification labels applied by the grooming agent (`question`, `bug`, `enhancement`, `dependency upgrade`, `do`, `plan`) — defined in `agents/grooming/label-criteria.json`.
 - `human-required` — marks issues and PRs that need a human in the loop (security, permissions, deployments, billing, legal/compliance, branch-protection or agent-identity changes, or any agent escalation point). Agents apply this label to their own issues/PRs when they hit an escalation point and **also** assign the issue/PR to the relevant human actor; humans may apply it too. Not mutually exclusive with other labels. The criteria are documented in `agents/grooming/label-criteria.json` so the grooming agent can apply it automatically, and each developer-agent prompt in `docker/scripts/prompts/` explains when to apply it during that action.
 
-Only usernames in the Terraform-managed `AGENT_ALLOWLIST` Actions variable can trigger `agent:groom` or `agent:developer`.
+Only usernames (and agent bot identities like `<developer-agent-app-slug>[bot]`) in the Terraform-managed `AGENT_ALLOWLIST` Actions variable can trigger `agent:groom`, `agent:developer`, or `agent:review`. The agent bots are included in the allowlist so that agents can apply `agent:*` labels to route work to one another (e.g. the developer agent applying `agent:review` on its own PR).
 
 ## Expected Deliverables
 
@@ -90,6 +91,31 @@ When running the container locally, pass your own `GH_TOKEN` (see [README.md](RE
 - Logging uses the `log()` helper in `entrypoint.sh` (`echo "[agent] $(date -Iseconds) $*"`).
 - Git identity inside the container is `claude-dev-agent[bot]`.
 - Required env vars are validated with `${VAR:?message}` at the top of each function.
+
+## Code Review Standards
+
+This section defines what a pull-request review — by either the reviewer agent or a human — must cover. It is the single source of truth for both audiences: the reviewer agent's prompt should link back here rather than duplicate the list, and human reviewers can use it as a checklist.
+
+### Every review evaluates the PR against these dimensions
+
+- **Adherence to the linked issue.** The PR is scoped to the requirements of the issue it claims to close (via `Closes #N`). Flag scope creep (unrelated changes bundled in), missing requirements, and acceptance-criteria gaps. If the issue is ambiguous, the PR description should say how the ambiguity was resolved.
+- **Correctness.** Logic does what the PR claims. Consider edge cases, error handling, idempotency, and behaviour under concurrent runs. Verify that referenced APIs, CLI flags, environment variables, secrets, and Actions variables actually exist and behave as described.
+- **Security.** No hardcoded credentials, no unsanitized user input flowing into shell, YAML, or Actions expression contexts, no privilege escalation, no unsafe network or git operations. See "Repo-specific security defaults" below for the concrete patterns this repo already relies on.
+- **Style and conventions.** Matches the conventions in this file (see **Shell Script Conventions** above) and the style of surrounding code. New files follow the layout described in **Repository Layout**. Do not introduce a competing convention when an existing one already covers the case.
+- **Test coverage.** New behaviour is exercised by tests where practical. For code that is hard to unit-test (workflow YAML, Terraform, container entrypoints), the PR description explains how the change was verified — e.g. a manual dry-run, a local `docker run` invocation, or a `terraform plan` excerpt.
+- **Documentation.** `AGENTS.md` and `README.md` are updated in the same PR when the change alters agent configuration, triggers, labels, env vars, or setup — see **Keeping Documentation Current** below for the exact list.
+
+### Repo-specific security defaults
+
+The following patterns are already used across this repo. A review must flag any new code that omits them:
+
+- **Allowlist gating on label senders.** Workflows triggered by `issues.labeled` or `pull_request.labeled` must gate on `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` — not on `github.repository_owner` (which is the org login in org repos, not a user) and not on the issue/PR author. GitHub has no per-label permission model, so the sender check is the only defence against an outside collaborator triggering an agent. See [`.github/workflows/agent-implement.yml`](.github/workflows/agent-implement.yml) for the canonical form.
+- **Output-injection hygiene.** Any value derived from user-controlled input (issue labels, PR titles, comment bodies, issue titles) that is written to `GITHUB_OUTPUT` must be stripped of CR/LF first — `tr -d '\r\n'` is the pattern already in use (see the `model:` label resolver in `agent-implement.yml`). Untrusted content must never be interpolated directly into `run:` scripts via `${{ ... }}`; pass it through `env:` and reference `"$VAR"` inside the script so the shell — not the workflow expression engine — parses it.
+- **Pinned action SHAs.** Third-party actions (including `actions/*` and `anthropics/*`) are pinned to a full 40-character commit SHA with an inline version comment (e.g. `actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0`), never to a tag or branch. Local actions under `./.github/actions/` are referenced by path and do not need a SHA.
+- **Least-privilege tokens.** Every workflow declares a top-level `permissions:` block scoped to the minimum needed (default to `contents: read`). Agent identities use short-lived installation tokens minted via [`.github/actions/agent-token`](.github/actions/agent-token/action.yml) from a GitHub App — not PATs, and not the default `GITHUB_TOKEN` — for any operation that acts as the agent. Checkouts pass `persist-credentials: false` so the minted token is the only credential in scope.
+- **Fail-loud on ambiguous input.** When a workflow input can be malformed (e.g. more than one `model:*` label on a single issue), the workflow exits with `::error::` and a human-readable message rather than silently picking one value. Silent fallbacks hide bugs and make behaviour dependent on label ordering.
+- **Bash safety in inline scripts.** Inline `run:` scripts start with `set -euo pipefail` and follow the **Shell Script Conventions** above. Scripts that depend on specific env vars should validate them with `${VAR:?message}` at the top of the relevant function or script (this pattern is used in `docker/scripts/entrypoint.sh`; inline workflow scripts that don't rely on caller-supplied vars don't need it). Multi-step scripts long enough to warrant it should be extracted into `docker/scripts/` or `.github/actions/` rather than inlined.
+- **Branch-protection immutability.** Reviews reject changes that would weaken the `main-protection` ruleset in [`terraform/main.tf`](terraform/main.tf) — required approvals, linear history, no force-push, admin push block — unless the PR explicitly justifies the change. Agents must not be able to merge their own PRs or push directly to `main`.
 
 ## Adding a New Agent Action
 
