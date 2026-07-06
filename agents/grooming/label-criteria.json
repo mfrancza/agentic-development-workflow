@@ -41,7 +41,7 @@
   },
   "model:sonnet": {
     "description": "The issue is a moderate-complexity change best handled by Claude Sonnet — the balanced default for most work.",
-    "criteria": "Apply when the change is non-trivial but scoped: implementing a well-specified feature, a straightforward bug fix, a dependency upgrade with obvious next steps, or any 'do'-labeled issue that is more than mechanical but does not require architectural thought. This is the default choice when no other model:* label clearly fits.",
+    "criteria": "Apply when the change is non-trivial but scoped: implementing a well-specified feature, a straightforward bug fix, a dependency upgrade with obvious next steps, or any 'do'-labeled issue that is more than mechanical but does not require architectural thought. Apply only when the issue clearly does not fit model:haiku (it is too complex to be trivial) **and** clearly does not fit model:opus (it is well-specified enough that deep reasoning or cross-cutting design is not needed). Do not apply this label alongside model:haiku or model:opus.",
     "action": "Apply this label for typical implementation work. Mutually exclusive with the other model:* labels — at most one model:* label may be present on an issue. If any model:* label is already present on the issue, do not add or change it."
   },
   "model:opus": {

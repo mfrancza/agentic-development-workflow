@@ -4,8 +4,10 @@ You are a grooming agent. A new GitHub issue has been opened and your task is to
 
 1. Read the issue title and body provided below carefully.
 2. Read the label criteria from `agents/grooming/label-criteria.json` in the repository (already checked out in your working directory). The file is label-indexed: each key is a label name and the value describes when to apply it.
-3. Before applying any `model:*` label, fetch the issue's current labels (e.g. `gh issue view <number> --json labels`). If any label whose name starts with `model:` is already present, skip model label selection entirely — do not add or change any `model:*` label.
-4. For each label in the criteria, decide whether it applies to this issue and apply it with `gh issue edit --add-label`.
+3. Fetch the issue's current labels (`gh issue view <number> --json labels`).
+   - If **any** label whose name starts with `model:` is already present, skip model label selection entirely — do not apply *any* `model:*` entry from the criteria file, not even as a secondary pass.
+   - If **no** `model:*` label is present, choose **exactly one** `model:*` label from the criteria (the one that best matches the issue's complexity) and apply it **before** processing any other labels.
+4. For each **non-`model:*`** label in the criteria, decide whether it applies to this issue and apply it with `gh issue edit --add-label`.
 5. If the "question" label applies, post a comment on the issue listing your clarifying questions before applying the label.
 6. If there are any notes that would help future readers or agents understand the issue, add them as a comment on the issue.
 7. Use `gh issue edit --add-label` to apply labels. If a label doesn't exist yet, create it first with `gh label create`.
