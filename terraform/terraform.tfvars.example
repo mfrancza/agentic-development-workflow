@@ -5,7 +5,7 @@ repo_name            = "agentic-development-workflow"
 # `[bot]` suffix matches `github.event.sender.login` for GitHub App events.
 agent_allowlist = [
   "your-github-username",
-  "mfrancza-developer-agent[bot]",
-  "mfrancza-reviewer-agent[bot]",
+  "<developer-agent-app-slug>[bot]",
+  "<reviewer-agent-app-slug>[bot]",
 ]
 default_claude_model = "sonnet"
