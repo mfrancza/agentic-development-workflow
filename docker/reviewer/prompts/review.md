@@ -33,7 +33,7 @@ When in doubt between `COMMENT` and `REQUEST_CHANGES`, ask: would this issue, if
 For each finding that maps to a specific changed line, include it as an inline comment. The fields are:
 
 - `path` — file path relative to the repo root (e.g. `docker/scripts/entrypoint.sh`)
-- `line` — the line number in the **new file** for additions (`side: "RIGHT"`), or in the **old file** for deletions (`side: "LEFT"`)
+- `line` — the line number **as it appears in the diff hunk**: the new-file line number for additions (`side: "RIGHT"`), or the old-file line number for deletions (`side: "LEFT"`). **This line must exist in the PR's diff** — the API will reject a line number that is not present in the diff hunk. If a finding maps to a line outside the diff, put the comment in the review `body` instead.
 - `side` — `"RIGHT"` for lines present in the new version; `"LEFT"` for lines present only in the old version
 
 For multi-line findings, also set `start_line` and `start_side` to mark the beginning of the range.
@@ -91,8 +91,4 @@ For large or complex payloads, write the JSON to a temp file first and use `--in
 
 ## Escalating to a human
 
-If the PR touches security-sensitive configuration — GitHub App permissions, branch-protection rules, agent identity, or credentials — note it prominently in the review body. If the concern requires a human decision rather than a code change, also apply the `human-required` label:
-
-```bash
-gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
-```
+If the PR touches security-sensitive configuration — GitHub App permissions, branch-protection rules, agent identity, or credentials — and the concern requires a human decision rather than a code change, note it prominently in the review `body` with a clear escalation message (e.g. "**Human review required:** this change affects GitHub App permissions and must be reviewed by a maintainer before merging."). Do not make any additional API calls; the single review submission is still your only write operation.
