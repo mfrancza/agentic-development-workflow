@@ -60,6 +60,7 @@ Optional: `CLAUDE_MODEL` (default `sonnet`), `CLAUDE_MAX_TURNS` (default `100`).
 - `agent:developer` — triggers the developer agent to implement the issue.
 - `model:<name>` (e.g. `model:opus`, `model:haiku`, `model:sonnet`) — overrides the repo-wide default Claude model for `agent-implement`, `agent-groom`, and `agent-fix-deployment` runs on that issue. At most one `model:*` label is allowed per issue; workflows fail loudly if more than one is present. Other workflows always use `vars.DEFAULT_CLAUDE_MODEL`.
 - Classification labels applied by the grooming agent (`question`, `bug`, `enhancement`, `dependency upgrade`, `do`, `plan`) — defined in `agents/grooming/label-criteria.json`.
+- `human-required` — marks issues and PRs that need a human in the loop (security, permissions, deployments, billing, legal/compliance, branch-protection or agent-identity changes, or any agent escalation point). Agents apply this label to their own issues/PRs when they hit an escalation point and **also** assign the issue/PR to the relevant human actor; humans may apply it too. Not mutually exclusive with other labels. The criteria are documented in `agents/grooming/label-criteria.json` so the grooming agent can apply it automatically, and each developer-agent prompt in `docker/scripts/prompts/` explains when to apply it during that action.
 
 Only usernames in the Terraform-managed `AGENT_ALLOWLIST` Actions variable can trigger `agent:groom` or `agent:developer`.
 

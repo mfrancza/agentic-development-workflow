@@ -66,7 +66,7 @@ Terraform will:
 - Codify repo settings (squash-merge only, delete branch on merge, etc.).
 - Apply branch protection on `main` via a repository ruleset (PR review required, no force pushes, no deletion, linear history — direct pushes to `main` blocked for everyone, admins included; admins can bypass review only via PR merges).
 - Publish `AGENT_ALLOWLIST` and `DEFAULT_CLAUDE_MODEL` as repo-level Actions variables so workflows reference them without hardcoding values in YAML.
-- Create the labels consumed by the agent workflows (`agent:developer`, `agent:groom`, `model:sonnet`/`opus`/`haiku`, and the grooming labels `question`/`bug`/`enhancement`/`dependency upgrade`/`do`/`plan`) so they show up in the GitHub label picker on issue creation.
+- Create the labels consumed by the agent workflows (`agent:developer`, `agent:groom`, `model:sonnet`/`opus`/`haiku`, the grooming labels `question`/`bug`/`enhancement`/`dependency upgrade`/`do`/`plan`, and `human-required` for issues/PRs needing a human in the loop) so they show up in the GitHub label picker on issue creation.
 
 If `terraform apply` errors with `422 already_exists` on a default GitHub label (`bug`, `enhancement`, `question` — these ship pre-created on new repos), import them and re-apply:
 
