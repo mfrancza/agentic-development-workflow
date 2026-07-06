@@ -38,10 +38,15 @@ A separate reviewer GitHub App already exists: the `REVIEWER_APP_ID` and
 developer app. Remaining identity work is verification and documentation, not
 creation.
 
-- **Permissions (to verify):** `contents: read` (clone), `pull_requests:
-  write` (submit reviews, reply to threads, approve), `issues: read`
-  (context). No push access to the repo contents — the reviewer never commits
-  code.
+- **Permissions (to verify):** Contents (read, for cloning),
+  Pull requests (read/write, to submit reviews, reply to threads, and
+  approve), Issues (read, for context). No push access to the repo contents —
+  the reviewer never commits code.
+  Note: the bootstrap instructions in README.md currently provision the
+  reviewer app with Issues (R/W) and Checks (R). Reconciling that with this
+  least-privilege target is part of [#36](https://github.com/mfrancza/agentic-development-workflow/issues/36)
+  — PR conversation comments only need Pull requests (write), so Issues can
+  likely be trimmed to read; Checks (read) is harmless to keep for CI context.
 - **Secrets:** `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY`, minted into
   short-lived installation tokens with `actions/create-github-app-token`,
   exactly like the developer app.
