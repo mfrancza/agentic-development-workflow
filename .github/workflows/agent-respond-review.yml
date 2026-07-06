@@ -60,7 +60,19 @@ jobs:
           fi
 
           # Inline review comments also count as feedback.
-          COMMENT_COUNT="$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" --jq 'length')"
+          # Fail open: if the API call errors or returns a non-numeric value
+          # (transient GitHub error, rate limit, permission regression), default
+          # to proceeding so a harmless approval doesn't block or alert noisily.
+          if ! COMMENT_COUNT="$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" --jq 'length' 2>/dev/null)"; then
+            echo "Failed to fetch inline comments; failing open and proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if ! [[ "$COMMENT_COUNT" =~ ^[0-9]+$ ]]; then
+            echo "Inline comment count '$COMMENT_COUNT' is non-numeric; failing open and proceeding."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$COMMENT_COUNT" -gt 0 ]; then
             echo "Approval carries $COMMENT_COUNT inline comment(s); proceeding."
             echo "proceed=true" >> "$GITHUB_OUTPUT"
