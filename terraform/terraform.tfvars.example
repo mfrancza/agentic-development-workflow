@@ -1,4 +1,11 @@
 repo_owner           = "your-github-username"
 repo_name            = "agentic-development-workflow"
-agent_allowlist      = ["your-github-username"]
+# Include the agent bot identities (e.g. the developer agent) so agents can
+# apply agent:* labels (like `agent:review`) and trigger other agents. The
+# `[bot]` suffix matches `github.event.sender.login` for GitHub App events.
+agent_allowlist = [
+  "your-github-username",
+  "<developer-agent-app-slug>[bot]",
+  "<reviewer-agent-app-slug>[bot]",
+]
 default_claude_model = "sonnet"
