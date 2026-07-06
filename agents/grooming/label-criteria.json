@@ -37,16 +37,16 @@
   "model:haiku": {
     "description": "The issue is simple enough to be handled by Claude Haiku — the fastest, lowest-cost model.",
     "criteria": "Apply when the change is trivial and mechanical: fixing a typo, tweaking a single config value, updating a comment or a small piece of documentation, or a one-line code change with no design decisions. If in doubt between haiku and sonnet, prefer sonnet.",
-    "action": "Apply this label when the issue is trivial. Mutually exclusive with the other model:* labels — at most one model:* label may be present on an issue."
+    "action": "Apply this label when the issue is trivial. Mutually exclusive with the other model:* labels — at most one model:* label may be present on an issue. If any model:* label is already present on the issue, do not add or change it."
   },
   "model:sonnet": {
     "description": "The issue is a moderate-complexity change best handled by Claude Sonnet — the balanced default for most work.",
     "criteria": "Apply when the change is non-trivial but scoped: implementing a well-specified feature, a straightforward bug fix, a dependency upgrade with obvious next steps, or any 'do'-labeled issue that is more than mechanical but does not require architectural thought. This is the default choice when no other model:* label clearly fits.",
-    "action": "Apply this label for typical implementation work. Mutually exclusive with the other model:* labels — at most one model:* label may be present on an issue."
+    "action": "Apply this label for typical implementation work. Mutually exclusive with the other model:* labels — at most one model:* label may be present on an issue. If any model:* label is already present on the issue, do not add or change it."
   },
   "model:opus": {
     "description": "The issue is complex enough to warrant Claude Opus — the highest-capability, highest-cost model.",
     "criteria": "Apply when the change requires deep reasoning, cross-cutting design, or careful trade-off analysis: high-level design for a new feature, non-trivial refactors, new agent types, work that spans multiple components, security-sensitive changes, or anything the 'plan' label would also apply to. Ambiguous or under-specified issues that require the agent to reason about scope also belong here.",
-    "action": "Apply this label for complex or design-heavy work. Mutually exclusive with the other model:* labels — at most one model:* label may be present on an issue."
+    "action": "Apply this label for complex or design-heavy work. Mutually exclusive with the other model:* labels — at most one model:* label may be present on an issue. If any model:* label is already present on the issue, do not add or change it."
   }
 }
