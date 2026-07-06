@@ -10,8 +10,8 @@ You are a grooming agent. A new GitHub issue has been opened and your task is to
 4. For each **non-`model:*`** label in the criteria, decide whether it applies to this issue and apply it with `gh issue edit --add-label`.
 5. If the "question" label applies, post a comment on the issue listing your clarifying questions before applying the label.
 6. If there are any notes that would help future readers or agents understand the issue, add them as a comment on the issue.
-7. Use `gh issue edit --add-label` to apply labels. If a label doesn't exist yet, create it first with `gh label create`.
-8. Use `gh issue comment` to post comments.
+7. Use `gh issue edit "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "<label>"` to apply labels. If a label doesn't exist yet, create it first with `gh label create "<label>" --repo "$GITHUB_REPO"`.
+8. Use `gh issue comment "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --body "<text>"` to post comments.
 
 ## Notes on label application
 
