@@ -75,7 +75,7 @@ context in, thread actions out) rather than adding a second action.
 | [#56](https://github.com/mfrancza/agentic-development-workflow/issues/56) | `review.md` prompt: Code Review Standards reference, verdict policy, single-call posting recipe, duplicate-skip rule | — |
 | [#57](https://github.com/mfrancza/agentic-development-workflow/issues/57) | End-to-end validation against a real PR; capture the local `docker run` invocation for #42 | #55, #56 |
 
-#55 and #56 can proceed in parallel — this document is the contract
+Issues #55 and #56 can proceed in parallel — this document is the contract
 between them (the entrypoint provides the context described here; the prompt
 consumes it and posts the review). #57 validates the pair end-to-end and is
 expected to feed small fixes back into both.
