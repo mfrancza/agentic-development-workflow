@@ -28,5 +28,10 @@
     "description": "The issue is complex enough to require design or planning before implementation.",
     "criteria": "Apply when the change spans multiple components, requires architectural decisions, involves coordination between systems, or cannot be done cleanly in a single commit. Examples: new multi-step workflows, refactors, new agent types, cross-cutting infrastructure changes.",
     "action": "Apply this label when the issue requires a plan before implementation begins. Mutually exclusive with 'do'."
+  },
+  "human-required": {
+    "description": "The issue or PR needs a human in the loop — an agent alone cannot (or should not) resolve it.",
+    "criteria": "Apply when the work touches something that should not be decided by an agent alone. Examples: security-sensitive decisions (auth changes, secret rotation, permission model changes), production deployments or rollbacks, billing/access/quota changes, legal/compliance/licensing concerns, changes to branch-protection or agent-identity/permissions, or any point at which the agent has escalated because it is blocked, uncertain, or lacks authority to proceed. When applying this label, also assign the issue or PR to the human(s) whose input is needed.",
+    "action": "Apply this label whenever a human needs to be in the loop. Agents should apply it to their own issues/PRs when they hit an escalation point; humans can apply it too. It is not mutually exclusive with any other label."
   }
 }

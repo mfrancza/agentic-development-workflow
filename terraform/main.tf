@@ -172,6 +172,10 @@ locals {
       color       = "fbca04"
       description = "Complex enough to require design or planning before implementation."
     }
+    "human-required" = {
+      color       = "b60205"
+      description = "A human is needed in the loop — agent should also assign the issue/PR to a human actor."
+    }
   }
 }
 

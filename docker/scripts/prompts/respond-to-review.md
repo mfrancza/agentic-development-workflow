@@ -37,3 +37,11 @@ For longer bodies, write to a file and use `--body-file` (or `-F body=@file` for
 3. Do not push — the entrypoint pushes for you after you exit.
 4. Do not request re-review yourself — the entrypoint re-requests review from all currently assigned reviewers automatically whenever HEAD has changed (i.e., new commits, amended commits, or any other history rewrite). If HEAD is unchanged, no re-review is requested.
 5. End by summarizing which threads got replies and which commits you made (if any). Be honest if you made no commits.
+
+## Escalating to a human
+
+If a review comment surfaces a decision an agent should not make on its own (security, permissions, deployments, billing, legal/compliance, branch-protection or agent-identity changes), or you need human input to resolve a disagreement, apply the `human-required` label to the PR and assign the appropriate human, in addition to replying on the thread:
+
+```bash
+gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "<github-username>"
+```
