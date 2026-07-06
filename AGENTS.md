@@ -35,7 +35,7 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 1. User opens a GitHub issue. Applying the `agent:groom` label runs the grooming agent (`AGENT_ACTION=groom`), which adds classification labels and clarifying notes based on [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json).
 2. Applying the `agent:developer` label triggers the developer agent (`AGENT_ACTION=implement`), which creates the `agent/issue-{N}` branch, writes a solution, and opens a PR.
 3. On CI failures against an agent-authored PR, the `agent-fix-checks` workflow re-invokes the container with `AGENT_ACTION=fix-checks`. **Note:** `agent-fix-checks.yml` is currently wired to `on.workflow_run.workflows: ["CI"]`; it will not fire until a workflow named `CI` exists in the repo (the entry is a placeholder — update the workflow list or add a `CI` workflow when CI lands).
-4. On a submitted PR review, the `agent-respond-review` workflow runs `AGENT_ACTION=respond-review`, which addresses feedback and pushes updates.
+4. On a submitted PR review, the `agent-respond-review` workflow runs `AGENT_ACTION=respond-review`, which addresses feedback and pushes updates. The workflow skips cleanly when the review is a bare approval — state `approved`, no body text, and no inline review comments — since there is nothing to respond to.
 5. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
 
 Every workflow builds the container from [`docker/`](docker/) and mints a short-lived installation token from the `developer-agent` GitHub App.
