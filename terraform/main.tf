@@ -104,7 +104,10 @@ resource "github_repository_ruleset" "main" {
 #
 # Three groups:
 #  - agent:* trigger labels (the workflows in .github/workflows/ gate on
-#    these; applying one routes the issue to that agent).
+#    these; applying one routes the issue or PR to that agent). Note that
+#    `agent:developer` and `agent:groom` are applied to issues, while
+#    `agent:review` is applied to PRs to request a review from the code
+#    review agent.
 #  - model:<name> overrides (agent-implement / agent-groom /
 #    agent-fix-deployment prefer these over the GitHub Actions repository
 #    variable `vars.DEFAULT_CLAUDE_MODEL` (not a Terraform variable); apply
@@ -125,6 +128,10 @@ locals {
     "agent:groom" = {
       color       = "6f42c1"
       description = "Route this issue to the grooming agent to add labels and notes."
+    }
+    "agent:review" = {
+      color       = "6f42c1"
+      description = "Request a review of this PR from the code review agent."
     }
 
     "model:sonnet" = {
