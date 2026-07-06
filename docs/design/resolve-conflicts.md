@@ -46,10 +46,11 @@ A new workflow `agent-resolve-conflicts.yml`:
 
 1. Enumerates open PRs authored by the developer agent (same authorship gate
    as `agent-respond-review`; humans resolve their own conflicts).
-2. Polls each PR's `mergeable` field until GitHub finishes computing it
-   (it is `unknown` immediately after a push; retry with backoff, a few
-   attempts).
-3. For each PR with `mergeable == false` (`DIRTY`), runs the developer
+2. Polls each PR's mergeability until GitHub finishes computing it. In the
+   `gh`/GraphQL representation used by `gh pr view --json mergeable`, the
+   value is `UNKNOWN` right after a push — retry with backoff, a few
+   attempts, until it settles to `MERGEABLE` or `CONFLICTING`.
+3. For each PR whose `mergeable` is `CONFLICTING`, runs the developer
    container with `AGENT_ACTION=resolve-conflicts` and that
    `GITHUB_PR_NUMBER`. One container run per conflicted PR; concurrency group
    `agent-resolve-conflicts-pr-<number>`, `cancel-in-progress: false`.
@@ -142,9 +143,9 @@ that was already required now simply covers the resolution too.
 | [#64](https://github.com/mfrancza/agentic-development-workflow/issues/64) | `agent-resolve-conflicts.yml` workflow (push trigger, PR enumeration, mergeable polling, per-PR dispatch, `workflow_dispatch` backstop) + docs | — |
 | [#65](https://github.com/mfrancza/agentic-development-workflow/issues/65) | End-to-end validation: manufacture a conflict against a test PR, watch it resolve; validate the fallback path with an unresolvable conflict | #63, #64 |
 
-#63 and #64 can proceed in parallel — this document is the contract
-(`AGENT_ACTION=resolve-conflicts`, env: `GITHUB_PR_NUMBER`). #65 validates
-both paths end-to-end.
+Issues #63 and #64 can proceed in parallel — this document is the contract
+(`AGENT_ACTION=resolve-conflicts`, env: `GITHUB_PR_NUMBER`). Issue #65
+validates both paths end-to-end.
 
 Dependencies are recorded natively as GitHub blocked-by relationships on the
 issues.
