@@ -102,7 +102,7 @@ resource "github_repository_ruleset" "main" {
 # to remember exact spellings for the trigger and model-override labels, and
 # the grooming agent doesn't need to `gh label create` on demand.
 #
-# Four groups:
+# Five groups:
 #  - agent:* trigger labels (the workflows in .github/workflows/ gate on
 #    these; applying one routes the issue or PR to that agent). Note that
 #    `agent:developer`, `agent:groom`, and `agent:design` are applied to
@@ -116,6 +116,8 @@ resource "github_repository_ruleset" "main" {
 #    at most one per issue).
 #  - grooming labels (the grooming agent applies these based on issue
 #    content — see agents/grooming/label-criteria.json).
+#  - workflow labels (`human-required` signals that an agent has escalated to
+#    a human and the issue/PR should be assigned to a human actor).
 #  - lifecycle labels (`draft` is applied by the designer agent to sub-issues
 #    it creates; means the issue is scoped by an unmerged design and is not
 #    yet ready for implementation).
