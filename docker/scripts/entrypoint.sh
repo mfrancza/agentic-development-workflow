@@ -63,18 +63,19 @@ setup_repo() {
 action_implement() {
     : "${GITHUB_ISSUE_NUMBER:?GITHUB_ISSUE_NUMBER is required for implement}"
 
-    setup_repo
-
     log "Fetching issue #${GITHUB_ISSUE_NUMBER}"
     ISSUE_JSON="$(gh issue view "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --json title,body,labels)"
     ISSUE_TITLE="$(echo "$ISSUE_JSON" | jq -r '.title')"
     ISSUE_BODY="$(echo "$ISSUE_JSON" | jq -r '.body')"
 
     # Skip issues labeled 'draft' — they are awaiting design-PR merge.
-    if echo "$ISSUE_JSON" | jq -e '[.labels[].name] | contains(["draft"])' > /dev/null; then
+    # Guard runs before setup_repo to avoid an unnecessary clone for skipped issues.
+    if echo "$ISSUE_JSON" | jq -e '[.labels[].name] | any(. == "draft")' > /dev/null; then
         log "Issue #${GITHUB_ISSUE_NUMBER} is labeled 'draft' — skipping until design PR merges"
         return 0
     fi
+
+    setup_repo
 
     BRANCH_NAME="agent/issue-${GITHUB_ISSUE_NUMBER}"
     log "Creating branch ${BRANCH_NAME}"
