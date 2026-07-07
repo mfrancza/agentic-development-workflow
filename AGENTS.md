@@ -20,10 +20,14 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 │       └── label-criteria.json       # Label definitions used by the grooming agent
 ├── docker/
 │   ├── Dockerfile                    # Developer agent container image (node:22-bookworm)
-│   └── scripts/
-│       ├── entrypoint.sh             # Container entrypoint — dispatches AGENT_ACTION
-│       ├── git-askpass.sh            # Token-based git credential helper
-│       └── prompts/                  # One system prompt per AGENT_ACTION
+│   ├── scripts/
+│   │   ├── entrypoint.sh             # Container entrypoint — dispatches AGENT_ACTION
+│   │   ├── git-askpass.sh            # Token-based git credential helper
+│   │   └── prompts/                  # One system prompt per AGENT_ACTION
+│   └── reviewer/                     # Reviewer agent image — separate from the developer image
+│       ├── Dockerfile                # Same base recipe as docker/Dockerfile (node + gh + Claude Code)
+│       ├── entrypoint.sh             # Review-only entrypoint (no AGENT_ACTION dispatch; no push/commit code)
+│       └── prompts/                  # Reviewer system prompt(s)
 ├── terraform/                        # Repo settings, branch-protection ruleset, Actions vars
 └── .github/
     ├── copilot-instructions.md       # Detailed onboarding for AI coding tools
@@ -38,11 +42,11 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 4. On a submitted PR review, the `agent-respond-review` workflow runs `AGENT_ACTION=respond-review`, which addresses feedback and pushes updates. The workflow skips cleanly when the review is a bare approval — state `approved`, no body text, and no inline review comments — since there is nothing to respond to.
 5. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
 
-Every workflow builds the container from [`docker/`](docker/) and mints a short-lived installation token from the `developer-agent` GitHub App.
+The developer workflows build the container from [`docker/`](docker/) and mint a short-lived installation token from the `developer-agent` GitHub App. The **reviewer image** is built from [`docker/reviewer/`](docker/reviewer/) and is designed to use the `reviewer-agent` App identity (see the reviewer image section below); however, the GitHub Actions workflow that triggers it is not yet implemented — the `agent:review` label is currently a placeholder until that workflow lands.
 
 ## Agent Actions
 
-The container is a single image dispatched by `AGENT_ACTION`. Required environment variables:
+The developer container is a single image dispatched by `AGENT_ACTION`. Required environment variables:
 
 | Action            | Required vars (in addition to `ANTHROPIC_API_KEY`, `GH_TOKEN`, `GITHUB_REPO`) |
 |-------------------|-------------------------------------------------------------------------------|
@@ -53,6 +57,8 @@ The container is a single image dispatched by `AGENT_ACTION`. Required environme
 | `fix-deployment`  | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                        |
 
 Optional: `CLAUDE_MODEL` (default `sonnet`), `CLAUDE_MAX_TURNS` (default `100`).
+
+The **reviewer image** at [`docker/reviewer/`](docker/reviewer/) does not use `AGENT_ACTION` — it performs exactly one action (review a PR) and dispatches nothing else. Required env: `ANTHROPIC_API_KEY`, `GH_TOKEN`, `GITHUB_REPO`, `GITHUB_PR_NUMBER`; optional `CLAUDE_MODEL` / `CLAUDE_MAX_TURNS` (same defaults as the developer image so `model:*` labels behave identically). The reviewer image deliberately ships no `git-askpass.sh` and has no `git commit` / `git push` code paths — the no-write guarantee is structural (image) as well as token-scoped (Contents: read on the reviewer App); see [`docs/design/reviewer-container.md`](docs/design/reviewer-container.md) decision 3. Claude posts the review via `gh api` and the entrypoint verifies afterwards that a review by the reviewer app exists on the PR head SHA — exiting non-zero otherwise (decision 1).
 
 ## Labels
 
