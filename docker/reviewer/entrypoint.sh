@@ -154,7 +154,7 @@ while true; do
                     line
                     startLine
                     diffSide
-                    comments(first: 50) {
+                    comments(last: 100) {
                       nodes {
                         databaseId
                         author { login }
