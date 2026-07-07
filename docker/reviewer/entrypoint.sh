@@ -43,14 +43,14 @@ log() {
 
 run_claude() {
     local prompt_file="$1"
-    shift
-    local user_prompt="$*"
+    local user_prompt_file="$2"
 
-    printf '%s\n' "$user_prompt" | claude --print \
+    claude --print \
         --dangerously-skip-permissions \
         --model "$CLAUDE_MODEL" \
         --max-turns "$CLAUDE_MAX_TURNS" \
-        --system-prompt-file "${SCRIPTS_DIR}/prompts/${prompt_file}"
+        --system-prompt-file "${SCRIPTS_DIR}/prompts/${prompt_file}" \
+        < "$user_prompt_file"
 }
 
 # -----------------------------------------------------------------------------
@@ -100,11 +100,10 @@ git fetch origin "$BASE_REF"
 BASE_SHA="$(git merge-base "origin/${BASE_REF}" HEAD)"
 
 # --- Gather the diff, changed files, and the commit series on the PR.
+#     Stream outputs directly to a temp file rather than capturing into bash
+#     variables; this avoids duplicating potentially large blobs in memory.
 log "Computing diff ${BASE_SHA}..HEAD"
-DIFF_STAT="$(git diff --stat "${BASE_SHA}..HEAD")"
-CHANGED_FILES="$(git diff --name-only "${BASE_SHA}..HEAD")"
-DIFF="$(git diff "${BASE_SHA}..HEAD")"
-COMMITS_ON_PR="$(git log --pretty='format:%h %s' "${BASE_SHA}..HEAD")"
+CONTEXT_FILE="$(mktemp)"
 
 # --- Gather existing review threads WITH IDs. GraphQL is the only place the
 #     thread IDs (used by #41's resolve-thread flow) surface; the REST
@@ -146,13 +145,14 @@ REVIEW_THREADS_JSON="$(gh api graphql \
       }' \
     --jq '.data.repository.pullRequest.reviewThreads.nodes')"
 
-# --- Gather CI check status. `gh pr checks` prints a non-zero exit when
-#     checks are failing/pending; that's not a script error for us, so swallow
-#     the exit code and fall back to an empty array.
+# --- Gather CI check status. `gh pr checks` exits non-zero when checks are
+#     failing/pending, but still emits JSON on stdout. Capture stdout regardless
+#     of exit status (|| true), then default to '[]' only if the output is
+#     actually empty — preserving the CI context Claude needs when checks fail.
 log "Fetching CI check status"
 CHECKS_JSON="$(gh pr checks "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" \
-    --json name,state,link,workflow,startedAt,completedAt 2>/dev/null \
-    || echo '[]')"
+    --json name,state,link,workflow,startedAt,completedAt 2>/dev/null)" || true
+CHECKS_JSON="${CHECKS_JSON:-[]}"
 
 # --- Identify this bot so we can verify our own review afterwards. GraphQL's
 #     `viewer` works with GitHub App installation tokens and returns the bot
@@ -160,50 +160,50 @@ CHECKS_JSON="$(gh pr checks "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" \
 REVIEWER_LOGIN="$(gh api graphql -f query='{ viewer { login } }' --jq '.data.viewer.login')"
 log "Reviewer identity: ${REVIEWER_LOGIN}"
 
+# --- Build the user prompt in a temp file, streaming git output directly to
+#     avoid duplicating potentially large blobs as bash variables.
+log "Building review prompt context in ${CONTEXT_FILE}"
+{
+    printf 'Review PR #%s in %s.\n\n' "${GITHUB_PR_NUMBER}" "${GITHUB_REPO}"
+    printf 'PR URL: %s\n' "${PR_URL}"
+    printf 'PR title: %s\n' "${PR_TITLE}"
+    printf 'PR author: %s\n' "${PR_AUTHOR}"
+    printf 'PR state: %s (draft: %s)\n' "${PR_STATE}" "${PR_IS_DRAFT}"
+    printf 'Base ref: %s\n' "${BASE_REF}"
+    printf 'Head ref: %s\n' "${HEAD_REF}"
+    printf 'Local branch (checked out): %s\n' "${BRANCH_NAME}"
+    printf 'Base SHA (merge-base with origin/%s): %s\n' "${BASE_REF}" "${BASE_SHA}"
+    printf 'Head SHA: %s\n' "${HEAD_SHA}"
+    printf 'Reviewer identity (this bot): %s\n\n' "${REVIEWER_LOGIN}"
+    printf 'Post the review against Head SHA %s. Submit it as a single\n' "${HEAD_SHA}"
+    printf 'POST /repos/%s/pulls/%s/reviews call so the\n' "${GITHUB_REPO}" "${GITHUB_PR_NUMBER}"
+    printf 'verdict and its inline comments land atomically.\n\n'
+    printf 'PR body:\n%s\n\n' "${PR_BODY}"
+    printf 'Commits on this PR since base:\n'
+} > "$CONTEXT_FILE"
+git log --pretty='format:%h %s' "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
+printf '\n\nDiff stat:\n' >> "$CONTEXT_FILE"
+git diff --stat "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
+printf '\nChanged files:\n' >> "$CONTEXT_FILE"
+git diff --name-only "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
+# Stream the full diff directly to avoid holding it in a bash variable
+printf '\nFull diff (base..head):\n' >> "$CONTEXT_FILE"
+git diff "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
+{
+    printf '\nExisting review threads (context only — do not reply to or resolve them;\n'
+    printf 'skip any finding already covered by an open thread):\n'
+    printf '%s\n' "${REVIEW_THREADS_JSON}"
+    printf '\nCI check status:\n'
+    printf '%s\n' "${CHECKS_JSON}"
+} >> "$CONTEXT_FILE"
+
 # -----------------------------------------------------------------------------
 # Invoke Claude
 # -----------------------------------------------------------------------------
 
 log "Running Claude to review PR"
-run_claude "review.md" \
-    "Review PR #${GITHUB_PR_NUMBER} in ${GITHUB_REPO}.
-
-PR URL: ${PR_URL}
-PR title: ${PR_TITLE}
-PR author: ${PR_AUTHOR}
-PR state: ${PR_STATE} (draft: ${PR_IS_DRAFT})
-Base ref: ${BASE_REF}
-Head ref: ${HEAD_REF}
-Local branch (checked out): ${BRANCH_NAME}
-Base SHA (merge-base with origin/${BASE_REF}): ${BASE_SHA}
-Head SHA: ${HEAD_SHA}
-Reviewer identity (this bot): ${REVIEWER_LOGIN}
-
-Post the review against Head SHA ${HEAD_SHA}. Submit it as a single
-POST /repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews call so the
-verdict and its inline comments land atomically.
-
-PR body:
-${PR_BODY}
-
-Commits on this PR since base:
-${COMMITS_ON_PR}
-
-Diff stat:
-${DIFF_STAT}
-
-Changed files:
-${CHANGED_FILES}
-
-Full diff (base..head):
-${DIFF}
-
-Existing review threads (context only — do not reply to or resolve them;
-skip any finding already covered by an open thread):
-${REVIEW_THREADS_JSON}
-
-CI check status:
-${CHECKS_JSON}"
+run_claude "review.md" "$CONTEXT_FILE"
+rm -f "$CONTEXT_FILE"
 
 # -----------------------------------------------------------------------------
 # Verify the review was posted (design decision 1)
