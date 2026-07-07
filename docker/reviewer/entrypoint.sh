@@ -77,7 +77,7 @@ HEAD_REF="$(echo "$PR_JSON"  | jq -r '.headRefName')"
 HEAD_SHA="$(echo "$PR_JSON"  | jq -r '.headRefOid')"
 PR_TITLE="$(echo "$PR_JSON"  | jq -r '.title')"
 PR_BODY="$(echo "$PR_JSON"   | jq -r '.body // ""')"
-PR_AUTHOR="$(echo "$PR_JSON" | jq -r '.author.login')"
+PR_AUTHOR="$(echo "$PR_JSON" | jq -r '.author.login // ""')"
 PR_URL="$(echo "$PR_JSON"    | jq -r '.url')"
 PR_STATE="$(echo "$PR_JSON"  | jq -r '.state')"
 PR_IS_DRAFT="$(echo "$PR_JSON" | jq -r '.isDraft')"
@@ -127,35 +127,55 @@ OWNER="${GITHUB_REPO%%/*}"
 REPO_NAME="${GITHUB_REPO#*/}"
 
 log "Fetching open (unresolved) review threads (with IDs)"
-REVIEW_THREADS_JSON="$(gh api graphql \
-    -F owner="$OWNER" -F name="$REPO_NAME" -F number="$GITHUB_PR_NUMBER" \
-    -f query='
-      query($owner: String!, $name: String!, $number: Int!) {
-        repository(owner: $owner, name: $name) {
-          pullRequest(number: $number) {
-            reviewThreads(first: 100) {
-              nodes {
-                id
-                isResolved
-                isOutdated
-                path
-                line
-                startLine
-                diffSide
-                comments(first: 50) {
+# Paginate through all review threads (100 per page) using cursor-based
+# pagination so PRs with >100 threads are fully covered. CURSOR starts as
+# the JSON literal `null` so `after: null` on the first page is equivalent
+# to omitting the argument.
+REVIEW_THREADS_JSON="[]"
+CURSOR=null
+while true; do
+    PAGE_JSON="$(gh api graphql \
+        -F owner="$OWNER" -F name="$REPO_NAME" -F number="$GITHUB_PR_NUMBER" \
+        -F cursor="$CURSOR" \
+        -f query='
+          query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+            repository(owner: $owner, name: $name) {
+              pullRequest(number: $number) {
+                reviewThreads(first: 100, after: $cursor) {
+                  pageInfo { endCursor hasNextPage }
                   nodes {
-                    databaseId
-                    author { login }
-                    body
-                    createdAt
+                    id
+                    isResolved
+                    isOutdated
+                    path
+                    line
+                    startLine
+                    diffSide
+                    comments(first: 50) {
+                      nodes {
+                        databaseId
+                        author { login }
+                        body
+                        createdAt
+                      }
+                    }
                   }
                 }
               }
             }
-          }
-        }
-      }' \
-    --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)]')"
+          }')"
+    PAGE_NODES="$(printf '%s' "$PAGE_JSON" | \
+        jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)]')"
+    REVIEW_THREADS_JSON="$(jq -n \
+        --argjson acc "$REVIEW_THREADS_JSON" \
+        --argjson page "$PAGE_NODES" \
+        '$acc + $page')"
+    HAS_NEXT="$(printf '%s' "$PAGE_JSON" | \
+        jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
+    [ "$HAS_NEXT" = "true" ] || break
+    CURSOR="$(printf '%s' "$PAGE_JSON" | \
+        jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')"
+done
 
 # --- Gather CI check status. `gh pr checks` exits non-zero when checks are
 #     failing/pending, but still emits JSON on stdout. Capture stdout regardless
