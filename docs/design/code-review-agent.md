@@ -1,7 +1,6 @@
 # Design: Code Review Agent
 
 **Issue:** [#27](https://github.com/mfrancza/agentic-development-workflow/issues/27)
-**Status:** Draft
 
 ## Summary
 

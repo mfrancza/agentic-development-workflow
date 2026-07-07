@@ -1,7 +1,6 @@
 # Design: Designer Agent
 
 **Issue:** [#68](https://github.com/mfrancza/agentic-development-workflow/issues/68)
-**Status:** Draft
 
 ## Summary
 
