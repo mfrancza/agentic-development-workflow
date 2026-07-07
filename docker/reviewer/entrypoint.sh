@@ -247,8 +247,12 @@ rm -f "$CONTEXT_FILE"
 # but before Claude posts — does not falsely satisfy the check.
 
 log "Verifying a review by ${REVIEWER_LOGIN} exists on ${HEAD_SHA}"
+# Use `jq -s` to aggregate across all pages rather than applying `--jq` once
+# per page: `--jq` + `--paginate` emits one number per page, which breaks the
+# `-eq 0` numeric comparison when there are multiple pages of reviews.
+# `jq -s` slurps all pages into a single outer array and counts matches once.
 REVIEW_MATCHES="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" \
-    --jq "[.[] | select(.user.login == \"${REVIEWER_LOGIN}\" and .commit_id == \"${HEAD_SHA}\")] | length")"
+    | jq -s "[.[][] | select(.user.login == \"${REVIEWER_LOGIN}\" and .commit_id == \"${HEAD_SHA}\")] | length")"
 
 if [ "${REVIEW_MATCHES:-0}" -eq 0 ]; then
     log "ERROR: no review by ${REVIEWER_LOGIN} found on ${HEAD_SHA} for PR #${GITHUB_PR_NUMBER} — agent did not complete the review"
