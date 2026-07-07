@@ -76,7 +76,7 @@ BASE_REF="$(echo "$PR_JSON"  | jq -r '.baseRefName')"
 HEAD_REF="$(echo "$PR_JSON"  | jq -r '.headRefName')"
 HEAD_SHA="$(echo "$PR_JSON"  | jq -r '.headRefOid')"
 PR_TITLE="$(echo "$PR_JSON"  | jq -r '.title')"
-PR_BODY="$(echo "$PR_JSON"   | jq -r '.body')"
+PR_BODY="$(echo "$PR_JSON"   | jq -r '.body // ""')"
 PR_AUTHOR="$(echo "$PR_JSON" | jq -r '.author.login')"
 PR_URL="$(echo "$PR_JSON"    | jq -r '.url')"
 PR_STATE="$(echo "$PR_JSON"  | jq -r '.state')"
@@ -100,9 +100,11 @@ log "Refreshing origin/${BASE_REF} and resolving merge-base"
 # runs rather than hanging. Use an ephemeral HTTP Authorization header derived
 # from GH_TOKEN rather than relying on any persistent credential helper that
 # may or may not survive across environments (private repos in particular).
-GIT_TERMINAL_PROMPT=0 git \
-    -c "http.extraHeader=Authorization: Bearer ${GH_TOKEN}" \
-    fetch origin "$BASE_REF"
+GIT_TERMINAL_PROMPT=0 \
+GIT_CONFIG_COUNT=1 \
+GIT_CONFIG_KEY_0="http.extraHeader" \
+GIT_CONFIG_VALUE_0="Authorization: Bearer ${GH_TOKEN}" \
+git fetch origin "$BASE_REF"
 BASE_SHA="$(git merge-base "origin/${BASE_REF}" HEAD)"
 
 # --- Gather the diff, changed files, and the commit series on the PR.
