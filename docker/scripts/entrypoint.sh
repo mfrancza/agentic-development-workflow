@@ -304,7 +304,7 @@ action_design() {
 
     BRANCH_NAME="design/issue-${GITHUB_ISSUE_NUMBER}"
 
-    # Preflight: skip (exit 0) if an open PR for this branch already exists.
+    # Preflight: skip (return 0) if an open PR for this branch already exists.
     # Branch name is load-bearing — the un-draft job parses it — so never deviate.
     OWNER="${GITHUB_REPO%%/*}"
     EXISTING_PR="$(gh pr list --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --state open \
