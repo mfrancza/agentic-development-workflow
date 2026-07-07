@@ -96,7 +96,13 @@ log "Head SHA (from git): ${HEAD_SHA}"
 #     clone start and now. Fail loudly if the fetch cannot update the ref —
 #     a stale base would silently produce an incorrect diff.
 log "Refreshing origin/${BASE_REF} and resolving merge-base"
-git fetch origin "$BASE_REF"
+# Disable interactive prompting so the command fails fast in non-interactive
+# runs rather than hanging. Use an ephemeral HTTP Authorization header derived
+# from GH_TOKEN rather than relying on any persistent credential helper that
+# may or may not survive across environments (private repos in particular).
+GIT_TERMINAL_PROMPT=0 git \
+    -c "http.extraHeader=Authorization: Bearer ${GH_TOKEN}" \
+    fetch origin "$BASE_REF"
 BASE_SHA="$(git merge-base "origin/${BASE_REF}" HEAD)"
 
 # --- Gather the diff, changed files, and the commit series on the PR.
@@ -104,6 +110,9 @@ BASE_SHA="$(git merge-base "origin/${BASE_REF}" HEAD)"
 #     variables; this avoids duplicating potentially large blobs in memory.
 log "Computing diff ${BASE_SHA}..HEAD"
 CONTEXT_FILE="$(mktemp)"
+# Ensure the temp file is removed on all exit paths (normal, error, SIGINT, …)
+# so that `set -e` failures before the explicit `rm -f` below don't leak it.
+trap 'rm -f "$CONTEXT_FILE"' EXIT
 
 # --- Gather existing review threads WITH IDs. GraphQL is the only place the
 #     thread IDs (used by #41's resolve-thread flow) surface; the REST
