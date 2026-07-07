@@ -33,10 +33,11 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 ## MVP Workflow
 
 1. User opens a GitHub issue. Applying the `agent:groom` label runs the grooming agent (`AGENT_ACTION=groom`), which adds classification labels and clarifying notes based on [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json).
-2. Applying the `agent:developer` label triggers the developer agent (`AGENT_ACTION=implement`), which creates the `agent/issue-{N}` branch, writes a solution, and opens a PR.
-3. On CI failures against an agent-authored PR, the `agent-fix-checks` workflow re-invokes the container with `AGENT_ACTION=fix-checks`. **Note:** `agent-fix-checks.yml` is currently wired to `on.workflow_run.workflows: ["CI"]`; it will not fire until a workflow named `CI` exists in the repo (the entry is a placeholder — update the workflow list or add a `CI` workflow when CI lands).
-4. On a submitted PR review, the `agent-respond-review` workflow runs `AGENT_ACTION=respond-review`, which addresses feedback and pushes updates. The workflow skips cleanly when the review is a bare approval — state `approved`, no body text, and no inline review comments — since there is nothing to respond to.
-5. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
+2. For issues labeled `plan` by the grooming agent, applying the `agent:design` label runs the designer agent (`AGENT_ACTION=design`), which creates the `design/issue-{N}` branch, writes a design document in `docs/design/`, creates draft sub-issues with dependencies, and opens a PR. Sub-issues are labeled `draft` until the design PR merges.
+3. Applying the `agent:developer` label triggers the developer agent (`AGENT_ACTION=implement`), which creates the `agent/issue-{N}` branch, writes a solution, and opens a PR. Issues labeled `draft` are skipped by the implement action.
+4. On CI failures against an agent-authored PR, the `agent-fix-checks` workflow re-invokes the container with `AGENT_ACTION=fix-checks`. **Note:** `agent-fix-checks.yml` is currently wired to `on.workflow_run.workflows: ["CI"]`; it will not fire until a workflow named `CI` exists in the repo (the entry is a placeholder — update the workflow list or add a `CI` workflow when CI lands).
+5. On a submitted PR review, the `agent-respond-review` workflow runs `AGENT_ACTION=respond-review`, which addresses feedback and pushes updates. The workflow skips cleanly when the review is a bare approval — state `approved`, no body text, and no inline review comments — since there is nothing to respond to.
+6. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
 
 Every workflow builds the container from [`docker/`](docker/) and mints a short-lived installation token from the `developer-agent` GitHub App.
 
@@ -48,6 +49,7 @@ The container is a single image dispatched by `AGENT_ACTION`. Required environme
 |-------------------|-------------------------------------------------------------------------------|
 | `implement`       | `GITHUB_ISSUE_NUMBER`                                                         |
 | `groom`           | `GITHUB_ISSUE_NUMBER`                                                         |
+| `design`          | `GITHUB_ISSUE_NUMBER`                                                         |
 | `fix-checks`      | `GITHUB_PR_NUMBER`                                                            |
 | `respond-review`  | `GITHUB_PR_NUMBER`                                                            |
 | `fix-deployment`  | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                        |
@@ -57,6 +59,7 @@ Optional: `CLAUDE_MODEL` (default `sonnet`), `CLAUDE_MAX_TURNS` (default `100`).
 ## Labels
 
 - `agent:groom` — triggers the grooming agent on the issue.
+- `agent:design` — triggers the designer agent (`AGENT_ACTION=design`) to write a design document and create draft sub-issues. Intended for issues the groomer classifies as `plan`. (**Note:** the `agent-design.yml` workflow is not yet implemented; this label is reserved until the workflow lands in issue #71.)
 - `agent:developer` — triggers the developer agent to implement the issue.
 - `agent:review` — applied to a PR to request a review from the code review agent. (**Note:** the reviewer-agent workflow is not yet implemented; this label is reserved as a placeholder trigger until the workflow lands.)
 - `model:<name>` (e.g. `model:opus`, `model:haiku`, `model:sonnet`) — overrides the repo-wide default Claude model for `agent-implement`, `agent-groom`, and `agent-fix-deployment` runs on that issue. At most one `model:*` label is allowed per issue; workflows fail loudly if more than one is present. Other workflows always use `vars.DEFAULT_CLAUDE_MODEL`. The grooming agent selects and applies a `model:*` label based on the complexity of the issue (mechanical → `model:haiku`, typical implementation → `model:sonnet`, design-heavy / cross-cutting / under-specified → `model:opus`), but it will not add or change one if a `model:*` label is already present.

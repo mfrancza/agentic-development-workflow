@@ -11,7 +11,7 @@ set -euo pipefail
 : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GITHUB_REPO:?GITHUB_REPO is required}"
-: "${AGENT_ACTION:?AGENT_ACTION is required (implement|fix-checks|respond-review|fix-deployment|groom)}"
+: "${AGENT_ACTION:?AGENT_ACTION is required (implement|fix-checks|respond-review|fix-deployment|groom|design)}"
 
 # Optional configuration
 CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
@@ -293,6 +293,70 @@ Related issue: #${GITHUB_ISSUE_NUMBER}"
 }
 
 
+action_design() {
+    : "${GITHUB_ISSUE_NUMBER:?GITHUB_ISSUE_NUMBER is required for design}"
+
+    BRANCH_NAME="design/issue-${GITHUB_ISSUE_NUMBER}"
+
+    # Preflight: skip (exit 0) if an open PR for this branch already exists.
+    # Branch name is load-bearing — the un-draft job parses it — so never deviate.
+    OWNER="${GITHUB_REPO%%/*}"
+    EXISTING_PR="$(gh pr list --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --state open \
+        --json url,headRepositoryOwner \
+        --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].url // empty")"
+    if [ -n "$EXISTING_PR" ]; then
+        log "Open PR already exists for ${BRANCH_NAME}: ${EXISTING_PR} — skipping"
+        exit 0
+    fi
+
+    setup_repo
+
+    log "Fetching issue #${GITHUB_ISSUE_NUMBER} (title, body, labels, comments)"
+    ISSUE_JSON="$(gh issue view "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --json title,body,labels,comments)"
+    ISSUE_TITLE="$(echo "$ISSUE_JSON" | jq -r '.title')"
+    ISSUE_BODY="$(echo "$ISSUE_JSON" | jq -r '.body')"
+    ISSUE_LABELS="$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(", ")')"
+    ISSUE_COMMENTS="$(echo "$ISSUE_JSON" | jq -r '[.comments[] | "**@\(.author.login):** \(.body)"] | join("\n\n---\n\n")')"
+
+    log "Creating branch ${BRANCH_NAME}"
+    git checkout -b "$BRANCH_NAME"
+
+    log "Running Claude to produce design"
+    run_claude "design.md" \
+        "Design a solution for this GitHub issue.
+
+Repository: ${GITHUB_REPO}
+Issue #${GITHUB_ISSUE_NUMBER}: ${ISSUE_TITLE}
+Branch: ${BRANCH_NAME}
+
+Labels: ${ISSUE_LABELS:-none}
+
+Issue body:
+${ISSUE_BODY}
+
+Issue comments (including grooming Q&A):
+${ISSUE_COMMENTS:-none}"
+
+    log "Verifying design PR was opened for ${BRANCH_NAME}"
+    PR_URL="$(gh pr list --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --state open \
+        --json url,headRepositoryOwner \
+        --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].url // empty")"
+    if [ -z "$PR_URL" ]; then
+        log "ERROR: no open PR found for ${BRANCH_NAME} (owner: ${OWNER}) — agent did not open a design PR"
+        exit 1
+    fi
+    log "Verified design PR: ${PR_URL}"
+
+    log "Verifying at least one sub-issue was created for issue #${GITHUB_ISSUE_NUMBER}"
+    SUB_ISSUE_COUNT="$(gh api "repos/${GITHUB_REPO}/issues/${GITHUB_ISSUE_NUMBER}/sub_issues" \
+        --jq 'length' 2>/dev/null || echo "0")"
+    if [ "$SUB_ISSUE_COUNT" -eq 0 ]; then
+        log "ERROR: issue #${GITHUB_ISSUE_NUMBER} has no sub-issues — agent did not create the task breakdown"
+        exit 1
+    fi
+    log "Verified ${SUB_ISSUE_COUNT} sub-issue(s) for issue #${GITHUB_ISSUE_NUMBER}"
+}
+
 action_groom() {
     : "${GITHUB_ISSUE_NUMBER:?GITHUB_ISSUE_NUMBER is required for groom}"
 
@@ -341,9 +405,12 @@ case "$AGENT_ACTION" in
     groom)
         action_groom
         ;;
+    design)
+        action_design
+        ;;
     *)
         log "ERROR: Unknown action '${AGENT_ACTION}'"
-        echo "Usage: AGENT_ACTION=(implement|fix-checks|respond-review|fix-deployment|groom)" >&2
+        echo "Usage: AGENT_ACTION=(implement|fix-checks|respond-review|fix-deployment|groom|design)" >&2
         exit 1
         ;;
 esac
