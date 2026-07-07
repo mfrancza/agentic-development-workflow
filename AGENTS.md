@@ -42,7 +42,7 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 4. On a submitted PR review, the `agent-respond-review` workflow runs `AGENT_ACTION=respond-review`, which addresses feedback and pushes updates. The workflow skips cleanly when the review is a bare approval — state `approved`, no body text, and no inline review comments — since there is nothing to respond to.
 5. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
 
-The developer workflows build the container from [`docker/`](docker/) and mint a short-lived installation token from the `developer-agent` GitHub App. The reviewer agent runs from a **separate image** at [`docker/reviewer/`](docker/reviewer/) using the `reviewer-agent` App identity (see the reviewer image section below).
+The developer workflows build the container from [`docker/`](docker/) and mint a short-lived installation token from the `developer-agent` GitHub App. The **reviewer image** is built from [`docker/reviewer/`](docker/reviewer/) and is designed to use the `reviewer-agent` App identity (see the reviewer image section below); however, the GitHub Actions workflow that triggers it is not yet implemented — the `agent:review` label is currently a placeholder until that workflow lands.
 
 ## Agent Actions
 

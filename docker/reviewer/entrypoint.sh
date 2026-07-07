@@ -118,14 +118,15 @@ trap 'rm -f "$CONTEXT_FILE"' EXIT
 
 # --- Gather existing review threads WITH IDs. GraphQL is the only place the
 #     thread IDs (used by #41's resolve-thread flow) surface; the REST
-#     /pulls/{n}/comments endpoint returns comment IDs but not thread IDs. We
-#     include resolved/outdated flags so the prompt can decide what's still
-#     open. Per design decision 4 these are context only — the initial-review
-#     prompt must not reply to or resolve them.
+#     /pulls/{n}/comments endpoint returns comment IDs but not thread IDs.
+#     Only unresolved (open) threads are fetched — resolved threads are not
+#     actionable and including all threads can cause context-limit failures on
+#     PRs with many comments. Per design decision 4 these are context only —
+#     the initial-review prompt must not reply to or resolve them.
 OWNER="${GITHUB_REPO%%/*}"
 REPO_NAME="${GITHUB_REPO#*/}"
 
-log "Fetching existing review threads (with IDs)"
+log "Fetching open (unresolved) review threads (with IDs)"
 REVIEW_THREADS_JSON="$(gh api graphql \
     -F owner="$OWNER" -F name="$REPO_NAME" -F number="$GITHUB_PR_NUMBER" \
     -f query='
@@ -154,7 +155,7 @@ REVIEW_THREADS_JSON="$(gh api graphql \
           }
         }
       }' \
-    --jq '.data.repository.pullRequest.reviewThreads.nodes')"
+    --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)]')"
 
 # --- Gather CI check status. `gh pr checks` exits non-zero when checks are
 #     failing/pending, but still emits JSON on stdout. Capture stdout regardless
@@ -201,8 +202,8 @@ git diff --name-only "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 printf '\nFull diff (base..head):\n' >> "$CONTEXT_FILE"
 git diff "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 {
-    printf '\nExisting review threads (context only — do not reply to or resolve them;\n'
-    printf 'skip any finding already covered by an open thread):\n'
+    printf '\nExisting open (unresolved) review threads (context only — do not reply to\n'
+    printf 'or resolve them; skip any finding already covered by an open thread):\n'
     printf '%s\n' "${REVIEW_THREADS_JSON}"
     printf '\nCI check status:\n'
     printf '%s\n' "${CHECKS_JSON}"
