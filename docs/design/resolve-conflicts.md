@@ -1,7 +1,6 @@
 # Design: Automatic merge-conflict resolution
 
 **Issue:** [#54](https://github.com/mfrancza/agentic-development-workflow/issues/54)
-**Status:** Draft
 
 ## Summary
 

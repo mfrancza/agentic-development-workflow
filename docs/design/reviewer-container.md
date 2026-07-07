@@ -2,7 +2,6 @@
 
 **Issue:** [#39](https://github.com/mfrancza/agentic-development-workflow/issues/39)
 **Parent design:** [code-review-agent.md](code-review-agent.md) (issue #27)
-**Status:** Draft
 
 ## Scope
 
