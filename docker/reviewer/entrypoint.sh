@@ -100,10 +100,13 @@ log "Refreshing origin/${BASE_REF} and resolving merge-base"
 # runs rather than hanging. Use an ephemeral HTTP Authorization header derived
 # from GH_TOKEN rather than relying on any persistent credential helper that
 # may or may not survive across environments (private repos in particular).
+# Use HTTP Basic auth (x-access-token:<token>) rather than Bearer — git's
+# smart-HTTP transport expects Basic auth for GitHub HTTPS remotes, matching
+# the existing git-askpass.sh convention in the developer image.
 GIT_TERMINAL_PROMPT=0 \
 GIT_CONFIG_COUNT=1 \
 GIT_CONFIG_KEY_0="http.extraHeader" \
-GIT_CONFIG_VALUE_0="Authorization: Bearer ${GH_TOKEN}" \
+GIT_CONFIG_VALUE_0="Authorization: Basic $(printf 'x-access-token:%s' "${GH_TOKEN}" | base64 -w 0)" \
 git fetch origin "$BASE_REF"
 BASE_SHA="$(git merge-base "origin/${BASE_REF}" HEAD)"
 
