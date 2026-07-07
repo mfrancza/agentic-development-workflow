@@ -65,7 +65,7 @@ Optional: `CLAUDE_MODEL` (default `sonnet`), `CLAUDE_MAX_TURNS` (default `100`).
 - `human-required` — marks issues and PRs that need a human in the loop (security, permissions, deployments, billing, legal/compliance, branch-protection or agent-identity changes, or any agent escalation point). Agents apply this label to their own issues/PRs when they hit an escalation point and **also** assign the issue/PR to the relevant human actor; humans may apply it too. Not mutually exclusive with other labels. The criteria are documented in `agents/grooming/label-criteria.json` so the grooming agent can apply it automatically, and each developer-agent prompt in `docker/scripts/prompts/` explains when to apply it during that action.
 - `draft` — applied by the designer agent to sub-issues it creates. Means the issue is scoped by an unmerged design document; do not start implementation until the design PR merges and this label is removed.
 
-Only usernames (and agent bot identities like `<developer-agent-app-slug>[bot]`) in the Terraform-managed `AGENT_ALLOWLIST` Actions variable can trigger `agent:groom`, `agent:developer`, or `agent:review`. The agent bots are included in the allowlist so that agents can apply `agent:*` labels to route work to one another (e.g. the developer agent applying `agent:review` on its own PR).
+Only usernames (and agent bot identities like `<developer-agent-app-slug>[bot]`) in the Terraform-managed `AGENT_ALLOWLIST` Actions variable can trigger `agent:groom`, `agent:developer`, `agent:review`, or `agent:design`. The agent bots are included in the allowlist so that agents can apply `agent:*` labels to route work to one another (e.g. the developer agent applying `agent:review` on its own PR).
 
 ## Expected Deliverables
 
