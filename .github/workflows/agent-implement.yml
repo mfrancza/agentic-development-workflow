@@ -61,8 +61,28 @@ jobs:
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Resolve Claude model from issue labels
+      - name: "Preflight: skip if issue is labeled draft"
+        id: draft-check
         if: steps.preflight.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          GITHUB_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          IS_DRAFT="$(gh issue view "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPO" \
+            --json labels \
+            --jq '[.labels[].name] | contains(["draft"])')"
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "Issue #${ISSUE_NUMBER} is labeled 'draft'; implementation cannot start until the design PR merges and the draft label is removed."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve Claude model from issue labels
+        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
         id: model
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
@@ -89,11 +109,11 @@ jobs:
           printf 'claude_model=%s\n' "$MODEL" >> "$GITHUB_OUTPUT"
 
       - name: Build agent image
-        if: steps.preflight.outputs.skip != 'true'
+        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
         run: docker build -t agent-developer:ci ./docker
 
       - name: Run agent
-        if: steps.preflight.outputs.skip != 'true'
+        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

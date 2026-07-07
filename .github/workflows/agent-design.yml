@@ -1,0 +1,72 @@
+name: agent-design
+
+# This workflow currently contains only the un-draft job (trigger 2 of 2).
+# The label-dispatch job (trigger 1: issues.labeled on agent:design) will be
+# added by the agent-design action implementation task (#71).
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  undraft-sub-issues:
+    # Fires only when a design-branch PR is merged — not just closed without
+    # merging.  pull_request.branches filters the *base* branch, so the
+    # head-branch check must live in the `if` condition instead.
+    if: >
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'design/issue-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      # Checkout must precede the local agent-token action: the runner resolves
+      # ./.github/actions/* references from the workspace.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          app-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Remove draft label from sub-issues on design-PR merge
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          GITHUB_REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+
+          # Extract parent issue number from branch name design/issue-{N}.
+          PARENT_ISSUE="${HEAD_REF#design/issue-}"
+          echo "Design PR merged for branch ${HEAD_REF}; removing draft label from sub-issues of issue #${PARENT_ISSUE}."
+
+          # Enumerate sub-issues via the GitHub sub-issues API.
+          # --paginate follows next-page links; --jq extracts the issue number
+          # from each entry across all pages, one number per output line.
+          mapfile -t SUB_ISSUE_NUMBERS < <(
+            gh api "repos/${GITHUB_REPO}/issues/${PARENT_ISSUE}/sub_issues" \
+              --paginate --jq '.[].number'
+          )
+
+          echo "Found ${#SUB_ISSUE_NUMBERS[@]} sub-issue(s)."
+
+          if [ "${#SUB_ISSUE_NUMBERS[@]}" -eq 0 ]; then
+            echo "No sub-issues found for issue #${PARENT_ISSUE}; nothing to un-draft."
+            exit 0
+          fi
+
+          for ISSUE_NUM in "${SUB_ISSUE_NUMBERS[@]}"; do
+            echo "Removing draft label from issue #${ISSUE_NUM}."
+            gh issue edit "$ISSUE_NUM" --repo "${GITHUB_REPO}" --remove-label "draft" \
+              || echo "Warning: could not remove draft label from issue #${ISSUE_NUM} (it may not carry the label)."
+          done
+
+          echo "Done un-drafting ${#SUB_ISSUE_NUMBERS[@]} sub-issue(s)."
