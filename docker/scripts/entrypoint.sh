@@ -66,9 +66,15 @@ action_implement() {
     setup_repo
 
     log "Fetching issue #${GITHUB_ISSUE_NUMBER}"
-    ISSUE_JSON="$(gh issue view "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --json title,body)"
+    ISSUE_JSON="$(gh issue view "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --json title,body,labels)"
     ISSUE_TITLE="$(echo "$ISSUE_JSON" | jq -r '.title')"
     ISSUE_BODY="$(echo "$ISSUE_JSON" | jq -r '.body')"
+
+    # Skip issues labeled 'draft' — they are awaiting design-PR merge.
+    if echo "$ISSUE_JSON" | jq -e '[.labels[].name] | contains(["draft"])' > /dev/null; then
+        log "Issue #${GITHUB_ISSUE_NUMBER} is labeled 'draft' — skipping until design PR merges"
+        return 0
+    fi
 
     BRANCH_NAME="agent/issue-${GITHUB_ISSUE_NUMBER}"
     log "Creating branch ${BRANCH_NAME}"
@@ -306,7 +312,7 @@ action_design() {
         --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].url // empty")"
     if [ -n "$EXISTING_PR" ]; then
         log "Open PR already exists for ${BRANCH_NAME}: ${EXISTING_PR} — skipping"
-        exit 0
+        return 0
     fi
 
     setup_repo
@@ -348,8 +354,10 @@ ${ISSUE_COMMENTS:-none}"
     log "Verified design PR: ${PR_URL}"
 
     log "Verifying at least one sub-issue was created for issue #${GITHUB_ISSUE_NUMBER}"
-    SUB_ISSUE_COUNT="$(gh api "repos/${GITHUB_REPO}/issues/${GITHUB_ISSUE_NUMBER}/sub_issues" \
-        --jq 'length' 2>/dev/null || echo "0")"
+    if ! SUB_ISSUE_COUNT="$(gh api "repos/${GITHUB_REPO}/issues/${GITHUB_ISSUE_NUMBER}/sub_issues" --jq 'length')"; then
+        log "ERROR: GitHub API call failed while querying sub-issues for issue #${GITHUB_ISSUE_NUMBER} (check permissions, preview headers, and network)"
+        exit 1
+    fi
     if [ "$SUB_ISSUE_COUNT" -eq 0 ]; then
         log "ERROR: issue #${GITHUB_ISSUE_NUMBER} has no sub-issues — agent did not create the task breakdown"
         exit 1

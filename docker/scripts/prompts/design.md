@@ -80,7 +80,7 @@ After the design document is complete and all sub-issues are created:
      --repo "$GITHUB_REPO" \
      --head "$BRANCH_NAME" \
      --title "Design: <issue title>" \
-     --body "$(cat <<'EOF'
+     --body "$(cat <<EOF
    Design document for issue #${GITHUB_ISSUE_NUMBER}.
 
    ## Summary
