@@ -102,19 +102,25 @@ resource "github_repository_ruleset" "main" {
 # to remember exact spellings for the trigger and model-override labels, and
 # the grooming agent doesn't need to `gh label create` on demand.
 #
-# Three groups:
+# Five groups:
 #  - agent:* trigger labels (the workflows in .github/workflows/ gate on
 #    these; applying one routes the issue or PR to that agent). Note that
-#    `agent:developer` and `agent:groom` are applied to issues, while
-#    `agent:review` is applied to PRs to request a review from the code
-#    review agent. Note: the reviewer-agent workflow does not yet exist;
-#    `agent:review` is a reserved placeholder until that workflow lands.
+#    `agent:developer`, `agent:groom`, and `agent:design` are applied to
+#    issues, while `agent:review` is applied to PRs to request a review from
+#    the code review agent. Note: the reviewer-agent and designer-agent
+#    workflows do not yet exist; `agent:review` and `agent:design` are
+#    reserved placeholder triggers until those workflows land.
 #  - model:<name> overrides (agent-implement / agent-groom /
 #    agent-fix-deployment prefer these over the GitHub Actions repository
 #    variable `vars.DEFAULT_CLAUDE_MODEL` (not a Terraform variable); apply
 #    at most one per issue).
 #  - grooming labels (the grooming agent applies these based on issue
 #    content — see agents/grooming/label-criteria.json).
+#  - workflow labels (`human-required` signals that an agent has escalated to
+#    a human and the issue/PR should be assigned to a human actor).
+#  - lifecycle labels (`draft` is applied by the designer agent to sub-issues
+#    it creates; means the issue is scoped by an unmerged design and is not
+#    yet ready for implementation).
 #
 # Note on pre-existing labels: `bug`, `enhancement`, and `question` ship as
 # GitHub defaults on new repos. If `terraform apply` errors with 422
@@ -133,6 +139,10 @@ locals {
     "agent:review" = {
       color       = "6f42c1"
       description = "Request a review of this PR from the code review agent."
+    }
+    "agent:design" = {
+      color       = "6f42c1"
+      description = "Route this issue to the designer agent to write a design doc and create draft sub-issues."
     }
 
     "model:sonnet" = {
@@ -175,6 +185,11 @@ locals {
     "human-required" = {
       color       = "b60205"
       description = "A human is needed in the loop — agent should also assign the issue/PR to a human actor."
+    }
+
+    "draft" = {
+      color       = "d1d5da"
+      description = "Scoped by an unmerged design; do not implement yet."
     }
   }
 }
