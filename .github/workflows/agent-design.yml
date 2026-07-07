@@ -45,7 +45,15 @@ jobs:
           set -euo pipefail
 
           # Extract parent issue number from branch name design/issue-{N}.
-          PARENT_ISSUE="${HEAD_REF#design/issue-}"
+          # Strict validation: the branch must match exactly design/issue-<digits>.
+          # Variants like design/issue-72/foo or design/issue-72-extra pass the
+          # startsWith() guard in the job `if` but would produce a non-numeric
+          # PARENT_ISSUE and an invalid API path — fail loudly instead.
+          if [[ ! "${HEAD_REF}" =~ ^design/issue-([0-9]+)$ ]]; then
+            echo "::error::HEAD_REF '${HEAD_REF}' does not match the expected pattern 'design/issue-<N>'. Aborting to avoid an invalid API call."
+            exit 1
+          fi
+          PARENT_ISSUE="${BASH_REMATCH[1]}"
           echo "Design PR merged for branch ${HEAD_REF}; removing draft label from sub-issues of issue #${PARENT_ISSUE}."
 
           # Enumerate sub-issues via the GitHub sub-issues API.
@@ -66,7 +74,7 @@ jobs:
           for ISSUE_NUM in "${SUB_ISSUE_NUMBERS[@]}"; do
             echo "Removing draft label from issue #${ISSUE_NUM}."
             gh issue edit "$ISSUE_NUM" --repo "${GITHUB_REPO}" --remove-label "draft" \
-              || echo "Warning: could not remove draft label from issue #${ISSUE_NUM} (it may not carry the label)."
+              || echo "::warning::Could not remove draft label from issue #${ISSUE_NUM} — it may not carry the label, or a permissions/rate-limit error occurred."
           done
 
           echo "Done un-drafting ${#SUB_ISSUE_NUMBERS[@]} sub-issue(s)."
