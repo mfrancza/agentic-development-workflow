@@ -1,7 +1,7 @@
 name: agent-review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [labeled]
 
 permissions:
@@ -28,8 +28,14 @@ jobs:
     steps:
       # Checkout must precede the local agent-token action: the runner resolves
       # ./.github/actions/* references from the workspace.
+      # Pin to the base branch SHA explicitly so the agent-token action and the
+      # docker/reviewer build context are always loaded from trusted base-branch
+      # code, not from the PR head. This matters even with pull_request_target
+      # (which already runs the workflow YAML from the base) because it makes
+      # the intent unambiguous and guards against accidental ref drift.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
+          ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
       - name: Mint installation token for reviewer-agent
