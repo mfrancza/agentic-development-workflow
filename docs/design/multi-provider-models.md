@@ -51,10 +51,15 @@ first-party CLI is the best-supported way to run its models agentically.
 The cost is per-provider differences (flags, prompt injection, sandboxing),
 contained in one runner function each.
 
-Both CLIs honor the repo's `AGENTS.md` natively. The per-action system
-prompts in `prompts/` are passed to Claude Code via `--system-prompt-file`;
-the Codex runner prepends the same file to the task prompt (Codex has no
-separate system-prompt flag in exec mode). The prompts themselves are
+Repo guidance in `AGENTS.md` reaches the agent through explicit prompt
+instructions — the per-action prompts tell the agent to read it (e.g. the
+reviewer prompt's `cat AGENTS.md` step) — not through assumed native harness
+behavior, so the mechanism is provider-independent by construction. The
+per-action system prompts ship inside the images at `/opt/agent/prompts/`
+(COPYed at build time from `docker/scripts/prompts/` and
+`docker/reviewer/prompts/`); Claude Code receives them via
+`--system-prompt-file`, and the Codex runner prepends the same file to the
+task prompt (Codex exec has no separate system-prompt flag). The prompts are
 already harness-agnostic (instructions + `gh` recipes) and need no changes.
 
 ### Decision 2: provider inferred from the model name
