@@ -1,6 +1,13 @@
 name: agent-review
 
 on:
+  # pull_request_target (not pull_request) is intentional: GitHub always
+  # resolves the workflow YAML and the build context for docker/reviewer from
+  # the *base* branch, never from the PR head. This prevents an allowlisted
+  # user applying agent:review from triggering a run that executes PR-authored
+  # workflow code or a PR-authored Docker image with access to
+  # REVIEWER_APP_PRIVATE_KEY and ANTHROPIC_API_KEY. See commit 1f18785 for the
+  # full security rationale.
   pull_request_target:
     types: [labeled]
 
