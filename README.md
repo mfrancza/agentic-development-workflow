@@ -10,7 +10,7 @@ Once the repo is set up (steps below), day-to-day operation is driven entirely b
 
 - Apply **`agent:groom`** to an issue → the grooming agent classifies it and asks clarifying questions.
 - Apply **`agent:developer`** to an issue → the developer agent creates `agent/issue-{N}`, implements a solution, and opens a PR.
-- Apply **`agent:review`** to a PR → the code review agent reviews the changes (and re-reviews when the PR is updated). (**Note:** the reviewer-agent workflow is not yet implemented; this label is reserved as a placeholder trigger until the workflow lands.)
+- Apply **`agent:review`** to a PR → the code review agent reviews the changes. (`agent-review.yml` builds `docker/reviewer/` and runs the reviewer container with the `reviewer-agent` App identity.)
 - Apply **`agent:design`** to an issue → the designer agent writes a design document on a `design/issue-{N}` branch, opens a PR, and creates draft sub-issues with dependency tracking. (**Note:** the designer-agent workflow is not yet implemented; this label is reserved as a placeholder trigger until the workflow lands.)
 - CI failure on an agent-authored PR → the agent is re-invoked to fix the checks. (**Note:** `agent-fix-checks` is wired to a workflow named `CI`; this step won't fire until a workflow with that name exists in the repo.)
 - PR review submitted on an agent-authored PR → the agent addresses feedback and pushes.
@@ -134,12 +134,12 @@ gh secret set DEVELOPER_APP_ID         --body "<developer App ID>"
 gh secret set DEVELOPER_APP_PRIVATE_KEY < ~/.config/agentic-agents/developer-agent.pem
 gh secret set ANTHROPIC_API_KEY        --body "<anthropic api key>"
 
-# Optional — for the reviewer agent (not yet wired into any workflow)
+# Required for the reviewer agent (used by agent-review.yml)
 gh secret set REVIEWER_APP_ID          --body "<reviewer App ID>"
 gh secret set REVIEWER_APP_PRIVATE_KEY < ~/.config/agentic-agents/reviewer-agent.pem
 ```
 
-Workflows use `DEVELOPER_APP_ID` / `DEVELOPER_APP_PRIVATE_KEY` to mint short-lived installation tokens at runtime and pass `ANTHROPIC_API_KEY` through to the container. The `REVIEWER_APP_*` secrets are set here for completeness but are not consumed by any current workflow — set them when the reviewer agent lands.
+Workflows use `DEVELOPER_APP_ID` / `DEVELOPER_APP_PRIVATE_KEY` to mint short-lived installation tokens for developer-agent runs, and `REVIEWER_APP_ID` / `REVIEWER_APP_PRIVATE_KEY` for reviewer-agent runs (`agent-review.yml`). All workflows pass `ANTHROPIC_API_KEY` through to the container.
 
 ### 4. Build the developer agent container
 
@@ -174,4 +174,4 @@ MVP substantially built. Implemented:
 - Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_CLAUDE_MODEL` Actions variables.
 - Per-issue Claude model override via `model:<name>` labels.
 
-Pending: reviewer agent container, and a dedicated local-run guide for developer and reviewer agents.
+Pending: a dedicated local-run guide for developer and reviewer agents.
