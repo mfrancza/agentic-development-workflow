@@ -56,8 +56,8 @@ For every sub-issue:
 
 The `draft` and `enhancement` labels must already exist in the repo. (`enhancement` is Terraform-managed today; `draft` will be added to Terraform in issue #69 — on a fresh repo before that lands, create it manually if needed.) If `gh issue create` fails because a label does not exist, create it first:
 ```bash
-gh label create "draft" --repo "$GITHUB_REPO" --color "cccccc" --description "Scoped by an unmerged design; do not implement yet."
-gh label create "enhancement" --repo "$GITHUB_REPO" --color "84b6eb" --description "New feature or request."
+gh label create "draft" --repo "$GITHUB_REPO" --color "cccccc" --description "Scoped by an unmerged design; do not implement yet." --force
+gh label create "enhancement" --repo "$GITHUB_REPO" --color "84b6eb" --description "New feature or request." --force
 ```
 
 After creating all sub-issues, update the task breakdown table in the design document with the actual issue numbers, then amend or add a new commit.
