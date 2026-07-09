@@ -82,16 +82,16 @@ After the design document is complete and all sub-issues are created:
      --head "$BRANCH_NAME" \
      --title "Design: <issue title>" \
      --body "$(cat <<EOF
-   Design document for issue #${GITHUB_ISSUE_NUMBER}.
+Design document for issue #${GITHUB_ISSUE_NUMBER}.
 
-   ## Summary
-   <1-3 bullet points summarising the design>
+## Summary
+<1-3 bullet points summarising the design>
 
-   ## Sub-issues created
-   <list of sub-issue numbers and titles>
+## Sub-issues created
+<list of sub-issue numbers and titles>
 
-   Closes #${GITHUB_ISSUE_NUMBER}
-   EOF
+Closes #${GITHUB_ISSUE_NUMBER}
+EOF
    )"
    ```
    Replace the heredoc placeholders with actual values before running.
