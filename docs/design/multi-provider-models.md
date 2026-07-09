@@ -62,15 +62,21 @@ per-action system prompts ship inside the images at `/opt/agent/prompts/`
 task prompt (Codex exec has no separate system-prompt flag). The prompts are
 already harness-agnostic (instructions + `gh` recipes) and need no changes.
 
-### Decision 2: provider inferred from the model name
+### Decision 2: explicit model→provider map, validated up front
 
 The `model:*` convention stays exactly as-is — one label, one value, e.g.
-`model:opus` or `model:gpt-5-codex`. The entrypoint infers the provider
-from the model name with a single case statement (`gpt-*`, `o[0-9]*`,
-`codex-*` → openai; everything else → anthropic, preserving today's
-behavior for `sonnet`/`opus`/`haiku` and full Anthropic model ids).
+`model:opus` or `model:gpt-5-codex`. The entrypoint maps the model name to
+its provider through an **explicit allowlist**: a case statement enumerating
+the exact supported model names (today's Anthropic aliases
+`sonnet`/`opus`/`haiku` plus the chosen OpenAI models). An unknown model
+name fails loudly at the start of the run — before any clone or API call —
+with an error listing the supported values, consistent with the repo's
+fail-loud-on-ambiguous-input security default. Adding a model is a one-line
+map change plus its Terraform label.
 
-Alternatives considered: an explicit `provider/model` label syntax
+Alternatives considered: pattern-based inference (`gpt-*` → openai, else
+anthropic) — accepts typos and unvetted model names silently, trading input
+validation for convenience; an explicit `provider/model` label syntax
 (`model:openai/gpt-5`) — more typing and a breaking convention change for
 existing labels; and a checked-in registry file mapping models to providers
 — indirection with no current payoff, and the reviewer image would need it
@@ -78,11 +84,10 @@ before cloning the repo. The case statement is duplicated once per image
 (developer, reviewer) with a comment noting the twin; if a third image ever
 appears, promote it to a shared lib file COPYed into the images.
 
-Terraform pre-provisions convenience labels for a few current OpenAI models
-(e.g. `model:gpt-5`, `model:gpt-5-mini`, `model:gpt-5-codex`) purely so the
-label picker is populated — the resolver passes through any `model:*` value,
-so new models need no code change (requirement 4). Which exact labels to
-seed is decided at implementation time against OpenAI's current lineup.
+Terraform pre-provisions a `model:*` label per supported model, keeping the
+label picker and the allowlist in one-to-one correspondence. Which OpenAI
+models make the initial list is decided at implementation time against
+OpenAI's current lineup (requirement 4 — models useful for software tasks).
 
 ### Decision 3: generalize the naming — `DEFAULT_MODEL`, `AGENT_MODEL`
 
@@ -109,10 +114,12 @@ fails loudly only if the empty one is actually needed.
 `docker/Dockerfile` and `docker/reviewer/Dockerfile` install the Codex CLI
 next to Claude Code, both npm-pinned by version for reproducibility (same
 convention as `CLAUDE_CODE_VERSION`; a `CODEX_CLI_VERSION` build arg). The
-alternative — per-provider images and workflow-level image selection — was
-rejected: it doubles the image matrix and moves provider knowledge up into
-every workflow, for no isolation benefit (keys are injected per run either
-way).
+alternative — per-provider images and workflow-level image selection — is
+deliberately deferred rather than rejected: a split could yield an isolation
+benefit (each image carrying only its own provider's CLI and key surface),
+but it doubles the image matrix and moves provider knowledge up into every
+workflow. Revisit once a second provider integration exists to compare
+against (see Out of scope).
 
 The reviewer image's structural no-write guarantee must hold for the Codex
 path too: `codex exec` is invoked with write access confined to the
@@ -130,19 +137,22 @@ provider-independent.
   possible later on top of the same convention.
 - Prompt tuning per provider — prompts stay shared; provider-specific prompt
   forks would need their own design if behavior diverges materially.
+- Per-provider image split for isolation — deferred until a second provider
+  integration exists to compare against (see Decision 5).
 
 ## Task breakdown and dependencies
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#80](https://github.com/mfrancza/agentic-development-workflow/issues/80) | Developer entrypoint: `run_agent()` dispatch, provider inference, conditional key validation, `AGENT_MODEL`/`AGENT_MAX_TURNS` rename (Anthropic path only — behavior unchanged) | — |
+| [#80](https://github.com/mfrancza/agentic-development-workflow/issues/80) | Developer entrypoint: `run_agent()` dispatch, explicit model→provider map with up-front validation, conditional key validation, `AGENT_MODEL`/`AGENT_MAX_TURNS` rename (Anthropic path only — behavior unchanged) | — |
 | [#81](https://github.com/mfrancza/agentic-development-workflow/issues/81) | OpenAI runner: Codex CLI in both Dockerfiles (pinned), `run_openai()` in the developer entrypoint (prompt assembly, exec flags, sandboxing) | #80 |
 | [#82](https://github.com/mfrancza/agentic-development-workflow/issues/82) | Terraform + workflows: `DEFAULT_MODEL` rename, OpenAI `model:*` convenience labels, `OPENAI_API_KEY` secret documented and passed by all five workflows | — |
 | [#83](https://github.com/mfrancza/agentic-development-workflow/issues/83) | Reviewer entrypoint: same runner dispatch + OpenAI path, preserving the no-write guarantee under `codex exec` | #81 |
 | [#84](https://github.com/mfrancza/agentic-development-workflow/issues/84) | End-to-end validation via CI: groom + implement runs with an OpenAI `model:*` label; reviewer run on an OpenAI model once #40 lands; confirm Anthropic default path unchanged | #81, #82, #83 |
 
 Issues #80 and #82 can proceed in parallel (this document is the contract:
-provider inference rule, `AGENT_MODEL`, `DEFAULT_MODEL`, both keys passed).
+the explicit model→provider map, `AGENT_MODEL`, `DEFAULT_MODEL`, both keys
+passed).
 Validation is CI-first per the project's convention — no local credential
 provisioning.
 
