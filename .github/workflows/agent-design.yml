@@ -26,9 +26,16 @@ jobs:
     steps:
       # Checkout must precede the local agent-token action: the runner resolves
       # ./.github/actions/* references from the workspace.
+      # Pin checkout to the pre-merge base SHA so the local composite action
+      # (./.github/actions/agent-token) is always resolved from trusted code
+      # that was on main *before* this PR landed.  Without this pin, a PR that
+      # modifies .github/actions/agent-token could exfiltrate
+      # DEVELOPER_APP_PRIVATE_KEY at merge time.  The run: step below uses only
+      # env-var inputs (HEAD_REF, GITHUB_REPO) so checking out the base is safe.
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
+          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Mint installation token for developer-agent
         id: setup
