@@ -18,7 +18,8 @@ jobs:
     # head-branch check must live in the `if` condition instead.
     if: >
       github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'design/issue-')
+      startsWith(github.event.pull_request.head.ref, 'design/issue-') &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -57,12 +58,19 @@ jobs:
           echo "Design PR merged for branch ${HEAD_REF}; removing draft label from sub-issues of issue #${PARENT_ISSUE}."
 
           # Enumerate sub-issues via the GitHub sub-issues API.
-          # --paginate follows next-page links; --jq extracts the issue number
-          # from each entry across all pages, one number per output line.
-          mapfile -t SUB_ISSUE_NUMBERS < <(
-            gh api "repos/${GITHUB_REPO}/issues/${PARENT_ISSUE}/sub_issues" \
-              --paginate --jq '.[].number'
-          )
+          # Capture output to a temp file so a non-zero exit from `gh api` is
+          # not silently swallowed by the process substitution — `set -e` is
+          # unreliable inside <(...) and would treat API failures as "no
+          # sub-issues" and exit 0.
+          _sub_issues_tmp="$(mktemp)"
+          if ! gh api "repos/${GITHUB_REPO}/issues/${PARENT_ISSUE}/sub_issues" \
+               --paginate --jq '.[].number' > "${_sub_issues_tmp}"; then
+            echo "::error::Failed to list sub-issues for issue #${PARENT_ISSUE}. Check token permissions and API rate limits."
+            rm -f "${_sub_issues_tmp}"
+            exit 1
+          fi
+          mapfile -t SUB_ISSUE_NUMBERS < "${_sub_issues_tmp}"
+          rm -f "${_sub_issues_tmp}"
 
           echo "Found ${#SUB_ISSUE_NUMBERS[@]} sub-issue(s)."
 
