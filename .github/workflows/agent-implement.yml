@@ -73,7 +73,7 @@ jobs:
           IS_DRAFT="$(gh issue view "$ISSUE_NUMBER" \
             --repo "$GITHUB_REPO" \
             --json labels \
-            --jq '[.labels[].name] | contains(["draft"])')"
+            --jq 'any(.labels[]; .name == "draft")')"
           if [ "$IS_DRAFT" = "true" ]; then
             echo "Issue #${ISSUE_NUMBER} is labeled 'draft'; implementation cannot start until the design PR merges and the draft label is removed."
             echo "skip=true" >> "$GITHUB_OUTPUT"
