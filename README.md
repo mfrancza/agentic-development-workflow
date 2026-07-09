@@ -15,7 +15,7 @@ Once the repo is set up (steps below), day-to-day operation is driven entirely b
 - CI failure on an agent-authored PR → the agent is re-invoked to fix the checks. (**Note:** `agent-fix-checks` is wired to a workflow named `CI`; this step won't fire until a workflow with that name exists in the repo.)
 - PR review submitted on an agent-authored PR → the agent addresses feedback and pushes.
 - Deployment failure → the agent opens a follow-up fix-up PR. (Triggers on any `deployment_status` failure; skips cleanly unless it can map the failing deployment SHA to a PR containing `Closes #N`.)
-- Add a **`model:<name>`** label (e.g. `model:opus`, `model:haiku`) to override the default Claude model for that issue's run. The grooming agent automatically selects and applies one of these labels based on issue complexity — if a `model:*` label is already present when the grooming agent runs, it will leave it unchanged.
+- Add a **`model:<name>`** label (e.g. `model:opus`, `model:haiku`) to override the default Claude model for that issue's or PR's run. Works on both issues (developer/grooming/fix-deployment runs) and PRs (`agent:review` runs). The grooming agent automatically selects and applies one of these labels based on issue complexity — if a `model:*` label is already present when the grooming agent runs, it will leave it unchanged. At most one `model:*` label is allowed; workflows fail loudly if more than one is present.
 
 Only usernames (and agent bot identities such as `<developer-agent-app-slug>[bot]`) in the Terraform-managed `AGENT_ALLOWLIST` can trigger the label-driven workflows (`agent:groom`, `agent:developer`, `agent:review`, `agent:design`). The agent bots are included so an agent can apply `agent:*` labels to hand work off — for example, the developer agent applying `agent:review` on its own PR to request a code review. Event-driven workflows then apply their own gates: `fix-checks`/`respond-review` run only for developer-agent PRs, and `fix-deployment` runs on any failed `deployment_status` event and skips cleanly unless it can map the deployment SHA to a PR containing `Closes #N`.
 
@@ -172,6 +172,6 @@ MVP substantially built. Implemented:
 - Grooming agent with label criteria in [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json).
 - GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/).
 - Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_CLAUDE_MODEL` Actions variables.
-- Per-issue Claude model override via `model:<name>` labels.
+- Claude model override via `model:<name>` labels on issues and PRs (reviewer agent).
 
 Pending: a dedicated local-run guide for developer and reviewer agents.
