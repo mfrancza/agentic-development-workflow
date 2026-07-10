@@ -10,12 +10,12 @@ Once the repo is set up (steps below), day-to-day operation is driven entirely b
 
 - Apply **`agent:groom`** to an issue → the grooming agent classifies it and asks clarifying questions.
 - Apply **`agent:developer`** to an issue → the developer agent creates `agent/issue-{N}`, implements a solution, and opens a PR. **If the issue carries the `draft` label the workflow skips with a log line** — implementation is blocked until the corresponding design PR merges and removes the label (see `agent:design` below).
-- Apply **`agent:review`** to a PR → the code review agent reviews the changes (and re-reviews when the PR is updated). (**Note:** the reviewer-agent workflow is not yet implemented; this label is reserved as a placeholder trigger until the workflow lands.)
+- Apply **`agent:review`** to a PR → the code review agent reviews the changes. (`agent-review.yml` builds `docker/reviewer/` and runs the reviewer container with the `reviewer-agent` App identity.)
 - Apply **`agent:design`** to an issue → the designer agent writes a design document on a `design/issue-{N}` branch, opens a PR, and creates sub-issues labeled `draft` to block premature implementation. (**Note:** the designer-agent workflow is not yet implemented; this label is reserved as a placeholder trigger until the workflow lands.) When the `design/issue-{N}` PR merges, the `agent-design` workflow automatically removes the `draft` label from every sub-issue of the parent issue, unblocking the developer agent for each one.
 - CI failure on an agent-authored PR → the agent is re-invoked to fix the checks. (**Note:** `agent-fix-checks` is wired to a workflow named `CI`; this step won't fire until a workflow with that name exists in the repo.)
 - PR review submitted on an agent-authored PR → the agent addresses feedback and pushes.
 - Deployment failure → the agent opens a follow-up fix-up PR. (Triggers on any `deployment_status` failure; skips cleanly unless it can map the failing deployment SHA to a PR containing `Closes #N`.)
-- Add a **`model:<name>`** label (e.g. `model:opus`, `model:haiku`) to override the default Claude model for that issue's run. The grooming agent automatically selects and applies one of these labels based on issue complexity — if a `model:*` label is already present when the grooming agent runs, it will leave it unchanged.
+- Add a **`model:<name>`** label (e.g. `model:opus`, `model:haiku`) to override the default Claude model for that issue's or PR's run. Works on both issues (developer/grooming/fix-deployment runs) and PRs (`agent:review` runs). The grooming agent automatically selects and applies one of these labels based on issue complexity — if a `model:*` label is already present when the grooming agent runs, it will leave it unchanged. At most one `model:*` label is allowed; workflows fail loudly if more than one is present.
 
 Only usernames (and agent bot identities such as `<developer-agent-app-slug>[bot]`) in the Terraform-managed `AGENT_ALLOWLIST` can trigger the label-driven workflows (`agent:groom`, `agent:developer`, `agent:review`, `agent:design`). The agent bots are included so an agent can apply `agent:*` labels to hand work off — for example, the developer agent applying `agent:review` on its own PR to request a code review. Event-driven workflows then apply their own gates: `fix-checks`/`respond-review` run only for developer-agent PRs, and `fix-deployment` runs on any failed `deployment_status` event and skips cleanly unless it can map the deployment SHA to a PR containing `Closes #N`.
 
@@ -75,13 +75,13 @@ Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **S
 - Repository permissions: Contents (R/W), Issues (R/W), Pull requests (R/W), Workflows (R/W), Metadata (R), Checks (R), Deployments (R)
 - Subscribe to events: Issues, Pull request, Pull request review, Check run, Deployment status
 - Webhook: **uncheck "Active"** — the GitHub UI otherwise requires a Webhook URL, and this project uses `workflow_dispatch` rather than webhooks.
-- After creation: note the **App ID** and generate + download a **private key** (`.pem`).
+- After creation: note the **Client ID** (labelled "Client ID" in the App's General settings page — a string like `Iv23.xxxxxxxxxxxxxxxx`, **not** the numeric "App ID") and generate + download a **private key** (`.pem`).
 
 **reviewer-agent**
 - Repository permissions: Contents (R), Issues (R/W), Pull requests (R/W), Metadata (R), Checks (R)
 - Subscribe to events: Pull request, Pull request review, Issue comment
 - Webhook: **uncheck "Active"** (same reason as above).
-- After creation: note the App ID and download the private key.
+- After creation: note the **Client ID** (same as above — the `Iv23.xxx` string) and download the private key.
 
 Then install each App on this repository (sidebar → **Install App** → **Install** next to your username → **Only select repositories** → pick `agentic-development-workflow`). That per-repo selection is what scopes the App to this repo; Terraform deliberately does not manage App installations (the GitHub API endpoints for it reject OAuth user tokens, which is what `gh auth token` issues).
 
@@ -130,16 +130,16 @@ Run once after `terraform apply`, and again whenever you rotate a key:
 
 ```bash
 # Required — used by all current agent workflows
-gh secret set DEVELOPER_APP_ID         --body "<developer App ID>"
+gh secret set DEVELOPER_APP_ID         --body "<developer App Client ID>"  # the Iv23.xxx Client ID, not the numeric App ID
 gh secret set DEVELOPER_APP_PRIVATE_KEY < ~/.config/agentic-agents/developer-agent.pem
 gh secret set ANTHROPIC_API_KEY        --body "<anthropic api key>"
 
-# Optional — for the reviewer agent (not yet wired into any workflow)
-gh secret set REVIEWER_APP_ID          --body "<reviewer App ID>"
+# Required for the reviewer agent (used by agent-review.yml)
+gh secret set REVIEWER_APP_ID          --body "<reviewer App Client ID>"   # the Iv23.xxx Client ID, not the numeric App ID
 gh secret set REVIEWER_APP_PRIVATE_KEY < ~/.config/agentic-agents/reviewer-agent.pem
 ```
 
-Workflows use `DEVELOPER_APP_ID` / `DEVELOPER_APP_PRIVATE_KEY` to mint short-lived installation tokens at runtime and pass `ANTHROPIC_API_KEY` through to the container. The `REVIEWER_APP_*` secrets are set here for completeness but are not consumed by any current workflow — set them when the reviewer agent lands.
+Workflows use `DEVELOPER_APP_ID` / `DEVELOPER_APP_PRIVATE_KEY` to mint short-lived installation tokens for developer-agent runs, and `REVIEWER_APP_ID` / `REVIEWER_APP_PRIVATE_KEY` for reviewer-agent runs (`agent-review.yml`). All workflows pass `ANTHROPIC_API_KEY` through to the container. **Important:** despite the `_APP_ID` suffix, these secrets must hold the GitHub App **Client ID** (the `Iv23.xxx` string visible in the App's General settings), which is the value forwarded as `client-id` to `actions/create-github-app-token`. The separate numeric "App ID" shown on the same page is not used here.
 
 ### 4. Build the developer agent container
 
@@ -172,6 +172,6 @@ MVP substantially built. Implemented:
 - Grooming agent with label criteria in [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json).
 - GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/).
 - Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_CLAUDE_MODEL` Actions variables.
-- Per-issue Claude model override via `model:<name>` labels.
+- Claude model override via `model:<name>` labels on issues and PRs (reviewer agent).
 
-Pending: reviewer agent container, and a dedicated local-run guide for developer and reviewer agents.
+Pending: a dedicated local-run guide for developer and reviewer agents.
