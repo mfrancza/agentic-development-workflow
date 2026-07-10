@@ -151,3 +151,13 @@ At minimum, before opening a PR, check whether your change alters any of the fol
 If you touch `agents/grooming/label-criteria.json`, also refresh the label list in the **Labels** section above.
 
 When in doubt, err on the side of updating the docs — a stale AGENTS.md is worse than a slightly-too-detailed one.
+
+### Merge-friendly documentation
+
+`AGENTS.md` and `README.md` are edited by many concurrent agent PRs, so write them to merge cleanly:
+
+- **No implementation-status notes in prose.** Do not write "(**Note:** X is not yet implemented; lands in issue #N)" next to a feature description. Describe the target behavior and let the linked issue track status — status notes go stale the moment a parallel PR ships the feature, and pruning them is a recurring merge-conflict source. (Same principle as design docs: a merged doc describes the accepted state.) Existing status notes are being removed opportunistically; do not add new ones.
+- **Prefer bullets over numbered lists** anywhere a step might later be inserted — renumbering turns a one-line insertion into a whole-list conflict.
+- **One fact per line.** Keep list items self-contained; do not reflow neighboring lines when editing one item.
+- **Add at a stable position.** When list order carries no meaning, append or keep the list alphabetized instead of inserting mid-list.
+- **Search for an existing entry before adding one.** Parallel PRs have produced duplicate bullets for the same label; extend the existing entry instead of adding a twin.
