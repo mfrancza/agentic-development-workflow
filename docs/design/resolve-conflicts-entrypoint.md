@@ -88,7 +88,13 @@ requires no new architectural decision.
 **Decision:** After `git merge origin/<base>`, check the exit code:
 
 - Exit 0 → merge is clean; push and exit.
-- Non-zero → conflict; proceed to Claude.
+- Exit 1 → conflict detected; proceed to Claude.
+- Exit 2 (or any other non-1, non-zero code) → hard error (e.g. missing ref,
+  dirty worktree, lock failure); do **not** attempt Claude resolution. Run
+  `git merge --abort` if the merge was partially started, then exit non-zero
+  with a log line describing the failure. Do not apply `human-required` for
+  these operational errors — a re-run after the underlying issue is fixed is
+  the expected recovery path.
 
 Additionally, before running Claude, capture the list of unmerged paths with
 `git diff --name-only --diff-filter=U` so the prompt can name specific files
@@ -123,18 +129,28 @@ distraction and adds token cost for no benefit.
 
 **Decision:** Two complementary checks after Claude finishes:
 
-1. `git diff --check` — exits non-zero if any conflict markers remain in
-   tracked files.
+1. `git diff --cached --check` — checks **staged** content for conflict markers.
+   This is the correct scope because Claude is required to `git add` every
+   resolved file; an unstaged check (`git diff --check`, without `--cached`)
+   would see the working tree vs. the index and would produce no output for
+   files that have already been staged, missing any markers Claude accidentally
+   left in.  Both forms are run so that any unstaged file (never `git add`ed by
+   Claude) is also caught:
+   - `git diff --cached --check` — staged content (working tree changes that
+     Claude added).
+   - `git diff --check` — unstaged content (any file Claude edited but did not
+     stage, which is itself an error).
 2. `git ls-files --unmerged` — lists files still in the "unmerged" index state
    (catches files that were never `git add`ed by Claude, even if they have no
    markers in the working copy).
 
-If either check produces output (or a non-zero exit), treat verification as
-failed and trigger the fallback.
+If any check produces output (or a non-zero exit), treat verification as failed
+and trigger the fallback.
 
 **Alternative considered:** grep for `<<<<<<<` across modified files. Rejected:
-`git diff --check` is the canonical tool for this and handles edge cases (e.g.
-markers in binary-adjacent context) better than a raw grep.
+`git diff --check` / `git diff --cached --check` are the canonical tools for
+this and handle edge cases (e.g. markers in binary-adjacent context) better
+than a raw grep.
 
 ### Decision 5 — Merge commit message
 
