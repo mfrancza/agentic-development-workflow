@@ -24,22 +24,20 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # Checkout must precede the local agent-token action: the runner resolves
-      # ./.github/actions/* references from the workspace.
-      # Pin checkout to the pre-merge base SHA so the local composite action
-      # (./.github/actions/agent-token) is always resolved from trusted code
-      # that was on main *before* this PR landed.  Without this pin, a PR that
-      # modifies .github/actions/agent-token could exfiltrate
-      # DEVELOPER_APP_PRIVATE_KEY at merge time.  The run: step below uses only
-      # env-var inputs (HEAD_REF, GITHUB_REPO) so checking out the base is safe.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          persist-credentials: false
-          ref: ${{ github.event.pull_request.base.sha }}
-
+      # No checkout step: we call actions/create-github-app-token directly
+      # instead of going through the local ./.github/actions/agent-token
+      # composite action.  Using a local action requires a workspace checkout,
+      # and on pull_request.closed events github.event.pull_request.base.sha
+      # may point at the post-merge HEAD (which already includes the merged PR).
+      # This means a PR that modifies .github/actions/agent-token could still
+      # get its modified local action executed here with DEVELOPER_APP_PRIVATE_KEY
+      # available — defeating the intended secret-exfiltration mitigation.
+      # Calling actions/create-github-app-token directly (with a pinned SHA)
+      # avoids the workspace entirely, so there is no local code-execution path
+      # that a merged PR can influence.
       - name: Mint installation token for developer-agent
         id: setup
-        uses: ./.github/actions/agent-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
         with:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
