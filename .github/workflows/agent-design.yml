@@ -1,0 +1,118 @@
+name: agent-design
+
+# This workflow currently contains only the un-draft job (trigger 2 of 2).
+# The label-dispatch job (trigger 1: issues.labeled on agent:design) will be
+# added by the agent-design action implementation task (#71).
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+jobs:
+  undraft-sub-issues:
+    # Fires only when a design-branch PR is merged — not just closed without
+    # merging.  pull_request.branches filters the *base* branch, so the
+    # head-branch check must live in the `if` condition instead.
+    if: >
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'design/issue-') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      # No checkout step: we call actions/create-github-app-token directly
+      # instead of going through the local ./.github/actions/agent-token
+      # composite action.  Using a local action requires a workspace checkout,
+      # and on pull_request.closed events github.event.pull_request.base.sha
+      # may point at the post-merge HEAD (which already includes the merged PR).
+      # This means a PR that modifies .github/actions/agent-token could still
+      # get its modified local action executed here with DEVELOPER_APP_PRIVATE_KEY
+      # available — defeating the intended secret-exfiltration mitigation.
+      # Calling actions/create-github-app-token directly (with a pinned SHA)
+      # avoids the workspace entirely, so there is no local code-execution path
+      # that a merged PR can influence.
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Remove draft label from sub-issues on design-PR merge
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          GITHUB_REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+
+          # Extract parent issue number from branch name design/issue-{N}.
+          # Strict validation: the branch must match exactly design/issue-<digits>.
+          # Variants like design/issue-72/foo or design/issue-72-extra pass the
+          # startsWith() guard in the job `if` but would produce a non-numeric
+          # PARENT_ISSUE and an invalid API path — fail loudly instead.
+          if [[ ! "${HEAD_REF}" =~ ^design/issue-([0-9]+)$ ]]; then
+            echo "::error::HEAD_REF '${HEAD_REF}' does not match the expected pattern 'design/issue-<N>'. Aborting to avoid an invalid API call."
+            exit 1
+          fi
+          PARENT_ISSUE="${BASH_REMATCH[1]}"
+          echo "Design PR merged for branch ${HEAD_REF}; removing draft label from sub-issues of issue #${PARENT_ISSUE}."
+
+          # Enumerate sub-issues via the GitHub sub-issues API.
+          # Capture output to a temp file so a non-zero exit from `gh api` is
+          # not silently swallowed by the process substitution — `set -e` is
+          # unreliable inside <(...) and would treat API failures as "no
+          # sub-issues" and exit 0.
+          _sub_issues_tmp="$(mktemp)"
+          if ! gh api "repos/${GITHUB_REPO}/issues/${PARENT_ISSUE}/sub_issues" \
+               --paginate --jq '.[].number' > "${_sub_issues_tmp}"; then
+            echo "::error::Failed to list sub-issues for issue #${PARENT_ISSUE}. Check token permissions and API rate limits."
+            rm -f "${_sub_issues_tmp}"
+            exit 1
+          fi
+          mapfile -t SUB_ISSUE_NUMBERS < "${_sub_issues_tmp}"
+          rm -f "${_sub_issues_tmp}"
+
+          echo "Found ${#SUB_ISSUE_NUMBERS[@]} sub-issue(s)."
+
+          if [ "${#SUB_ISSUE_NUMBERS[@]}" -eq 0 ]; then
+            echo "No sub-issues found for issue #${PARENT_ISSUE}; nothing to un-draft."
+            exit 0
+          fi
+
+          for ISSUE_NUM in "${SUB_ISSUE_NUMBERS[@]}"; do
+            echo "Removing draft label from issue #${ISSUE_NUM}."
+            if ! gh issue edit "$ISSUE_NUM" --repo "${GITHUB_REPO}" --remove-label "draft"; then
+              # Distinguish benign from operational failure: if the label is still
+              # present after the failed removal, it's an operational error
+              # (permissions, rate-limit, transient API error) and we must fail
+              # loudly — leaving the issue labeled `draft` silently blocks the
+              # developer agent.  If the label is already absent the edit command
+              # may have exited non-zero simply because the label wasn't there,
+              # which is a no-op that we treat as a warning and continue.
+              #
+              # Capture the re-check output and exit code explicitly — do NOT use
+              # a pipe (`gh api ... | grep`) because set -e is suppressed in `if`
+              # conditions and the pipe exit status is the *last* command's, which
+              # would treat a failed `gh api` call as "label absent" and exit 0
+              # even though the draft label may still be present.
+              _recheck_status=0
+              _recheck_output="$(gh api "repos/${GITHUB_REPO}/issues/${ISSUE_NUM}" \
+                  --jq 'any(.labels[]; .name == "draft")')" || _recheck_status=$?
+              if [ "${_recheck_status}" -ne 0 ]; then
+                echo "::error::Failed to remove draft label from issue #${ISSUE_NUM}, and the re-check API call also failed (check token permissions and API rate limits)."
+                exit 1
+              elif [ "${_recheck_output}" = "true" ]; then
+                echo "::error::Failed to remove draft label from issue #${ISSUE_NUM} and the label is still present. Check token permissions and API rate limits."
+                exit 1
+              else
+                echo "::warning::Could not remove draft label from issue #${ISSUE_NUM} — the label was already absent (non-fatal)."
+              fi
+            fi
+          done
+
+          echo "Done un-drafting ${#SUB_ISSUE_NUMBERS[@]} sub-issue(s)."
