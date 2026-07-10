@@ -60,7 +60,7 @@ jobs:
         id: setup
         uses: ./.github/actions/agent-token
         with:
-          app-id: ${{ secrets.DEVELOPER_APP_ID }}
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
       - name: Build agent image
