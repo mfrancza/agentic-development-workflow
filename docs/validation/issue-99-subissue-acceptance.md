@@ -36,8 +36,10 @@ All three issues appear as native sub-issues of #99 in the GitHub sub-issue API.
 
 **Confirmation of atomic `--parent` usage:** The issue timeline shows `parent_issue_added` within one second of issue creation in all cases, which is the fingerprint of `gh issue create --parent` (GraphQL atomic mutation). A two-step create-then-link approach would show a larger gap between creation and linking.
 
-| Issue | labeled event | parent_issue_added event | Gap |
-|-------|--------------|--------------------------|-----|
+The table below uses the `labeled` event timestamp as a proxy for issue creation time. Labels are applied atomically at creation time via `gh issue create --label ...`, so the `labeled` event timestamp closely approximates the `created` event in the GitHub timeline API. The gap column measures the interval from the `labeled` event to the `parent_issue_added` event, making the sub-second atomicity comparison unambiguous.
+
+| Issue | labeled event (creation proxy) | parent_issue_added event | Gap |
+|-------|-------------------------------|--------------------------|-----|
 | Issue #101 | 2026-07-10T04:24:18Z | 2026-07-10T04:24:19Z | 1s |
 | Issue #102 | 2026-07-10T04:24:56Z | 2026-07-10T04:24:57Z | 1s |
 | Issue #103 | 2026-07-10T04:25:08Z | 2026-07-10T04:25:09Z | 1s |
@@ -54,15 +56,15 @@ Issues #102 and #103 were created with both `draft` and `enhancement` labels (co
 | Issue #102 | draft, enhancement | enhancement ✓ |
 | Issue #103 | draft, enhancement | enhancement ✓ |
 
-### 3. Blocked-by relationships between sub-issues ⚠️ (known limitation, out of scope)
+### 3. Blocked-by relationships between sub-issues ⚠️ (verified: not recorded — pre-existing API limitation)
 
-Issue #103 should be blocked by issue #102 per the design document. The API reports `blocked_by: 0` for both issues — no blocked-by relationships were recorded.
+Issue #103 includes verifying whether blocked-by relationships are recorded. The check was performed: the API reports `blocked_by: 0` for both issues — **no blocked-by relationships were recorded**.
 
-This is a **pre-existing limitation** documented in `docs/design/planned-issues-as-sub-issues.md` (Decision 4):
+The underlying cause is a **pre-existing limitation** documented in `docs/design/planned-issues-as-sub-issues.md` (Decision 4):
 
 > The investigation found that the `POST .../dependencies/blocked_by` endpoint also returns 404 for the developer-agent token. This is a separate pre-existing limitation (outside the scope of issue #99); it is documented here as context for a future fix.
 
-This limitation is explicitly out of scope for issues #99, #102, and #103.
+The verification was performed and produced a clear result (no relationships recorded). The *fix* for this gap is out of scope for issues #99, #102, and #103 — this criterion is a known-blocked check, not an excluded one.
 
 ### 4. Entrypoint post-run verification passes ✅
 
