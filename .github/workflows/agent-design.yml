@@ -58,8 +58,7 @@ jobs:
           # to exclude PRs from forks with the same branch name.
           PR_NUMBER="$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open \
             --json number,headRepositoryOwner \
-            --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].number // empty" \
-            2>/dev/null || true)"
+            --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].number // empty")"
           if [ -n "$PR_NUMBER" ]; then
             echo "Found existing open design PR #$PR_NUMBER for $BRANCH (owner: $OWNER); skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
