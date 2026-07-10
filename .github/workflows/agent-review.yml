@@ -56,13 +56,21 @@ jobs:
         id: model
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
+          # Pass event-derived and repo-variable values via env so they are
+          # parsed by the shell rather than interpolated into the run: script
+          # by the Actions expression engine. This satisfies the
+          # output-injection hardening rule in AGENTS.md: untrusted content
+          # must never be interpolated directly into run: via ${{ ... }}.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          DEFAULT_CLAUDE_MODEL: ${{ vars.DEFAULT_CLAUDE_MODEL }}
         run: |
           set -euo pipefail
           # Look for labels matching model:<name> (e.g. model:opus, model:haiku).
           # Fail with a clear error if more than one model:* label is present to
           # avoid ambiguous model selection.
-          MODEL_LABELS="$(gh pr view "${{ github.event.pull_request.number }}" \
-            --repo "${{ github.repository }}" \
+          MODEL_LABELS="$(gh pr view "$PR_NUMBER" \
+            --repo "$REPO" \
             --json labels \
             --jq '[.labels[].name | select(startswith("model:"))]')"
           MODEL_COUNT="$(printf '%s' "$MODEL_LABELS" | jq 'length')"
@@ -72,7 +80,7 @@ jobs:
           fi
           MODEL="$(printf '%s' "$MODEL_LABELS" | jq -r 'first // empty' | sed 's/^model://')"
           if [ -z "$MODEL" ]; then
-            MODEL="${{ vars.DEFAULT_CLAUDE_MODEL }}"
+            MODEL="$DEFAULT_CLAUDE_MODEL"
           fi
           # Strip CR/LF to prevent output injection before writing to GITHUB_OUTPUT.
           MODEL="$(printf '%s' "$MODEL" | tr -d '\r\n')"
