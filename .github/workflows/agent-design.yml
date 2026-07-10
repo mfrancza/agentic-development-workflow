@@ -88,8 +88,22 @@ jobs:
 
           for ISSUE_NUM in "${SUB_ISSUE_NUMBERS[@]}"; do
             echo "Removing draft label from issue #${ISSUE_NUM}."
-            gh issue edit "$ISSUE_NUM" --repo "${GITHUB_REPO}" --remove-label "draft" \
-              || echo "::warning::Could not remove draft label from issue #${ISSUE_NUM} — it may not carry the label, or a permissions/rate-limit error occurred."
+            if ! gh issue edit "$ISSUE_NUM" --repo "${GITHUB_REPO}" --remove-label "draft"; then
+              # Distinguish benign from operational failure: if the label is still
+              # present after the failed removal, it's an operational error
+              # (permissions, rate-limit, transient API error) and we must fail
+              # loudly — leaving the issue labeled `draft` silently blocks the
+              # developer agent.  If the label is already absent the edit command
+              # may have exited non-zero simply because the label wasn't there,
+              # which is a no-op that we treat as a warning and continue.
+              if gh api "repos/${GITHUB_REPO}/issues/${ISSUE_NUM}" --jq 'any(.labels[]; .name == "draft")' \
+                   2>/dev/null | grep -qx "true"; then
+                echo "::error::Failed to remove draft label from issue #${ISSUE_NUM} and the label is still present. Check token permissions and API rate limits."
+                exit 1
+              else
+                echo "::warning::Could not remove draft label from issue #${ISSUE_NUM} — the label was already absent (non-fatal)."
+              fi
+            fi
           done
 
           echo "Done un-drafting ${#SUB_ISSUE_NUMBERS[@]} sub-issue(s)."
