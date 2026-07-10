@@ -156,5 +156,4 @@ passed).
 Validation is CI-first per the project's convention — no local credential
 provisioning.
 
-Dependencies are recorded natively as GitHub blocked-by relationships on the
-issues.
+Dependency order is documented in the task breakdown table above.

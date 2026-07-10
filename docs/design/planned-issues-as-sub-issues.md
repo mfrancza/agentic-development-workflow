@@ -108,16 +108,16 @@ structured file, which adds complexity out of proportion to the benefit. The
 existing check already catches complete failures; partial failures become far
 less likely once creation and linking are atomic.
 
-### Decision 4: Blocked-by relationships are unchanged
+### Decision 4: Blocked-by relationships removed; dependency order in design doc
 
-The prompt's `gh api -X POST ... dependencies/blocked_by` calls record
-task-to-task dependency order. These are distinct from the parent-child
-sub-issue relationship and are not affected by this change. They stay as-is.
+The investigation found that the `POST .../dependencies/blocked_by` endpoint
+returns 404 for the developer-agent App token — the App lacks the required
+write permission. The calls were silently failing. They were left as-is in
+issue #99 (out of scope) and later removed from the prompt in issue #105.
 
-**Note:** The investigation found that the `POST .../dependencies/blocked_by`
-endpoint also returns 404 for the developer-agent token. This is a separate
-pre-existing limitation (outside the scope of issue #99); it is documented
-here as context for a future fix.
+Task-to-task dependency order is now captured only in the task breakdown table
+in the design document (the "Depends on" column). Reviewers and implementers
+use the design doc table to understand sequencing.
 
 ## Out of scope
 
