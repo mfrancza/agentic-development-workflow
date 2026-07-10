@@ -6,8 +6,7 @@ on:
   # the *base* branch, never from the PR head. This prevents an allowlisted
   # user applying agent:review from triggering a run that executes PR-authored
   # workflow code or a PR-authored Docker image with access to
-  # REVIEWER_APP_PRIVATE_KEY and ANTHROPIC_API_KEY. See commit 1f18785 for the
-  # full security rationale.
+  # REVIEWER_APP_PRIVATE_KEY and ANTHROPIC_API_KEY.
   pull_request_target:
     types: [labeled]
 
