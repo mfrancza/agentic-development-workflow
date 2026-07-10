@@ -96,8 +96,19 @@ jobs:
               # developer agent.  If the label is already absent the edit command
               # may have exited non-zero simply because the label wasn't there,
               # which is a no-op that we treat as a warning and continue.
-              if gh api "repos/${GITHUB_REPO}/issues/${ISSUE_NUM}" --jq 'any(.labels[]; .name == "draft")' \
-                   2>/dev/null | grep -qx "true"; then
+              #
+              # Capture the re-check output and exit code explicitly — do NOT use
+              # a pipe (`gh api ... | grep`) because set -e is suppressed in `if`
+              # conditions and the pipe exit status is the *last* command's, which
+              # would treat a failed `gh api` call as "label absent" and exit 0
+              # even though the draft label may still be present.
+              _recheck_status=0
+              _recheck_output="$(gh api "repos/${GITHUB_REPO}/issues/${ISSUE_NUM}" \
+                  --jq 'any(.labels[]; .name == "draft")')" || _recheck_status=$?
+              if [ "${_recheck_status}" -ne 0 ]; then
+                echo "::error::Failed to remove draft label from issue #${ISSUE_NUM}, and the re-check API call also failed (check token permissions and API rate limits)."
+                exit 1
+              elif [ "${_recheck_output}" = "true" ]; then
                 echo "::error::Failed to remove draft label from issue #${ISSUE_NUM} and the label is still present. Check token permissions and API rate limits."
                 exit 1
               else
