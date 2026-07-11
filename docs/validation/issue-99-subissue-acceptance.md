@@ -58,7 +58,16 @@ Issues #102 and #103 were created with both `draft` and `enhancement` labels (co
 
 ### 3. Blocked-by relationships between sub-issues ⚠️ (verified: not recorded — pre-existing API limitation)
 
-Issue #103 includes verifying whether blocked-by relationships are recorded. The check was performed: the API reports `blocked_by: 0` for both issues — **no blocked-by relationships were recorded**.
+Issue #103 includes verifying whether blocked-by relationships are recorded. The check was performed using the GitHub issue REST API:
+
+```bash
+gh api repos/mfrancza/agentic-development-workflow/issues/102 --jq '.blocked_by // 0'
+# => 0
+gh api repos/mfrancza/agentic-development-workflow/issues/103 --jq '.blocked_by // 0'
+# => 0
+```
+
+The API reports `blocked_by: 0` for both issues — **no blocked-by relationships were recorded**.
 
 The underlying cause is a **pre-existing limitation** documented in `docs/design/planned-issues-as-sub-issues.md` (Decision 4):
 
@@ -89,6 +98,6 @@ This change ensures future design runs use `--parent` explicitly and consistentl
 
 ## Overall result
 
-**PASS** — The design agent creates all implementation sub-issues as native GitHub sub-issues nested under the parent plan issue. Sub-issues receive correct labels. The entrypoint exits 0. The only gap (blocked-by relationships) is a pre-existing API limitation already documented as out of scope.
+**PASS** — The design agent creates all implementation sub-issues as native GitHub sub-issues nested under the parent plan issue. Sub-issues receive correct labels. The entrypoint exits 0. The only gap: blocked-by relationships were verified as not recorded (`blocked_by: 0` for both sub-issues — the check was performed). The root cause is a pre-existing API limitation; only the *fix* for that limitation is out of scope for issues #99 and #103.
 
 Issue #99 is ready to close once PR #110 merges (which formalizes this behavior in the prompt).
