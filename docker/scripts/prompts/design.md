@@ -31,10 +31,12 @@ Create one sub-issue per implementation task (and one e2e validation task). Each
 
 For every sub-issue:
 
-1. **Create** the issue with `gh issue create`:
+1. **Create** the issue with `gh issue create`, linking it to the parent in the
+   same step via `--parent`:
    ```bash
    gh issue create \
      --repo "$GITHUB_REPO" \
+     --parent "$GITHUB_ISSUE_NUMBER" \
      --title "<task title>" \
      --body "<scope/key-files/dependency body>" \
      --label "draft" \
@@ -42,12 +44,18 @@ For every sub-issue:
      --parent "$GITHUB_ISSUE_NUMBER"
    ```
    Capture the returned issue URL and extract the issue number from it.
+   (`--parent` uses a GraphQL mutation internally and works with the
+   developer-agent token; the `POST .../sub_issues` REST endpoint returns 404
+   for this token — do not use that endpoint.)
 
-2. **Record blocked-by dependencies** (for tasks that depend on other tasks):
+2. **Record blocked-by dependencies** (for tasks that depend on other tasks).
+   The API requires the blocking issue's global database ID, not its number:
    ```bash
+   BLOCKING_ID="$(gh api "repos/${GITHUB_REPO}/issues/<blocking_issue_number>" --jq '.id')"
    gh api -X POST "repos/${GITHUB_REPO}/issues/<blocked_issue_number>/dependencies/blocked_by" \
-     --field blocked_by_id=<blocking_issue_number>
+     -F issue_id="$BLOCKING_ID"
    ```
+   Repeat for every depends-on edge in the task breakdown table.
 
 The `draft` and `enhancement` labels must already exist in the repo. (`enhancement` is Terraform-managed today; `draft` will be added to Terraform in issue #69 — on a fresh repo before that lands, create it manually if needed.) If `gh issue create` fails because a label does not exist, create it first:
 ```bash
