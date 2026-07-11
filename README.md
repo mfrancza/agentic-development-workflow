@@ -190,7 +190,9 @@ Reviews are posted under your GitHub identity rather than the reviewer-agent bot
 
 Option B — reviewer-agent installation token (matches CI exactly):
 
-If you need the review to appear as coming from the `reviewer-agent` bot, mint a short-lived installation token from the App's private key. You need the **numeric App ID** (visible on the App's settings page at `https://github.com/settings/apps/<app-name>` — it is a plain integer, not the `Iv23.xxx` Client ID) and the private key downloaded in step 1 (the `.pem` file):
+If you need the review to appear as coming from the `reviewer-agent` bot, mint a short-lived installation token from the App's private key. You need the **numeric App ID** (visible on the App's settings page at `https://github.com/settings/apps/<app-name>` — it is a plain integer, not the `Iv23.xxx` Client ID) and the private key downloaded in step 1 (the `.pem` file).
+
+> **Note on App ID vs. Client ID:** The CI workflow uses `actions/create-github-app-token`, which accepts *either* the numeric App ID or the `Iv23.xxx` Client ID as its `app-id` input. If your `REVIEWER_APP_ID` repository secret contains the Client ID (valid for that action), it **will not work** as `APP_ID` here — the GitHub JWT API requires the numeric form in the `iss` claim. To find the numeric ID, open the App's settings page and look for the plain-integer "App ID" field; it is distinct from the Client ID shown further down the page.
 
 ```sh
 # Requires: openssl, curl, jq
