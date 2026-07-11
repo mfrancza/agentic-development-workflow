@@ -38,17 +38,12 @@ For every sub-issue:
      --title "<task title>" \
      --body "<scope/key-files/dependency body>" \
      --label "draft" \
-     --label "enhancement"
+     --label "enhancement" \
+     --parent "$GITHUB_ISSUE_NUMBER"
    ```
    Capture the returned issue URL and extract the issue number from it.
 
-2. **Link to parent** via the sub-issue API:
-   ```bash
-   gh api -X POST "repos/${GITHUB_REPO}/issues/${GITHUB_ISSUE_NUMBER}/sub_issues" \
-     --field sub_issue_id=<new_issue_number>
-   ```
-
-3. **Record blocked-by dependencies** (for tasks that depend on other tasks):
+2. **Record blocked-by dependencies** (for tasks that depend on other tasks):
    ```bash
    gh api -X POST "repos/${GITHUB_REPO}/issues/<blocked_issue_number>/dependencies/blocked_by" \
      --field blocked_by_id=<blocking_issue_number>
