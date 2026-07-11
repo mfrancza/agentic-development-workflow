@@ -164,6 +164,107 @@ docker run --rm \
 
 See [AGENTS.md](AGENTS.md#agent-actions) for the full matrix of `AGENT_ACTION` values and their required env vars.
 
+### 5. Build and run the reviewer agent container
+
+The reviewer image lives at `docker/reviewer/`, separate from the developer image at `docker/`. In CI, `agent-review.yml` builds and runs it automatically when the `agent:review` label is applied to a PR. The same image can be run locally to validate a review pass against a real PR.
+
+**Build**
+
+```sh
+docker build -t agent-reviewer ./docker/reviewer
+```
+
+**Credentials**
+
+The container needs two secrets: a GitHub token (`GH_TOKEN`) with Pull requests read/write on the target repo, and an Anthropic API key (`ANTHROPIC_API_KEY`).
+
+*Sourcing `GH_TOKEN`*
+
+Option A — your personal GitHub token (simplest, for local testing):
+
+```sh
+export GH_TOKEN=$(gh auth token)
+```
+
+Reviews are posted under your GitHub identity rather than the reviewer-agent bot. This is fine for validating review logic locally; in CI the review is attributed to the reviewer-agent App.
+
+Option B — reviewer-agent installation token (matches CI exactly):
+
+If you need the review to appear as coming from the `reviewer-agent` bot, mint a short-lived installation token from the App's private key. You need the Client ID (`REVIEWER_APP_ID` — the `Iv23.xxx` value set in step 3) and the private key downloaded in step 1 (the `.pem` file):
+
+```sh
+# Requires: openssl, curl, jq
+CLIENT_ID="Iv23.xxxxxxxxxxxxxxxxxxxx"      # REVIEWER_APP_ID value from step 3
+KEY_FILE="$HOME/.config/agentic-agents/reviewer-agent.pem"
+
+_b64url() { openssl enc -base64 -A | tr '+/' '-_' | tr -d '='; }
+now=$(date +%s)
+jwt_header=$(printf '{"alg":"RS256","typ":"JWT"}' | _b64url)
+jwt_payload=$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' \
+  "$((now - 60))" "$((now + 600))" "$CLIENT_ID" | _b64url)
+jwt_sig=$(printf '%s.%s' "$jwt_header" "$jwt_payload" \
+  | openssl dgst -sha256 -sign "$KEY_FILE" | _b64url)
+JWT="${jwt_header}.${jwt_payload}.${jwt_sig}"
+
+installation_id=$(curl -sf \
+  -H "Authorization: Bearer $JWT" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/app/installations" \
+  | jq -r '.[0].id')
+export GH_TOKEN=$(curl -sf -X POST \
+  -H "Authorization: Bearer $JWT" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/app/installations/${installation_id}/access_tokens" \
+  | jq -r '.token')
+```
+
+The token expires in one hour and carries the same scopes as the CI installation token.
+
+*Sourcing `ANTHROPIC_API_KEY`*
+
+```sh
+export ANTHROPIC_API_KEY="sk-ant-..."   # load from your password manager, not shell history
+```
+
+*Passing credentials without leaking them*
+
+Use `-e VARNAME` (without `=value`) so Docker reads each secret from your shell environment — the value never appears in the `docker run` command text, shell history, or container process list:
+
+```sh
+export GH_TOKEN=$(gh auth token)           # or use Option B above
+export ANTHROPIC_API_KEY="sk-ant-..."      # from your password manager
+
+docker run --rm \
+  -e ANTHROPIC_API_KEY \
+  -e GH_TOKEN \
+  -e GITHUB_REPO="owner/repo" \
+  -e GITHUB_PR_NUMBER="42" \
+  agent-reviewer
+```
+
+For a reusable setup, write secrets to a permissions-restricted file outside the repo and use `--env-file`:
+
+```sh
+# Create once; never commit this file
+cat > ~/.reviewer-env <<'EOF'
+ANTHROPIC_API_KEY=sk-ant-...
+GH_TOKEN=ghp_...
+EOF
+chmod 600 ~/.reviewer-env
+```
+
+```sh
+docker run --rm \
+  --env-file ~/.reviewer-env \
+  -e GITHUB_REPO="owner/repo" \
+  -e GITHUB_PR_NUMBER="42" \
+  agent-reviewer
+```
+
+Optional: `-e CLAUDE_MODEL="sonnet"` and `-e CLAUDE_MAX_TURNS="100"` (both default to these values, matching the CI workflow knobs).
+
+The entrypoint clones the repo read-only, gathers the diff against the merge-base, fetches open review threads and CI check status, invokes Claude, then verifies that a review by the authenticated GitHub identity was posted against the PR head SHA — exiting non-zero if the agent did not complete the review.
+
 ## Status
 
 MVP substantially built. Implemented:
@@ -173,5 +274,4 @@ MVP substantially built. Implemented:
 - GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/).
 - Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_CLAUDE_MODEL` Actions variables.
 - Claude model override via `model:<name>` labels on issues and PRs (reviewer agent).
-
-Pending: a dedicated local-run guide for developer and reviewer agents.
+- Local run guides for the developer agent (step 4) and the reviewer agent (step 5).
