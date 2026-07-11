@@ -197,9 +197,11 @@ fi
 ```
 
 Paginate the thread query only if PRs with >100 threads become plausible;
-initially, 100 is well above any expected count. Fail-open (`|| true`) on
-GraphQL errors matches the existing guard's posture — a transient API
-failure should not silently swallow a real approval that needs response.
+initially, 100 is well above any expected count. Fail-open
+(`|| UNRESOLVED_COUNT=""`) on GraphQL errors matches the existing guard's
+posture — an empty string fails the numeric regex check and lets the loop
+proceed, so a transient API failure does not silently swallow a real
+approval that needs response.
 
 **Alternatives considered.**
 
