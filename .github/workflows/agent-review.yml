@@ -8,7 +8,7 @@ on:
   # workflow code or a PR-authored Docker image with access to
   # REVIEWER_APP_PRIVATE_KEY and ANTHROPIC_API_KEY.
   pull_request_target:
-    types: [labeled]
+    types: [labeled, synchronize]
 
 permissions:
   contents: read
@@ -19,15 +19,28 @@ concurrency:
 
 jobs:
   review:
-    # Gate on the user who applied the label, not who opened the PR. The
-    # allowlist is managed as a Terraform parameter (vars.AGENT_ALLOWLIST) so
-    # usernames are not hardcoded in YAML — run `terraform apply` to update it.
-    # GitHub has no per-label permission model and `repository_owner` doesn't
-    # work in org repos (it's the org login, not a user).
+    # Gate differently per event type:
+    #
+    # labeled — keep the existing sender-allowlist check: the user who applied
+    #   the label must be in vars.AGENT_ALLOWLIST. GitHub has no per-label
+    #   permission model and `repository_owner` doesn't work in org repos (it's
+    #   the org login, not a user). The allowlist is managed as a Terraform
+    #   parameter so usernames are not hardcoded in YAML.
+    #
+    # synchronize — check only that agent:review is already on the PR; no
+    #   sender check. The sender on synchronize is the pusher, not the actor
+    #   who applied the label. The label is the authorization artifact: it was
+    #   applied earlier by an allowlisted actor, so its presence is sufficient
+    #   to authorize re-review. See docs/design/re-review-loop.md § 1.
     if: >
-      github.event.label.name == 'agent:review' &&
       github.event.pull_request.state == 'open' &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      (
+        (github.event.action == 'labeled' &&
+         github.event.label.name == 'agent:review' &&
+         contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)) ||
+        (github.event.action == 'synchronize' &&
+         contains(github.event.pull_request.labels.*.name, 'agent:review'))
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
