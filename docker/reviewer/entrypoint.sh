@@ -124,8 +124,10 @@ trap 'rm -f "$CONTEXT_FILE"' EXIT
 #     /pulls/{n}/comments endpoint returns comment IDs but not thread IDs.
 #     Only unresolved (open) threads are fetched — resolved threads are not
 #     actionable and including all threads can cause context-limit failures on
-#     PRs with many comments. Per design decision 4 these are context only —
-#     the initial-review prompt must not reply to or resolve them.
+#     PRs with many comments. Per updated design decision 4 (superseded by
+#     re-review-loop.md / issue #116), the prompt evaluates each open thread
+#     and resolves addressed ones via resolveReviewThread before posting the
+#     new review.
 OWNER="${GITHUB_REPO%%/*}"
 REPO_NAME="${GITHUB_REPO#*/}"
 
