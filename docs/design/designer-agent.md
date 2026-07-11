@@ -89,9 +89,11 @@ For the sub-issues, the prompt encodes the practices already in use:
 - Single-PR-sized tasks; each body states scope, key files, and its place in
   the dependency order; parallelizable tasks are explicitly independent, and
   an end-to-end validation task depends on the implementation tasks.
-- Every sub-issue: linked to the parent via the sub-issue API
-  (`POST /repos/{repo}/issues/{parent}/sub_issues`), dependencies recorded
-  natively via blocked-by
+- Every sub-issue: linked to the parent atomically via
+  `gh issue create --parent "$GITHUB_ISSUE_NUMBER"` (the
+  `POST .../sub_issues` REST endpoint returns 404 for the developer-agent
+  token; `--parent` uses a GraphQL mutation internally and succeeds),
+  dependencies recorded natively via blocked-by
   (`POST /repos/{repo}/issues/{n}/dependencies/blocked_by` with the blocking
   issue's global database ID as `-F issue_id=<id>`), and labeled
   `draft` + `enhancement`.

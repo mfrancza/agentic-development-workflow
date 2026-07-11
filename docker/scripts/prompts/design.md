@@ -31,24 +31,23 @@ Create one sub-issue per implementation task (and one e2e validation task). Each
 
 For every sub-issue:
 
-1. **Create** the issue with `gh issue create`:
+1. **Create** the issue with `gh issue create`, linking it to the parent in the
+   same step via `--parent`:
    ```bash
    gh issue create \
      --repo "$GITHUB_REPO" \
+     --parent "$GITHUB_ISSUE_NUMBER" \
      --title "<task title>" \
      --body "<scope/key-files/dependency body>" \
      --label "draft" \
      --label "enhancement"
    ```
    Capture the returned issue URL and extract the issue number from it.
+   (`--parent` uses a GraphQL mutation internally and works with the
+   developer-agent token; the `POST .../sub_issues` REST endpoint returns 404
+   for this token — do not use that endpoint.)
 
-2. **Link to parent** via the sub-issue API:
-   ```bash
-   gh api -X POST "repos/${GITHUB_REPO}/issues/${GITHUB_ISSUE_NUMBER}/sub_issues" \
-     --field sub_issue_id=<new_issue_number>
-   ```
-
-3. **Record blocked-by dependencies** (for tasks that depend on other tasks).
+2. **Record blocked-by dependencies** (for tasks that depend on other tasks).
    The API requires the blocking issue's global database ID, not its number:
    ```bash
    BLOCKING_ID="$(gh api "repos/${GITHUB_REPO}/issues/<blocking_issue_number>" --jq '.id')"
