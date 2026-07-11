@@ -119,8 +119,11 @@ and the fallback comment can list them.
   commits) and `git log --oneline <merge-base>..origin/<base>` (base commits
   that introduced the conflict).
 - The PR title and body (for intent).
-- The linked issue number, if parseable from the PR body (for additional
-  intent; non-fatal if absent).
+- The linked issue title and body, if an issue number is parseable from the
+  PR body (fetched via `gh issue view <NUMBER> --json title,body`; non-fatal
+  if absent or unparseable). Passing the full issue content — not just the
+  number — ensures Issue #107's prompt can present the original intent to
+  Claude without requiring Claude to make a separate `gh issue view` call.
 - The explicit list of conflicted file paths.
 
 This mirrors the context-gathering pattern in `action_respond_review`.
