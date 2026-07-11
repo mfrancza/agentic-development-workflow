@@ -6,8 +6,8 @@
 ## Summary
 
 Implement `AGENT_ACTION=resolve-conflicts` inside the existing developer
-container image. This comprises three deliverables that travel together in one
-PR:
+container image. This comprises three deliverables that must stay in sync
+across their implementation PRs:
 
 1. `action_resolve_conflicts` — a new function in
    `docker/scripts/entrypoint.sh` that handles all git mechanics: checking out
@@ -136,10 +136,10 @@ distraction and adds token cost for no benefit.
    files that have already been staged, missing any markers Claude accidentally
    left in.  Both forms are run so that any unstaged file (never `git add`ed by
    Claude) is also caught:
-   - `git diff --cached --check` — staged content (working tree changes that
-     Claude added).
-   - `git diff --check` — unstaged content (any file Claude edited but did not
-     stage, which is itself an error).
+   - `git diff --cached --check` — staged content (index vs. HEAD; catches
+     conflict markers that Claude staged via `git add`).
+   - `git diff --check` — unstaged content (working tree vs. index; catches
+     files Claude edited but never staged).
 2. `git ls-files --unmerged` — lists files still in the "unmerged" index state
    (catches files that were never `git add`ed by Claude, even if they have no
    markers in the working copy).
