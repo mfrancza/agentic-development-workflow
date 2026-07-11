@@ -70,7 +70,7 @@ jobs:
           # (transient GitHub error, rate limit, permission regression), treat
           # the count as unknown and fall through to the unresolved-thread check.
           COMMENT_COUNT=""
-          if ! COMMENT_COUNT="$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" --jq 'length' 2>/dev/null)"; then
+          if ! COMMENT_COUNT="$(gh api "repos/$REPO_OWNER/$REPO_NAME/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" --jq 'length' 2>/dev/null)"; then
             echo "Failed to fetch inline comments; treating inline count as unknown."
           elif ! [[ "$COMMENT_COUNT" =~ ^[0-9]+$ ]]; then
             echo "Inline comment count '$COMMENT_COUNT' is non-numeric; treating as unknown."
