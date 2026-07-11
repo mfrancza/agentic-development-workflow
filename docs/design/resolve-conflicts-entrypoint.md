@@ -70,15 +70,19 @@ The action is `GITHUB_PR_NUMBER`-scoped (not issue-scoped), consistent with
 ### Decision 1 — Entrypoint owns git mechanics; Claude owns semantic content
 
 **Decision:** Follow the same split used by `respond-review`: the entrypoint
-does all git operations (checkout, merge, push, abort, commit), while Claude
-only edits file content and produces a human-readable summary.
+owns the git lifecycle operations (checkout, merge, verify, commit, push,
+abort), while Claude owns the per-file resolution work — editing conflicted
+files, staging each resolved file via `git add`, and producing a human-readable
+summary. The `git add` per file is Claude's responsibility because it is the
+natural endpoint of semantic resolution; the entrypoint does not know when an
+individual file is ready to stage.
 
 **Alternatives considered:**
 - Have Claude do the git operations too (as with `action_implement`). Rejected:
   conflict resolution requires precise sequencing — merge, then edit, then
   verify, then commit — and doing verification inside a Claude session is
-  unreliable. Keeping git operations in the shell ensures the verification step
-  is authoritative.
+  unreliable. Keeping the git lifecycle in the shell ensures the verification
+  step is authoritative.
 
 This matches the pattern documented for this issue in the parent design doc and
 requires no new architectural decision.
