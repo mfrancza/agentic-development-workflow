@@ -176,7 +176,7 @@ docker build -t agent-reviewer ./docker/reviewer
 
 **Credentials**
 
-The container needs two secrets: a GitHub token (`GH_TOKEN`) with **Contents read** and **Pull requests read/write** on the target repo, and an Anthropic API key (`ANTHROPIC_API_KEY`). Contents read is required because the reviewer entrypoint clones the repo and checks out the PR branch; Pull requests read/write is required to post the review.
+The container needs two secrets: a GitHub token (`GH_TOKEN`) with **Contents read**, **Pull requests read/write**, and **Checks: read** on the target repo, and an Anthropic API key (`ANTHROPIC_API_KEY`). Contents read is required because the reviewer entrypoint clones the repo and checks out the PR branch; Pull requests read/write is required to post the review; Checks: read is required because the entrypoint calls `gh pr checks` to fetch CI check status and include it in the review prompt.
 
 *Sourcing `GH_TOKEN`*
 
