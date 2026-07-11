@@ -48,7 +48,12 @@ For every sub-issue:
      --field sub_issue_id=<new_issue_number>
    ```
 
-**Note on dependency order:** Do not call `POST .../dependencies/blocked_by`. That endpoint returns 404 for the developer-agent App token — the App lacks the required write permission, so the call silently fails. Task-to-task dependency order is captured only in the task breakdown table in the design document (the "Depends on" column). Reviewers and implementers use the design doc table to understand sequencing.
+**Note on dependency order:** Do not call `POST .../dependencies/blocked_by`.
+That endpoint returns 404 for the developer-agent App token — the App lacks the
+required write permission, so the call silently fails. Task-to-task dependency
+order is captured only in the task breakdown table in the design document (the
+"Depends on" column). Reviewers and implementers use the design doc table to
+understand sequencing.
 
 The `draft` and `enhancement` labels must already exist in the repo. (`enhancement` is Terraform-managed today; `draft` will be added to Terraform in issue #69 — on a fresh repo before that lands, create it manually if needed.) If `gh issue create` fails because a label does not exist, create it first:
 ```bash
