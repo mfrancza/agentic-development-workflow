@@ -253,12 +253,17 @@ docker run --rm \
 For a reusable setup, write secrets to a permissions-restricted file outside the repo and use `--env-file`:
 
 ```sh
-# Create once; never commit this file
-cat > ~/.reviewer-env <<'EOF'
-ANTHROPIC_API_KEY=sk-ant-...
-GH_TOKEN=ghp_...
-EOF
-chmod 600 ~/.reviewer-env
+# Create once; never commit this file.
+# umask 077 ensures the file is created with 600 permissions from the start;
+# read -rsp prompts for each secret without echoing it, so values never
+# appear in command text or shell history.
+(
+  umask 077
+  read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo
+  read -rsp "GH_TOKEN: " GH_TOKEN && echo
+  printf 'ANTHROPIC_API_KEY=%s\nGH_TOKEN=%s\n' "$ANTHROPIC_API_KEY" "$GH_TOKEN" \
+    > ~/.reviewer-env
+)
 ```
 
 ```sh
