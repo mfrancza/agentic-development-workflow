@@ -231,7 +231,7 @@ The token expires in one hour and carries the same scopes as the CI installation
 *Sourcing `ANTHROPIC_API_KEY`*
 
 ```sh
-export ANTHROPIC_API_KEY="sk-ant-..."   # load from your password manager, not shell history
+read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
 ```
 
 *Passing credentials without leaking them*
@@ -240,7 +240,7 @@ Use `-e VARNAME` (without `=value`) so Docker reads each secret from your shell 
 
 ```sh
 export GH_TOKEN=$(gh auth token)           # or use Option B above
-export ANTHROPIC_API_KEY="sk-ant-..."      # from your password manager
+read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
 
 docker run --rm \
   -e ANTHROPIC_API_KEY \
