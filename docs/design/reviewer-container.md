@@ -50,13 +50,20 @@ Neither layer alone is sufficient (a future image edit could add push
 paths; a future permission bump could enable them), so reviews of changes to
 either must check the other still holds.
 
-### 4. Existing threads are context, not targets
+### 4. Existing threads are evaluated and resolved *(superseded by [re-review-loop.md](re-review-loop.md) — see issue #116)*
 
-The entrypoint passes existing review threads (with IDs) so the initial
-review does not duplicate findings that are already tracked — the prompt
-instructs Claude to skip any finding substantively covered by an open
-thread. Replying to or resolving those threads is explicitly #41's job; the
-initial-review prompt must not attempt it.
+The entrypoint passes existing review threads (with IDs) so the review can
+evaluate them against the current diff. The prompt instructs Claude to skip
+any finding substantively covered by a still-open thread; for threads whose
+findings are now addressed, Claude resolves them via the `resolveReviewThread`
+GraphQL mutation before posting the new review — so the verdict reflects only
+what truly remains unresolved.
+
+**Note:** The original decision deferred thread resolution to issue #41, with
+the initial-review prompt treating threads as context only. That was superseded
+in issue #116: the updated `review.md` prompt now actively evaluates open
+threads and resolves addressed ones (resolve first, then post the review). See
+`docs/design/re-review-loop.md` (decision 2) for the full rationale.
 
 ### 5. Knobs match the developer image
 
