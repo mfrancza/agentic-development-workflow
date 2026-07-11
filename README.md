@@ -176,7 +176,7 @@ docker build -t agent-reviewer ./docker/reviewer
 
 **Credentials**
 
-The container needs two secrets: a GitHub token (`GH_TOKEN`) with Pull requests read/write on the target repo, and an Anthropic API key (`ANTHROPIC_API_KEY`).
+The container needs two secrets: a GitHub token (`GH_TOKEN`) with **Contents read** and **Pull requests read/write** on the target repo, and an Anthropic API key (`ANTHROPIC_API_KEY`). Contents read is required because the reviewer entrypoint clones the repo and checks out the PR branch; Pull requests read/write is required to post the review.
 
 *Sourcing `GH_TOKEN`*
 
@@ -190,27 +190,35 @@ Reviews are posted under your GitHub identity rather than the reviewer-agent bot
 
 Option B — reviewer-agent installation token (matches CI exactly):
 
-If you need the review to appear as coming from the `reviewer-agent` bot, mint a short-lived installation token from the App's private key. You need the Client ID (`REVIEWER_APP_ID` — the `Iv23.xxx` value set in step 3) and the private key downloaded in step 1 (the `.pem` file):
+If you need the review to appear as coming from the `reviewer-agent` bot, mint a short-lived installation token from the App's private key. You need the **numeric App ID** (visible on the App's settings page at `https://github.com/settings/apps/<app-name>` — it is a plain integer, not the `Iv23.xxx` Client ID) and the private key downloaded in step 1 (the `.pem` file):
 
 ```sh
 # Requires: openssl, curl, jq
-CLIENT_ID="Iv23.xxxxxxxxxxxxxxxxxxxx"      # REVIEWER_APP_ID value from step 3
+APP_ID="123456"                            # numeric GitHub App ID (not the Iv23.xxx Client ID)
+OWNER="your-org-or-user"
+REPO="your-repo"
 KEY_FILE="$HOME/.config/agentic-agents/reviewer-agent.pem"
 
 _b64url() { openssl enc -base64 -A | tr '+/' '-_' | tr -d '='; }
 now=$(date +%s)
 jwt_header=$(printf '{"alg":"RS256","typ":"JWT"}' | _b64url)
 jwt_payload=$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' \
-  "$((now - 60))" "$((now + 600))" "$CLIENT_ID" | _b64url)
+  "$((now - 60))" "$((now + 600))" "$APP_ID" | _b64url)
 jwt_sig=$(printf '%s.%s' "$jwt_header" "$jwt_payload" \
   | openssl dgst -sha256 -sign "$KEY_FILE" | _b64url)
 JWT="${jwt_header}.${jwt_payload}.${jwt_sig}"
 
+# Fetch the installation for the specific repo (avoids picking the wrong
+# installation when the App is installed on multiple accounts/repos)
 installation_id=$(curl -sf \
   -H "Authorization: Bearer $JWT" \
   -H "Accept: application/vnd.github+json" \
-  "https://api.github.com/app/installations" \
-  | jq -r '.[0].id')
+  "https://api.github.com/repos/${OWNER}/${REPO}/installation" \
+  | jq -r '.id')
+
+[ -n "$installation_id" ] && [ "$installation_id" != "null" ] || \
+  { echo "No installation found for ${OWNER}/${REPO} — check APP_ID and that the App is installed on the repo."; exit 1; }
+
 export GH_TOKEN=$(curl -sf -X POST \
   -H "Authorization: Bearer $JWT" \
   -H "Accept: application/vnd.github+json" \
