@@ -28,12 +28,17 @@ jobs:
         with:
           persist-credentials: false
 
-      # Skip cleanly when there is nothing to respond to: an "approved" review
-      # with no body text and no inline review comments. Non-approval states
-      # (changes_requested, commented) always warrant a response even if the
-      # body is empty, since they signal the reviewer wants something changed
-      # or opened a discussion. Approvals with any body text or inline comments
-      # still warrant a response — the reviewer left feedback despite approving.
+      # Skip cleanly when there is nothing to respond to.
+      # Non-approval states (changes_requested, commented) always proceed — they
+      # signal the reviewer wants something changed or opened a discussion.
+      # For approved reviews two skip conditions apply:
+      #   1. Bare approval (no body, no inline comments): skip immediately without
+      #      querying unresolved threads — the common case, short-circuits the
+      #      extra API call.
+      #   2. Approved + zero unresolved PR review threads: skip even when the
+      #      review carries body text or inline comments — those are advisory
+      #      when nothing remains unresolved. Fail open on GraphQL errors so a
+      #      transient failure doesn't silently suppress a real response.
       - name: Check for reviewer feedback
         id: feedback
         env:
@@ -42,45 +47,95 @@ jobs:
           REVIEW_BODY: ${{ github.event.review.body }}
           REVIEW_ID: ${{ github.event.review.id }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          REPO_NAME: ${{ github.event.repository.name }}
         run: |
           set -euo pipefail
 
-          # Anything other than a bare approval is worth responding to.
+          # Anything other than an approved review is worth responding to.
           if [ "$REVIEW_STATE" != "approved" ]; then
             echo "Review state is '$REVIEW_STATE'; proceeding."
             echo "proceed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          # A non-blank body counts as feedback even on an approval.
+          # Determine whether body text is present.
+          HAS_BODY=false
           if [ -n "$(printf '%s' "${REVIEW_BODY:-}" | tr -d '[:space:]')" ]; then
-            echo "Approval carries a non-empty review body; proceeding."
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            exit 0
+            HAS_BODY=true
           fi
 
-          # Inline review comments also count as feedback.
+          # Determine inline review comment count.
           # Fail open: if the API call errors or returns a non-numeric value
-          # (transient GitHub error, rate limit, permission regression), default
-          # to proceeding so a harmless approval doesn't block or alert noisily.
-          if ! COMMENT_COUNT="$(gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" --jq 'length' 2>/dev/null)"; then
-            echo "Failed to fetch inline comments; failing open and proceeding."
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          # (transient GitHub error, rate limit, permission regression), treat
+          # the count as unknown and fall through to the unresolved-thread check.
+          COMMENT_COUNT=""
+          if ! COMMENT_COUNT="$(gh api "repos/$REPO_OWNER/$REPO_NAME/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" --jq 'length' 2>/dev/null)"; then
+            echo "Failed to fetch inline comments; treating inline count as unknown."
+          elif ! [[ "$COMMENT_COUNT" =~ ^[0-9]+$ ]]; then
+            echo "Inline comment count '$COMMENT_COUNT' is non-numeric; treating as unknown."
+            COMMENT_COUNT=""
+          fi
+
+          HAS_INLINE=false
+          if [[ "$COMMENT_COUNT" =~ ^[0-9]+$ ]] && [ "$COMMENT_COUNT" -gt 0 ]; then
+            HAS_INLINE=true
+          fi
+
+          # Bare approval: no body text and confirmed zero inline comments.
+          # Short-circuit without making the GraphQL call.
+          if [ "$HAS_BODY" = false ] && [ "$HAS_INLINE" = false ] && [ -n "$COMMENT_COUNT" ]; then
+            echo "Approval with no body and no inline comments; skipping respond-review."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          if ! [[ "$COMMENT_COUNT" =~ ^[0-9]+$ ]]; then
-            echo "Inline comment count '$COMMENT_COUNT' is non-numeric; failing open and proceeding."
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [ "$COMMENT_COUNT" -gt 0 ]; then
-            echo "Approval carries $COMMENT_COUNT inline comment(s); proceeding."
+
+          # Non-bare approval (body or inline comments present, or inline count
+          # unknown): skip if the PR has zero unresolved review threads. An
+          # approval with no open threads carries no actionable feedback — inline
+          # comments and body text are advisory when nothing remains unresolved.
+          # Fail open on GraphQL errors (empty or non-numeric response ⇒ proceed).
+          # Paginates through all review threads in batches of 100 using
+          # --paginate, which automatically supplies $endCursor each round.
+          UNRESOLVED_COUNT="$(gh api graphql --paginate \
+            -F owner="$REPO_OWNER" \
+            -F name="$REPO_NAME" \
+            -F number="$PR_NUMBER" \
+            -f query='
+              query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
+                repository(owner: $owner, name: $name) {
+                  pullRequest(number: $number) {
+                    reviewThreads(first: 100, after: $endCursor) {
+                      nodes { isResolved }
+                      pageInfo { hasNextPage endCursor }
+                    }
+                  }
+                }
+              }' \
+            --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' \
+            2>/dev/null | jq -s 'add // 0')" || UNRESOLVED_COUNT=""
+
+          if ! [[ "$UNRESOLVED_COUNT" =~ ^[0-9]+$ ]]; then
+            echo "Unresolved thread count is non-numeric or unavailable; failing open and proceeding."
             echo "proceed=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "Approval with no body and no inline comments; skipping respond-review."
-          echo "proceed=false" >> "$GITHUB_OUTPUT"
+          if [ "$UNRESOLVED_COUNT" -eq 0 ]; then
+            echo "Approval with zero unresolved threads; skipping respond-review."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Unresolved threads remain — there is actionable feedback to respond to.
+          if [ "$HAS_BODY" = true ]; then
+            echo "Approval carries a non-empty review body; $UNRESOLVED_COUNT unresolved thread(s) remain; proceeding."
+          elif [ "$HAS_INLINE" = true ]; then
+            echo "Approval carries $COMMENT_COUNT inline comment(s); $UNRESOLVED_COUNT unresolved thread(s) remain; proceeding."
+          else
+            echo "Approval with unknown inline count; $UNRESOLVED_COUNT unresolved thread(s) remain; proceeding."
+          fi
+          echo "proceed=true" >> "$GITHUB_OUTPUT"
 
       # Mint only after we've decided to proceed — no installation token for runs we skip.
       - name: Mint installation token for developer-agent
