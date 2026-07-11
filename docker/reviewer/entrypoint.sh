@@ -225,8 +225,9 @@ git diff --name-only "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 printf '\nFull diff (base..head):\n' >> "$CONTEXT_FILE"
 git diff "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 {
-    printf '\nExisting open (unresolved) review threads (context only — do not reply to\n'
-    printf 'or resolve them; skip any finding already covered by an open thread):\n'
+    printf '\nExisting open (unresolved) review threads (evaluate each against the current\n'
+    printf 'diff; resolve addressed threads via resolveReviewThread before posting the\n'
+    printf 'review; skip new findings already covered by still-open threads):\n'
     printf '%s\n' "${REVIEW_THREADS_JSON}"
     printf '\nCI check status:\n'
     printf '%s\n' "${CHECKS_JSON}"
