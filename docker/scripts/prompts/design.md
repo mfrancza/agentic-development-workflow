@@ -48,12 +48,14 @@ For every sub-issue:
      --field sub_issue_id=<new_issue_number>
    ```
 
-**Note on dependency order:** Do not call `POST .../dependencies/blocked_by`.
-That endpoint returns 404 for the developer-agent App token — the App lacks the
-required write permission, so the call silently fails. Task-to-task dependency
-order is captured only in the task breakdown table in the design document (the
-"Depends on" column). Reviewers and implementers use the design doc table to
-understand sequencing.
+3. **Record blocked-by dependencies** (for tasks that depend on other tasks).
+   The API requires the blocking issue's global database ID, not its number:
+   ```bash
+   BLOCKING_ID="$(gh api "repos/${GITHUB_REPO}/issues/<blocking_issue_number>" --jq '.id')"
+   gh api -X POST "repos/${GITHUB_REPO}/issues/<blocked_issue_number>/dependencies/blocked_by" \
+     -F issue_id="$BLOCKING_ID"
+   ```
+   Repeat for every depends-on edge in the task breakdown table.
 
 The `draft` and `enhancement` labels must already exist in the repo. (`enhancement` is Terraform-managed today; `draft` will be added to Terraform in issue #69 — on a fresh repo before that lands, create it manually if needed.) If `gh issue create` fails because a label does not exist, create it first:
 ```bash

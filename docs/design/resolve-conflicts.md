@@ -146,4 +146,5 @@ Issues #63 and #64 can proceed in parallel — this document is the contract
 (`AGENT_ACTION=resolve-conflicts`, env: `GITHUB_PR_NUMBER`). Issue #65
 validates both paths end-to-end.
 
-Dependency order is documented in the task breakdown table above.
+Dependencies are recorded natively as GitHub blocked-by relationships on the
+issues.

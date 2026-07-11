@@ -192,4 +192,6 @@ graph TD
 Issues #36–#38 can proceed in parallel; #40 integrates them; #41 completes
 the acceptance criteria.
 
-Dependency order is documented in the task breakdown table above.
+Dependencies are also recorded natively on the issues themselves using
+GitHub's blocked-by relationships, so blocked work is visible directly in the
+issue UI without consulting this table.

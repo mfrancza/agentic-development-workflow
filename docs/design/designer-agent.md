@@ -43,7 +43,8 @@ A new workflow `agent-design.yml` mirrors `agent-groom.yml`:
 - Runs the existing developer image with a new `AGENT_ACTION=design` and the
   developer-agent identity. The developer app already has Contents (R/W) for
   the design branch/PR and Issues (R/W) for sub-issue creation, sub-issue
-  linking, and labels — no new identity or permission is needed.
+  linking, blocked-by relationships, and labels — no new identity or
+  permission is needed.
 - `model:<name>` labels on the issue override `vars.DEFAULT_CLAUDE_MODEL`,
   exactly like `agent-implement` / `agent-groom`.
 
@@ -89,11 +90,11 @@ For the sub-issues, the prompt encodes the practices already in use:
   the dependency order; parallelizable tasks are explicitly independent, and
   an end-to-end validation task depends on the implementation tasks.
 - Every sub-issue: linked to the parent via the sub-issue API
-  (`POST /repos/{repo}/issues/{parent}/sub_issues`) and labeled
-  `draft` + `enhancement`. Dependency order is captured in the design doc's
-  task breakdown table ("Depends on" column); the
-  `POST .../dependencies/blocked_by` API endpoint returns 404 for the
-  developer-agent App token and is not called.
+  (`POST /repos/{repo}/issues/{parent}/sub_issues`), dependencies recorded
+  natively via blocked-by
+  (`POST /repos/{repo}/issues/{n}/dependencies/blocked_by` with the blocking
+  issue's global database ID as `-F issue_id=<id>`), and labeled
+  `draft` + `enhancement`.
 - Issue references at the start of a Markdown line must be written as
   "Issue #N" — a bare leading `#N` renders as a header (bug class already
   caught twice in review).
@@ -109,8 +110,8 @@ For the sub-issues, the prompt encodes the practices already in use:
   the branch name, enumerates the parent's sub-issues, and removes the
   `draft` label from each — plain `gh` CLI steps with the agent token; no
   container needed. Alternatives considered: manual un-drafting (toil that
-  will be forgotten) and closing/reopening sub-issues (interrupts the
-  sub-issue relationship); both rejected.
+  will be forgotten) and closing/reopening sub-issues (destroys the
+  blocked-by graph); both rejected.
 - **Implementation guard:** `agent-implement.yml` gains one condition — skip
   (with a log line) when the issue carries the `draft` label, so a stray
   `agent:developer` label cannot start implementation against an unapproved
@@ -149,4 +150,5 @@ Issues #69 and #70 can proceed in parallel (this document is the contract:
 `AGENT_ACTION=design`, env `GITHUB_ISSUE_NUMBER`, branch `design/issue-{N}`).
 Issue #72 only needs the label from #69. Issue #73 validates the whole loop.
 
-Dependency order is documented in the task breakdown table above.
+Dependencies are recorded natively as GitHub blocked-by relationships on the
+issues.

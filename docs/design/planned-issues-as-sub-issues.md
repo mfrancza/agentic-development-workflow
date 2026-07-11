@@ -108,16 +108,27 @@ structured file, which adds complexity out of proportion to the benefit. The
 existing check already catches complete failures; partial failures become far
 less likely once creation and linking are atomic.
 
-### Decision 4: Blocked-by relationships removed; dependency order in design doc
+### Decision 4: Blocked-by API call corrected; dependency order tracked natively
 
-The investigation found that the `POST .../dependencies/blocked_by` endpoint
-returns 404 for the developer-agent App token — the App lacks the required
-write permission. The calls were silently failing. They were left as-is in
-issue #99 (out of scope) and later removed from the prompt in issue #105.
+The investigation (issue #99) found that the original
+`POST .../dependencies/blocked_by` calls silently returned 404 due to a
+payload bug: the field was named `blocked_by_id` (correct name is `issue_id`),
+and issue *numbers* were passed where the API requires the global database *ID*.
+The endpoint itself works with the developer-agent App token when called
+correctly — this is not a permission gap.
 
-Task-to-task dependency order is now captured only in the task breakdown table
-in the design document (the "Depends on" column). Reviewers and implementers
-use the design doc table to understand sequencing.
+The call was corrected in issue #105:
+
+```bash
+BLOCKING_ID="$(gh api "repos/${GITHUB_REPO}/issues/<blocking_issue_number>" --jq '.id')"
+gh api -X POST "repos/${GITHUB_REPO}/issues/<blocked_issue_number>/dependencies/blocked_by" \
+  -F issue_id="$BLOCKING_ID"
+```
+
+Task-to-task dependency order is now tracked natively via GitHub's blocked-by
+relationship graph (visible in the issue UI Relationships panel) and also
+documented in the task breakdown table ("Depends on" column) for easy
+reference.
 
 ## Out of scope
 

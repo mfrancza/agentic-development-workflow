@@ -79,4 +79,5 @@ between them (the entrypoint provides the context described here; the prompt
 consumes it and posts the review). #57 validates the pair end-to-end and is
 expected to feed small fixes back into both.
 
-Dependency order is documented in the task breakdown table above.
+Dependencies are recorded natively as GitHub blocked-by relationships on the
+issues.
