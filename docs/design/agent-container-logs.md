@@ -48,7 +48,10 @@ Neither stream alone is sufficient:
   telling debuggers to jump between the workflow-run UI and the artifact.
 - **Claude Code session JSONL** — one file per session at
   `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl` (confirmed against
-  Claude Code v2.1.150, the version pinned in `docker/Dockerfile`). Records
+  Claude Code v2.1.150, the version pinned in `docker/Dockerfile`; the #128
+  validation task must re-verify this path after any Claude Code version
+  bump, since a silent path change would produce an empty `session/`
+  directory with no other error). Records
   each turn, tool invocation, tool result, and model response with
   timestamps. Persists by default in `--print` mode (no flag needed). This is
   what the Q&A calls "model session logs" — the turn-by-turn record needed to
@@ -85,8 +88,14 @@ matches how workflow logs are already accessed.
   bounded without needing a separate policy.
 - Failure runs still upload: `if: always()` on the upload step ensures logs
   survive an aborting container.
-- Artifacts are scoped to the workflow run: only users who can already see
-  the workflow log can download them. No new access-control surface.
+- **Artifact access scope:** On a *private* repository, artifacts are scoped
+  to the workflow run and require the same repository read access as the
+  workflow log. On a *public* repository, workflow run artifacts are
+  downloadable by anyone (unauthenticated `gh run download` or the Actions
+  UI) — there is no access gate beyond the repo being public. The redaction
+  strategy in Decision 4 is therefore the primary security control regardless
+  of repository visibility; it must not be treated as a defence-in-depth
+  measure subordinate to access control.
 
 Alternatives considered and rejected:
 
@@ -134,6 +143,30 @@ Two mechanisms feed `container.log`:
   set up so trap output is also captured) copies `~/.claude/projects/.` to
   `/home/agent/logs/session/`. Runs on every exit path — normal, `set -e`
   abort, SIGTERM from workflow cancellation.
+
+**Implementation constraint — tee flush before redaction (required in #125):**
+`exec > >(tee -a …)` creates a background subprocess connected to bash's
+stdout via a kernel pipe. When the EXIT trap fires, that subprocess is still
+running — it continues draining whatever is in the pipe buffer. If the
+trap's redaction pass runs while tee still has unwritten data buffered, tee
+subsequently flushes that data to `container.log` *after* redaction, leaving
+the final kilobytes of output (most recent `gh`/`git` commands, final Claude
+response) unredacted in the file.
+
+The trap body **must** follow this sequence to close the race:
+
+1. Emit any final log lines that should appear in `container.log` (these
+   must come *before* closing the fd).
+2. `exec >&-` — close bash's stdout fd, signalling EOF into the pipe. tee
+   will drain the pipe and exit cleanly.
+3. `wait` — block until the tee subprocess exits. After `wait` returns,
+   `container.log` is fully written.
+4. Run the `sed -i` redaction pass over `/home/agent/logs/`.
+5. Copy `~/.claude/projects/` to `/home/agent/logs/session/`.
+
+Any trap messages needed after step 2 must go to stderr or directly to the
+log file (e.g. `echo "… " >> /home/agent/logs/container.log`) since stdout
+is closed. #125 must implement this sequence.
 
 Why bind-mount rather than `docker cp` from a named volume: `--rm` is
 retained across all workflows for cleanup hygiene, and `docker cp` before
@@ -231,7 +264,7 @@ need a design of its own) and is deliberately not bundled.
 | [#125](https://github.com/mfrancza/agentic-development-workflow/issues/125) | Add log-capture block to the developer image entrypoint (`docker/scripts/entrypoint.sh`): install the `tee` redirect, install the trap-EXIT that copies `~/.claude/projects/` to `/home/agent/logs/session/` and runs the secret-redaction pass, ensure `/home/agent/logs` exists and is writable. Same block, copied, into the reviewer entrypoint (`docker/reviewer/entrypoint.sh`). No behavior change to the actions themselves. | — |
 | [#126](https://github.com/mfrancza/agentic-development-workflow/issues/126) | Update all six developer-image workflow container-run steps (`agent-implement.yml`, `agent-groom.yml`, `agent-design.yml` design job, `agent-fix-checks.yml`, `agent-fix-deployment.yml`, `agent-respond-review.yml`) and the reviewer workflow (`agent-review.yml`): pre-create `${RUNNER_TEMP}/agent-logs` with 0777, add `-v` bind-mount to `docker run`, add pinned `actions/upload-artifact` step with `if: always()`, run-specific artifact name, and `retention-days: 30`. | — |
 | [#127](https://github.com/mfrancza/agentic-development-workflow/issues/127) | Documentation: update `AGENTS.md` (where logs land, what's in them, the 30-day retention, the redaction pass) and `README.md` (add the `-v "$PWD/logs:/home/agent/logs"` mount to the local `docker run` example, note the artifact download flow for CI runs). | — |
-| [#128](https://github.com/mfrancza/agentic-development-workflow/issues/128) | End-to-end validation: trigger one developer workflow (`implement` or `groom` on a throwaway issue) and one reviewer workflow on a real PR; download the artifacts via `gh run download`; verify `container.log` contains the entrypoint's log lines and the final Claude output; verify `session/**/*.jsonl` exists and is non-empty; verify a synthetic token in the logs is redacted (temporarily set a fake `GH_TOKEN` value and confirm it does not appear in the uploaded artifact); force an intentional failure (e.g. bad env var) and confirm the artifact still uploads. | #125, #126 |
+| [#128](https://github.com/mfrancza/agentic-development-workflow/issues/128) | End-to-end validation: trigger one developer workflow (`implement` or `groom` on a throwaway issue) and one reviewer workflow on a real PR; download the artifacts via `gh run download`; verify `container.log` contains the entrypoint's log lines and the final Claude output; verify `session/**/*.jsonl` exists and is non-empty; verify a synthetic token in the logs is redacted (temporarily set a fake `GH_TOKEN` value and confirm it does not appear in the uploaded artifact); force an intentional failure (e.g. bad env var) and confirm the artifact still uploads. **Additionally: after any bump to the Claude Code version pinned in `docker/Dockerfile`, explicitly confirm that `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl` (the path confirmed against v2.1.150) still exists and is non-empty — a silent path change would produce an empty `session/` directory with no other error.** | #125, #126 |
 
 Issues #125 and #126 can proceed in parallel — this document is the contract
 between them: the container writes everything to `/home/agent/logs/` before
