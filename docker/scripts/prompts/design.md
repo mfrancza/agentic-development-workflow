@@ -40,7 +40,8 @@ For every sub-issue:
      --title "<task title>" \
      --body "<scope/key-files/dependency body>" \
      --label "draft" \
-     --label "enhancement"
+     --label "enhancement" \
+     --parent "$GITHUB_ISSUE_NUMBER"
    ```
    Capture the returned issue URL and extract the issue number from it.
    (`--parent` uses a GraphQL mutation internally and works with the
