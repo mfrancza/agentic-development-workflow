@@ -95,21 +95,25 @@ jobs:
           # approval with no open threads carries no actionable feedback — inline
           # comments and body text are advisory when nothing remains unresolved.
           # Fail open on GraphQL errors (empty or non-numeric response ⇒ proceed).
-          # TODO: paginate if PRs routinely exceed 100 review threads.
-          UNRESOLVED_COUNT="$(gh api graphql \
+          # Paginates through all review threads in batches of 100 using
+          # --paginate, which automatically supplies $endCursor each round.
+          UNRESOLVED_COUNT="$(gh api graphql --paginate \
             -F owner="$REPO_OWNER" \
             -F name="$REPO_NAME" \
             -F number="$PR_NUMBER" \
             -f query='
-              query($owner: String!, $name: String!, $number: Int!) {
+              query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
                 repository(owner: $owner, name: $name) {
                   pullRequest(number: $number) {
-                    reviewThreads(first: 100) { nodes { isResolved } }
+                    reviewThreads(first: 100, after: $endCursor) {
+                      nodes { isResolved }
+                      pageInfo { hasNextPage endCursor }
+                    }
                   }
                 }
               }' \
             --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' \
-            2>/dev/null)" || UNRESOLVED_COUNT=""
+            2>/dev/null | jq -s 'add // 0')" || UNRESOLVED_COUNT=""
 
           if ! [[ "$UNRESOLVED_COUNT" =~ ^[0-9]+$ ]]; then
             echo "Unresolved thread count is non-numeric or unavailable; failing open and proceeding."
