@@ -221,11 +221,16 @@ installation_id=$(curl -sf \
 [ -n "$installation_id" ] && [ "$installation_id" != "null" ] || \
   { echo "No installation found for ${OWNER}/${REPO} — check APP_ID and that the App is installed on the repo."; exit 1; }
 
-export GH_TOKEN=$(curl -sf -X POST \
+_token=$(curl -sf -X POST \
   -H "Authorization: Bearer $JWT" \
   -H "Accept: application/vnd.github+json" \
   "https://api.github.com/app/installations/${installation_id}/access_tokens" \
   | jq -r '.token')
+
+[ -n "$_token" ] && [ "$_token" != "null" ] || \
+  { echo "Failed to mint installation token — check that the App is installed and the JWT is valid."; exit 1; }
+
+export GH_TOKEN="$_token"
 ```
 
 The token expires in one hour and carries the same scopes as the CI installation token.
