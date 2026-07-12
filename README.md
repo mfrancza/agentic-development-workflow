@@ -152,9 +152,15 @@ docker build -t agent-developer ./docker
 Run locally against an issue (example — `AGENT_ACTION=implement`):
 
 ```sh
+# Export secrets into your shell first; using -e VARNAME (not -e KEY=VALUE) keeps
+# values out of the docker run command text and shell history
+# (the values will still be present in the container environment).
+export GH_TOKEN=$(gh auth token)    # or set from another source
+[ -n "${ANTHROPIC_API_KEY:-}" ] || { read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY; }
+
 docker run --rm \
-  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-  -e GH_TOKEN="$GH_TOKEN" \
+  -e ANTHROPIC_API_KEY \
+  -e GH_TOKEN \
   -e GITHUB_REPO="owner/repo" \
   -e AGENT_ACTION="implement" \
   -e GITHUB_ISSUE_NUMBER="1" \
@@ -163,6 +169,132 @@ docker run --rm \
 ```
 
 See [AGENTS.md](AGENTS.md#agent-actions) for the full matrix of `AGENT_ACTION` values and their required env vars.
+
+### 5. Build and run the reviewer agent container
+
+The reviewer image lives at `docker/reviewer/`, separate from the developer image at `docker/`. In CI, `agent-review.yml` builds and runs it automatically when the `agent:review` label is applied to a PR. The same image can be run locally to validate a review pass against a real PR.
+
+**Build**
+
+```sh
+docker build -t agent-reviewer ./docker/reviewer
+```
+
+**Credentials**
+
+The container needs two secrets: a GitHub token (`GH_TOKEN`) with **Contents read**, **Pull requests read/write**, and **Checks: read** on the target repo, and an Anthropic API key (`ANTHROPIC_API_KEY`). Contents read is required because the reviewer entrypoint clones the repo and checks out the PR branch; Pull requests read/write is required to post the review; Checks: read is required because the entrypoint calls `gh pr checks` to fetch CI check status and include it in the review prompt.
+
+*Sourcing `GH_TOKEN`*
+
+Option A — your personal GitHub token (simplest, for local testing):
+
+```sh
+export GH_TOKEN=$(gh auth token)
+```
+
+Reviews are posted under your GitHub identity rather than the reviewer-agent bot. This is fine for validating review logic locally; in CI the review is attributed to the reviewer-agent App.
+
+Option B — reviewer-agent installation token (matches CI exactly):
+
+If you need the review to appear as coming from the `reviewer-agent` bot, mint a short-lived installation token from the App's private key. You need the **numeric App ID** (visible on the App's settings page at `https://github.com/settings/apps/<app-name>` — it is a plain integer, not the `Iv23.xxx` Client ID) and the private key downloaded in step 1 (the `.pem` file).
+
+> **Note on App ID vs. Client ID:** The CI workflow uses `.github/actions/agent-token`, which calls `actions/create-github-app-token` via the `client-id` input — it expects the `Iv23.xxx` Client ID. If your `REVIEWER_APP_ID` repository secret contains the Client ID (valid for that action), it **will not work** as `APP_ID` here — the GitHub JWT API requires the numeric App ID in the `iss` claim. To find the numeric ID, open the App's settings page and look for the plain-integer "App ID" field; it is distinct from the Client ID shown further down the page.
+
+> **Tip:** The guards in this snippet use `exit 1` for error reporting. If you paste it directly into an interactive shell session, a failure will close that session. To avoid this, paste the snippet into a script file and run it, or wrap the whole block in a subshell — but note that a subshell will not export `GH_TOKEN` to the parent shell, so you would need to re-export it after (`export GH_TOKEN="$(...)"` form).
+
+```sh
+# Requires: openssl, curl, jq
+APP_ID="123456"                            # numeric GitHub App ID (not the Iv23.xxx Client ID)
+OWNER="your-org-or-user"
+REPO="your-repo"
+KEY_FILE="$HOME/.config/agentic-agents/reviewer-agent.pem"
+
+[ -f "$KEY_FILE" ] && [ -r "$KEY_FILE" ] || \
+  { echo "KEY_FILE not found or not readable: $KEY_FILE"; exit 1; }
+
+_b64url() { openssl enc -base64 -A | tr '+/' '-_' | tr -d '='; }
+now=$(date +%s)
+jwt_header=$(printf '{"alg":"RS256","typ":"JWT"}' | _b64url)
+jwt_payload=$(printf '{"iat":%s,"exp":%s,"iss":%s}' \
+  "$((now - 60))" "$((now + 600))" "$APP_ID" | _b64url)
+jwt_sig=$(printf '%s.%s' "$jwt_header" "$jwt_payload" \
+  | openssl dgst -sha256 -sign "$KEY_FILE" | _b64url)
+JWT="${jwt_header}.${jwt_payload}.${jwt_sig}"
+
+# Fetch the installation for the specific repo (avoids picking the wrong
+# installation when the App is installed on multiple accounts/repos)
+installation_id=$(curl -sf \
+  -H "Authorization: Bearer $JWT" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/${OWNER}/${REPO}/installation" \
+  | jq -r '.id')
+
+[ -n "$installation_id" ] && [ "$installation_id" != "null" ] || \
+  { echo "No installation found for ${OWNER}/${REPO} — check APP_ID and that the App is installed on the repo."; exit 1; }
+
+_token=$(curl -sf -X POST \
+  -H "Authorization: Bearer $JWT" \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/app/installations/${installation_id}/access_tokens" \
+  | jq -r '.token')
+
+[ -n "$_token" ] && [ "$_token" != "null" ] || \
+  { echo "Failed to mint installation token — check that the App is installed and the JWT is valid."; exit 1; }
+
+export GH_TOKEN="$_token"
+```
+
+The token expires in one hour and carries the same scopes as the CI installation token.
+
+*Sourcing `ANTHROPIC_API_KEY`*
+
+```sh
+read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY
+```
+
+*Passing credentials without leaking them*
+
+Use `-e VARNAME` (without `=value`) so Docker reads each secret from your shell environment — the value does not appear in the `docker run` command text or shell history. Note that the secret is still present in the container's environment and visible via `docker inspect` while the container runs:
+
+```sh
+export GH_TOKEN=$(gh auth token)           # or use Option B above
+read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY
+
+docker run --rm \
+  -e ANTHROPIC_API_KEY \
+  -e GH_TOKEN \
+  -e GITHUB_REPO="owner/repo" \
+  -e GITHUB_PR_NUMBER="42" \
+  agent-reviewer
+```
+
+For a reusable setup, write secrets to a permissions-restricted file outside the repo and use `--env-file`:
+
+```sh
+# Create once; never commit this file.
+# umask 077 ensures the file is created with 600 permissions from the start;
+# read -rsp prompts for each secret without echoing it, so values never
+# appear in command text or shell history.
+(
+  umask 077
+  read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo
+  read -rsp "GH_TOKEN: " GH_TOKEN && echo
+  printf 'ANTHROPIC_API_KEY=%s\nGH_TOKEN=%s\n' "$ANTHROPIC_API_KEY" "$GH_TOKEN" \
+    > ~/.reviewer-env
+)
+```
+
+```sh
+docker run --rm \
+  --env-file ~/.reviewer-env \
+  -e GITHUB_REPO="owner/repo" \
+  -e GITHUB_PR_NUMBER="42" \
+  agent-reviewer
+```
+
+Optional: `-e CLAUDE_MODEL="sonnet"` and `-e CLAUDE_MAX_TURNS="100"` (both default to these values, matching the CI workflow knobs).
+
+The entrypoint clones the repo read-only, gathers the diff against the merge-base, fetches open review threads and CI check status, invokes Claude, then verifies that a review by the authenticated GitHub identity was posted against the PR head SHA — exiting non-zero if the agent did not complete the review.
 
 ## Status
 
@@ -173,5 +305,4 @@ MVP substantially built. Implemented:
 - GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/).
 - Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_CLAUDE_MODEL` Actions variables.
 - Claude model override via `model:<name>` labels on issues and PRs (reviewer agent).
-
-Pending: a dedicated local-run guide for developer and reviewer agents.
+- Local run guides for the developer agent ([Build the developer agent container](#4-build-the-developer-agent-container)) and the reviewer agent ([Build and run the reviewer agent container](#5-build-and-run-the-reviewer-agent-container)).
