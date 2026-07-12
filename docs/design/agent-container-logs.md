@@ -243,8 +243,11 @@ Two edge cases must be handled explicitly:
    interleaving the replacement string throughout every line. The substitution
    for each variable **must be skipped when that variable is empty**:
    ```bash
-   [ -n "${GH_TOKEN:-}" ] && find /home/agent/logs -type f \
-     -exec sed -i "s/$(printf '%s\n' "${GH_TOKEN}" | sed 's/[\/&\\]/\\&/g')/***REDACTED-GH_TOKEN***/g" {} +
+   if [ -n "${GH_TOKEN:-}" ]; then
+     _escaped_token=$(printf '%s\n' "${GH_TOKEN}" | sed 's/[\/&\\]/\\&/g')
+     find /home/agent/logs -type f \
+       -exec sed -i "s/${_escaped_token}/***REDACTED-GH_TOKEN***/g" {} +
+   fi
    ```
 
 2. **Regex/replacement metacharacters:** `GH_TOKEN` and `ANTHROPIC_API_KEY`
