@@ -200,6 +200,8 @@ If you need the review to appear as coming from the `reviewer-agent` bot, mint a
 
 > **Note on App ID vs. Client ID:** The CI workflow uses `.github/actions/agent-token`, which calls `actions/create-github-app-token` via the `client-id` input — it expects the `Iv23.xxx` Client ID. If your `REVIEWER_APP_ID` repository secret contains the Client ID (valid for that action), it **will not work** as `APP_ID` here — the GitHub JWT API requires the numeric App ID in the `iss` claim. To find the numeric ID, open the App's settings page and look for the plain-integer "App ID" field; it is distinct from the Client ID shown further down the page.
 
+> **Tip:** The guards in this snippet use `exit 1` for error reporting. If you paste it directly into an interactive shell session, a failure will close that session. To avoid this, paste the snippet into a script file and run it, or wrap the whole block in a subshell — but note that a subshell will not export `GH_TOKEN` to the parent shell, so you would need to re-export it after (`export GH_TOKEN="$(...)"` form).
+
 ```sh
 # Requires: openssl, curl, jq
 APP_ID="123456"                            # numeric GitHub App ID (not the Iv23.xxx Client ID)
@@ -247,7 +249,7 @@ The token expires in one hour and carries the same scopes as the CI installation
 *Sourcing `ANTHROPIC_API_KEY`*
 
 ```sh
-read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
+read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY
 ```
 
 *Passing credentials without leaking them*
@@ -256,7 +258,7 @@ Use `-e VARNAME` (without `=value`) so Docker reads each secret from your shell 
 
 ```sh
 export GH_TOKEN=$(gh auth token)           # or use Option B above
-read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
+read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY
 
 docker run --rm \
   -e ANTHROPIC_API_KEY \
