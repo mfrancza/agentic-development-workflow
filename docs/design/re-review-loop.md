@@ -119,13 +119,12 @@ Prompt-level flow (updated `review.md`):
 5. **Resolve addressed threads** via the GraphQL `resolveReviewThread`
    mutation, one call per thread ID. Do this **after** the review is posted.
 
-Order matters: **post the review first, then resolve threads**. If thread
+Order matters: **post the review first, then resolve threads**. If the
+review post fails, the run aborts before any thread resolutions — the next
+re-review starts from the same open-thread state with no drift. If thread
 resolutions fail after the review lands, the next re-review can retry —
-worst case is a thread that remains open but could have been resolved. If
-resolutions fail before the review is posted, the run aborts cleanly and the
-next re-review sees the same open-thread set and can retry without any drift
-between verdict and thread state. A resolution failure is non-fatal: the
-review already stands.
+worst case is a thread that remains open but could have been resolved.
+A resolution failure is non-fatal: the review already stands.
 
 **Alternatives considered.**
 
