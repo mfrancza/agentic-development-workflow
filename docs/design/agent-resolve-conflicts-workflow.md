@@ -152,9 +152,12 @@ consistent with the output-injection hygiene pattern in `AGENTS.md`.
 
 **Safe env wiring for multi-trigger workflows:** `inputs.*` is only defined
 when the trigger is `workflow_dispatch` or `workflow_call`. On a `push` trigger
-the entire `inputs` context is absent, so `${{ inputs.pr_number }}` evaluates
-to an empty string at expression time — however, strict Bash (`set -e -o
-pipefail`) combined with an unset variable and `set -u` would still error.
+the entire `inputs` context is absent; referencing `${{ inputs.pr_number }}`
+can cause expression evaluation itself to fail — it does not merely resolve to
+an empty string. This means `${{ inputs.pr_number }}` must never appear in an
+`env:` mapping or expression for a multi-trigger workflow. Even if expression
+evaluation were to silently produce an empty string, strict Bash (`set -e -o
+pipefail -u`) would still error on an unset variable inside the script.
 The `env:` mapping must therefore use a fallback expression:
 
 ```yaml
@@ -170,7 +173,7 @@ always produces an empty string when no input was provided.
 
 **Decision:** Enumerate agent-authored PRs by filtering
 `author.login == "app/mfrancza-developer-agent"` in the output of
-`gh pr list --json author --limit 500`. The explicit `--limit 500` overrides
+`gh pr list --json author,number --limit 500`. The explicit `--limit 500` overrides
 `gh`'s default cap of 30 results, ensuring that older open agent-authored PRs
 are not silently skipped. 500 is a practical upper bound (a repository with
 more than 500 simultaneously open agent PRs warrants a different strategy);
