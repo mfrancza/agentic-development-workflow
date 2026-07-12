@@ -204,7 +204,7 @@ KEY_FILE="$HOME/.config/agentic-agents/reviewer-agent.pem"
 _b64url() { openssl enc -base64 -A | tr '+/' '-_' | tr -d '='; }
 now=$(date +%s)
 jwt_header=$(printf '{"alg":"RS256","typ":"JWT"}' | _b64url)
-jwt_payload=$(printf '{"iat":%s,"exp":%s,"iss":"%s"}' \
+jwt_payload=$(printf '{"iat":%s,"exp":%s,"iss":%s}' \
   "$((now - 60))" "$((now + 600))" "$APP_ID" | _b64url)
 jwt_sig=$(printf '%s.%s' "$jwt_header" "$jwt_payload" \
   | openssl dgst -sha256 -sign "$KEY_FILE" | _b64url)
