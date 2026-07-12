@@ -97,8 +97,9 @@ matches how workflow logs are already accessed.
 - **Artifact access scope:** On a *private* repository, artifacts are scoped
   to the workflow run and require the same repository read access as the
   workflow log. On a *public* repository, workflow run artifacts are
-  downloadable by anyone (unauthenticated `gh run download` or the Actions
-  UI) — there is no access gate beyond the repo being public. The redaction
+  downloadable by anyone — via the Actions UI without requiring a GitHub
+  account, or via `gh run download` with any authenticated GitHub account
+  — there is no access gate beyond the repo being public. The redaction
   strategy in Decision 4 is therefore the primary security control regardless
   of repository visibility; it must not be treated as a defence-in-depth
   measure subordinate to access control.
@@ -133,6 +134,10 @@ Contract between the container and the workflow:
 - **Host path:** `${{ runner.temp }}/agent-logs/` (workflow-controlled;
   pre-created with `chmod 0777` because the container's `agent` UID differs
   from the runner's `runner` UID and the mount must be writable).
+  `${{ runner.temp }}` is the GitHub Actions expression equivalent of the
+  `${RUNNER_TEMP}` shell environment variable; both forms appear in this
+  document in their contextually appropriate places — YAML expressions in
+  workflow step configuration, shell variables in shell commands.
 - **Wiring:** `docker run --rm -v "$HOST_LOGS:/home/agent/logs" …` in every
   workflow that runs an agent image.
 
