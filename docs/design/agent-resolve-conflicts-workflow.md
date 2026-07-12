@@ -1,0 +1,199 @@
+# Design: `agent-resolve-conflicts` Workflow
+
+**Issue:** [#64](https://github.com/mfrancza/agentic-development-workflow/issues/64)
+**Parent design:** [docs/design/resolve-conflicts.md](resolve-conflicts.md) (Issue #54)
+
+## Summary
+
+Implement `.github/workflows/agent-resolve-conflicts.yml` — the GitHub Actions
+workflow that reacts to pushes on `main` by detecting conflicted agent-authored
+PRs and dispatching the `resolve-conflicts` container action for each one.
+
+The parent design doc is the authoritative contract for the overall feature.
+This document covers the implementation decisions specific to the workflow file
+itself: job structure, token timing, polling strategy, and the `workflow_dispatch`
+bypass.
+
+## Requirements as understood
+
+From issue #64, its grooming Q&A, and the parent design doc
+(`docs/design/resolve-conflicts.md`):
+
+1. **Triggers** — `push` to `main` (the reactive hook) and `workflow_dispatch`
+   with an optional `pr_number` input (the manual backstop). Conflicted PRs emit
+   no events of their own; a PR becomes conflicted precisely when `main` advances
+   past it, making `push` to `main` the reliable signal (see the PR #26 gotcha
+   in the parent design doc).
+
+2. **Enumeration** — enumerate open PRs authored by the developer agent. Only
+   agent-authored PRs are touched; human PRs are excluded by this authorship gate.
+
+3. **Mergeable polling** — GitHub computes mergeability asynchronously. A PR's
+   `mergeable` field returns `UNKNOWN` immediately after a push. The workflow must
+   poll with exponential backoff until the value settles before acting.
+
+4. **Per-PR dispatch** — for each PR with `mergeable == CONFLICTING`, run the
+   developer container with `AGENT_ACTION=resolve-conflicts` and
+   `GITHUB_PR_NUMBER`. Each PR's run must sit under its own concurrency group
+   (`agent-resolve-conflicts-pr-<number>`, `cancel-in-progress: false`) so an
+   in-progress resolution is never cancelled by a subsequent push.
+
+5. **Token timing** — the agent token (minted via `.github/actions/agent-token`)
+   must be minted *after* the workflow confirms there are conflicted PRs to
+   process; do not mint a token for runs where there is nothing to do.
+
+6. **Model** — `vars.DEFAULT_CLAUDE_MODEL`; no per-PR override initially.
+
+7. **Documentation** — AGENTS.md and README.md are updated in the same PR as
+   the workflow file.
+
+The grooming notes confirm that this issue can start immediately (the parent
+design is the contract), that `cancel-in-progress: false` is intentional, and
+that the `push`-to-`main` trigger is the correct hook.
+
+## Decisions
+
+### Decision 1 — Two-job structure: `find-conflicted-prs` + `resolve` matrix
+
+**Decision:** Split the workflow into two jobs:
+
+- **`find-conflicted-prs`** — runs with the default `GITHUB_TOKEN` (read-only),
+  enumerates agent PRs, polls mergeability for each, and outputs a JSON array of
+  conflicted PR numbers.
+- **`resolve`** — a matrix job over that array; each matrix entry runs
+  independently under its own concurrency group, mints an agent token, builds
+  the image, and dispatches the container.
+
+**Alternatives considered:**
+
+- *Single sequential job* that enumerates PRs and loops over conflicted ones:
+  simpler YAML but cannot use GitHub Actions' native per-PR concurrency groups.
+  Concurrency keys are evaluated at the job level and must reference values known
+  at scheduling time; a `matrix` entry is exactly that. A single looping job
+  would either serialize all PRs under one concurrency key (defeating the
+  per-PR isolation requirement) or require separate workflow dispatch calls that
+  add complexity.
+
+- *Dispatch per-PR via `gh workflow run`* from the outer job: creates a
+  dependency on the `workflow_dispatch` trigger, adds API round-trip latency,
+  and makes the inner run hard to observe from the outer. Rejected.
+
+The matrix approach is idiomatic for fan-out workflows in GitHub Actions and
+maps the per-PR concurrency requirement directly onto the Actions model with no
+extra machinery.
+
+### Decision 2 — Token minting scope
+
+**Decision:** The `find-conflicted-prs` job uses `github.token` (the default
+read-only GITHUB_TOKEN) for PR listing and mergeability polling. The agent token
+is minted only in the `resolve` matrix job, which runs only when there is at
+least one conflicted PR, satisfying the spec's requirement to mint "after
+determining there is work to do."
+
+**Alternative considered:** Mint the token once in `find-conflicted-prs` and
+pass it to the `resolve` job via `outputs`. Rejected: GitHub Actions does not
+provide a safe mechanism to pass an installation token between jobs — the value
+would appear in plain text in the workflow log. Each job that needs the agent
+token must mint its own. This is already the pattern in `agent-respond-review.yml`,
+which mints only after the feedback-check step confirms there is something to do.
+
+### Decision 3 — Empty-matrix guard
+
+**Decision:** The `resolve` job carries an `if` condition:
+
+```
+needs.find-conflicted-prs.outputs.conflicted_prs != '[]'
+```
+
+Without this guard, a `fromJson('[]')` expression in the `strategy.matrix` field
+produces no matrix entries, which is a workflow validation error at runtime.
+When there are no conflicted PRs the `resolve` job is skipped entirely and no
+agent token is minted.
+
+### Decision 4 — Mergeability polling strategy
+
+**Decision:** For each PR, retry up to five times with exponential backoff
+(delays: 5 s, 10 s, 20 s, 40 s, 80 s — total worst-case 155 s per PR). If the
+value is still `UNKNOWN` after all retries, log the PR number and skip it for
+this run. The next `push` to `main` or a manual `workflow_dispatch` is the
+natural retry.
+
+All polling for all PRs is done sequentially in the `find-conflicted-prs` job
+before the matrix is built. This keeps the polling logic in one place and avoids
+spinning up concurrent runner slots for pure waiting.
+
+**Alternatives considered:**
+
+- *Fail the entire `find-conflicted-prs` job if any PR stays `UNKNOWN`*: rejects
+  the whole batch because of one PR's transient state. Rejected.
+
+- *Poll indefinitely with a hard timeout*: complicates the script, risks burning
+  GitHub Actions minutes for pathological cases, and offers no better outcome
+  than skipping. Rejected.
+
+### Decision 5 — `workflow_dispatch` input handling
+
+**Decision:** When `inputs.pr_number` is non-empty (the `workflow_dispatch`
+path), the `find-conflicted-prs` job skips enumeration entirely and polls only
+the specified PR number. On `push` triggers, `inputs.pr_number` is undefined and
+the bash expression `"$PR_NUMBER_INPUT"` evaluates to an empty string, so
+enumeration proceeds normally.
+
+The input value is passed via an `env:` variable (`PR_NUMBER_INPUT`) in the
+`run:` step and referenced as `"$PR_NUMBER_INPUT"` inside the script. It is
+never interpolated directly into the `run:` body via `${{ inputs.pr_number }}`,
+consistent with the output-injection hygiene pattern in `AGENTS.md`.
+
+### Decision 6 — Developer agent author login
+
+**Decision:** Enumerate agent-authored PRs by filtering
+`author.login == "app/mfrancza-developer-agent"` in the output of
+`gh pr list --json author`. This matches the check already used in
+`agent-fix-checks.yml` (`"$AUTHOR" = "app/mfrancza-developer-agent"`), which
+is the canonical trust gate for agent-authored PRs in this repo.
+
+This login string is repo-specific; it is not abstracted into a variable or
+secret, consistent with the existing `agent-fix-checks.yml` precedent.
+
+### Decision 7 — `fail-fast: false` in the matrix
+
+**Decision:** Set `fail-fast: false` on the `resolve` matrix job so that a
+resolution failure for one PR does not cancel in-flight or queued resolutions
+for other PRs. Each PR's conflict is independent; a failed resolution on one
+should not block another from being attempted.
+
+### Decision 8 — Permissions block
+
+**Decision:** The workflow declares `permissions: contents: read` at the
+top level (the repo-wide security default from `AGENTS.md`). The `resolve` job
+needs no additional permissions on the Actions side — all PR writes (comments,
+labels) happen inside the container using the agent token injected as `GH_TOKEN`.
+The `find-conflicted-prs` job reads PRs via `github.token` which already has
+`pull-requests: read` from the default permissions.
+
+## Out of scope
+
+- The `AGENT_ACTION=resolve-conflicts` entrypoint function and prompt — that is
+  issue #63.
+- End-to-end validation (manufacture a conflict against a test PR, verify
+  resolution; validate the fallback path) — that is issue #65, which covers both
+  issue #63 and issue #64.
+- `model:*` PR-label overrides for the `resolve-conflicts` action (deferred per
+  parent design).
+- Conflict resolution on human-authored PRs.
+
+## Task breakdown and dependencies
+
+| Issue | Task | Depends on |
+|-------|------|-----------|
+| [#130](https://github.com/mfrancza/agentic-development-workflow/issues/130) | Implement `.github/workflows/agent-resolve-conflicts.yml`: `push`/`workflow_dispatch` triggers, `find-conflicted-prs` job (agent PR enumeration, `mergeable` polling with exponential backoff, conflicted-PR JSON output), `resolve` matrix job (per-PR concurrency group, token mint, image build, container dispatch), empty-matrix guard | — |
+| [#131](https://github.com/mfrancza/agentic-development-workflow/issues/131) | Documentation: update AGENTS.md MVP Workflow section and agent actions table; update README.md | Issue #130 |
+| [#65](https://github.com/mfrancza/agentic-development-workflow/issues/65) | End-to-end validation: manufacture a conflict, watch it resolve via the full push trigger; validate the fallback path (existing issue — covers both issue #63 and issue #64) | Issue #63, Issue #130, Issue #131 |
+
+The workflow implementation task can start immediately (the parent design doc is
+the contract: `AGENT_ACTION=resolve-conflicts`, env `GITHUB_PR_NUMBER`). The
+documentation task follows once the workflow's trigger, env vars, and concurrency
+model are settled. Issue #65 validates the complete loop end-to-end.
+
+Dependencies are recorded natively as GitHub blocked-by relationships on the
+issues.
