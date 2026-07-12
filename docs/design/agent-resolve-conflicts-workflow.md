@@ -195,9 +195,15 @@ are not silently skipped. 500 is a practical upper bound (a repository with
 more than 500 simultaneously open agent PRs warrants a different strategy);
 the default 30 would silently miss conflicted PRs beyond the newest 30.
 
-This matches the check already used in
-`agent-fix-checks.yml` (`"$AUTHOR" = "app/mfrancza-developer-agent"`), which
-is the canonical trust gate for agent-authored PRs in this repo.
+This matches the author login returned by `gh pr view --json author` in
+`agent-fix-checks.yml` (`"$AUTHOR" = "app/mfrancza-developer-agent"`). Note
+that the `app/`-prefixed form is what the GitHub REST/GraphQL API surfaces via
+`gh pr list --json author` and `gh pr view --json author`. Webhook event
+payloads (e.g., `github.event.pull_request.user.login`) use a different form
+(`mfrancza-developer-agent[bot]`); `agent-respond-review.yml` uses that form
+for its `if:` condition. Implementers should use `app/mfrancza-developer-agent`
+only when filtering `gh pr list --json author` output — not in event-payload
+expressions or any other context.
 
 This login string is repo-specific; it is not abstracted into a variable or
 secret, consistent with the existing `agent-fix-checks.yml` precedent.
