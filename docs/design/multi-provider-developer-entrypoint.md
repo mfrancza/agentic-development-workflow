@@ -56,8 +56,8 @@ model names are decided here — those belong to issues #81 and #82.
 - `resolve_provider(model)` — the case statement that maps a model name to
   its provider string (`anthropic` today; `openai` added by #81). Unknown
   values `log` an error and `exit 1`.
-- `run_agent(prompt_file, user_prompt...)` — the dispatcher. Calls
-  `resolve_provider "$AGENT_MODEL"`, then routes on the result to
+- `run_agent(prompt_file, user_prompt...)` — the dispatcher. Routes on the
+  cached `$AGENT_PROVIDER` (set in the preamble — see Decision 3) to
   `run_anthropic` (implemented) or `run_openai` (stub).
 
 `run_anthropic()` contains the exact `claude --print
@@ -72,8 +72,9 @@ lifted verbatim, with `$CLAUDE_MODEL` / `$CLAUDE_MAX_TURNS` renamed to their
 - **Fold the dispatch into `run_agent` itself** (inline `case` on
   provider). Rejected: separating provider resolution from runner
   invocation makes the boot-time validation step (Decision 3) natural to
-  place — `resolve_provider` is called once up front, and again from
-  `run_agent`, without duplicating the case body. Extracting it into a
+  place — `resolve_provider` is called once up front in the preamble, and
+  `run_agent` consumes the cached `$AGENT_PROVIDER` result without
+  duplicating the case body. Extracting it into a
   helper also makes the shape symmetric to `run_anthropic` / `run_openai`
   and easier to unit-test if we ever add a bash test harness.
 - **Skip `run_openai()` entirely and let the case statement error until
@@ -158,7 +159,7 @@ between two paired PRs is not that.
 - **Read `$AGENT_MODEL` only; require #82 to merge first.** Rejected: the
   parent design lists #80 and #82 as parallelizable (both "Depends on:
   nothing"). Adding an implicit ordering constraint just to avoid a
-  three-line shim narrows the merge window for no lasting benefit.
+  two-line shim narrows the merge window for no lasting benefit.
 - **Bundle #80 and #82 into a single PR.** Rejected: the two issues touch
   different subsystems (bash entrypoint vs Terraform + five YAML
   workflows) and reviewers benefit from reviewing them separately. Also,
