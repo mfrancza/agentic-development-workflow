@@ -145,11 +145,16 @@ Two mechanisms feed `container.log`:
 
 - **Inside the container:** the entrypoint runs
   `exec > >(tee -a /home/agent/logs/container.log) 2>&1` at the top of
-  `main` (after env validation but before any other output) so all subsequent
-  output goes to both the container's stdout (still visible in the workflow
-  log, unchanged) and the log file. Because `tee` writes as the container
-  runs, a mid-run abort still leaves everything up to the abort point on
-  disk.
+  `main` — **before** required-env validation and before any other output,
+  immediately after `mkdir -p /home/agent/logs` — so all subsequent output
+  (including env-validation failure messages) goes to both the container's
+  stdout (still visible in the workflow log, unchanged) and the log file.
+  Because `tee` writes as the container runs, a mid-run abort still leaves
+  everything up to the abort point on disk. Installing the redirect before
+  env validation is important: if a required variable (`GH_TOKEN`,
+  `ANTHROPIC_API_KEY`, etc.) is missing, the error is captured in
+  `container.log` and surfaces in the uploaded artifact rather than
+  disappearing when the container exits.
 - **Session file harvest:** a `trap` on `EXIT` (installed after the tee is
   set up so trap output is also captured) copies `~/.claude/projects/.` to
   `/home/agent/logs/session/`. Runs on every exit path — normal, `set -e`
