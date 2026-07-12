@@ -52,11 +52,12 @@ From issue #64, its grooming Q&A, and the parent design doc
    workflow file" means Issue #131 and #130 are both merged before Issue #65
    (end-to-end validation) begins — docs are not deferred indefinitely.
 
-8. **Permissions** — the workflow must declare `pull-requests: read` explicitly
-   at the top-level `permissions:` block (in addition to `contents: read`).
-   GitHub Actions' `permissions:` block is replacing, not additive; any unlisted
-   scope defaults to `none`, so omitting `pull-requests: read` would cause `gh
-   pr list` to fail with a 403 inside `find-conflicted-prs`.
+8. **Permissions** — although issue #64 only mentions `contents: read` at the
+   top level, the workflow must also declare `pull-requests: read` explicitly in
+   the top-level `permissions:` block. This is an inferred/corrective requirement:
+   GitHub Actions' `permissions:` block is replacing, not additive — any unlisted
+   scope defaults to `none`, so `contents: read` alone would set `pull-requests`
+   to `none`, causing `gh pr list` to fail with a 403 inside `find-conflicted-prs`.
 
 The grooming notes confirm that this issue can start immediately (the parent
 design is the contract), that `cancel-in-progress: false` is intentional, and
@@ -181,9 +182,12 @@ env:
   PR_NUMBER_INPUT: ${{ github.event.inputs.pr_number || '' }}
 ```
 
-`github.event.inputs` is always a map (possibly empty) regardless of trigger,
-so this expression is safe on both `push` and `workflow_dispatch` runs and
-always produces an empty string when no input was provided.
+`github.event.inputs` is only present in the event payload for
+`workflow_dispatch` and `workflow_call` triggers; on a `push` trigger it is
+absent and resolves to `null`. The `|| ''` fallback in the expression makes it
+safe regardless of trigger: `null || ''` evaluates to `''`, so
+`PR_NUMBER_INPUT` is always set (to an empty string on `push` runs, to the
+supplied value on `workflow_dispatch` runs).
 
 ### Decision 6 — Developer agent author login
 
