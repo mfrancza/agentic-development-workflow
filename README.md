@@ -152,10 +152,11 @@ docker build -t agent-developer ./docker
 Run locally against an issue (example — `AGENT_ACTION=implement`):
 
 ```sh
-# Export secrets into your shell first (values are read from the environment,
-# not from the command line, so they stay out of shell history and process listings)
+# Export secrets into your shell first; using -e VARNAME (not -e KEY=VALUE) keeps
+# values out of the docker run command text and shell history
+# (the values will still be present in the container environment).
 export GH_TOKEN=$(gh auth token)    # or set from another source
-# read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY  # if not already set
+[ -n "$ANTHROPIC_API_KEY" ] || { read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY; }
 
 docker run --rm \
   -e ANTHROPIC_API_KEY \
@@ -302,4 +303,4 @@ MVP substantially built. Implemented:
 - GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/).
 - Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_CLAUDE_MODEL` Actions variables.
 - Claude model override via `model:<name>` labels on issues and PRs (reviewer agent).
-- Local run guides for the developer agent (step 4) and the reviewer agent (step 5).
+- Local run guides for the developer agent ([Build the developer agent container](#4-build-the-developer-agent-container)) and the reviewer agent ([Build and run the reviewer agent container](#5-build-and-run-the-reviewer-agent-container)).
