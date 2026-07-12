@@ -44,8 +44,13 @@ From issue #64, its grooming Q&A, and the parent design doc
 
 6. **Model** — `vars.DEFAULT_CLAUDE_MODEL`; no per-PR override initially.
 
-7. **Documentation** — AGENTS.md and README.md are updated in the same PR as
-   the workflow file.
+7. **Documentation** — AGENTS.md and README.md are updated alongside the
+   workflow file. Per the task breakdown below, documentation lands in a
+   separate follow-on PR (Issue #131) that is blocked on the workflow
+   implementation (Issue #130), so that the docs accurately reflect the
+   finished workflow rather than a design-time approximation. "Same PR as the
+   workflow file" means Issue #131 and #130 are both merged before Issue #65
+   (end-to-end validation) begins — docs are not deferred indefinitely.
 
 8. **Permissions** — the workflow must declare `pull-requests: read` explicitly
    at the top-level `permissions:` block (in addition to `contents: read`).
@@ -127,6 +132,17 @@ natural retry.
 All polling for all PRs is done sequentially in the `find-conflicted-prs` job
 before the matrix is built. This keeps the polling logic in one place and avoids
 spinning up concurrent runner slots for pure waiting.
+
+**Practical runtime bound:** The worst-case polling cost is 155 s per PR ×
+the number of open agent PRs. At the `--limit 500` cap this is theoretically
+155 s × 500 ≈ 21.5 hours, which would exceed GitHub Actions' job time limit.
+In practice this repository is unlikely to have more than a handful of
+simultaneously open agent PRs at any time. The implementation should add a
+defensive cap — skip polling (and log a warning) if the enumerated PR count
+exceeds a threshold (e.g., 50) — so a pathological accumulation of stale PRs
+cannot block the runner. The `--limit 500` in Decision 6 is an enumeration cap
+(prevents silently missing PRs); the polling cap is a separate guard that fires
+only when the count is unreasonably large.
 
 **Alternatives considered:**
 
@@ -228,7 +244,7 @@ injected as `GH_TOKEN`.
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#130](https://github.com/mfrancza/agentic-development-workflow/issues/130) | Implement `.github/workflows/agent-resolve-conflicts.yml`: `push`/`workflow_dispatch` triggers, `find-conflicted-prs` job (agent PR enumeration, `mergeable` polling with exponential backoff, conflicted-PR JSON output), `resolve` matrix job (per-PR concurrency group, token mint, image build, container dispatch), empty-matrix guard | — |
+| [#130](https://github.com/mfrancza/agentic-development-workflow/issues/130) | Implement `.github/workflows/agent-resolve-conflicts.yml`: `push`/`workflow_dispatch` triggers, top-level `permissions:` block (`contents: read` + `pull-requests: read`), `find-conflicted-prs` job (agent PR enumeration, `mergeable` polling with exponential backoff, conflicted-PR JSON output, polling cap guard), `resolve` matrix job (per-PR concurrency group, token mint, image build, container dispatch), empty-matrix guard | — |
 | [#131](https://github.com/mfrancza/agentic-development-workflow/issues/131) | Documentation: update AGENTS.md MVP Workflow section and agent actions table; update README.md | Issue #130 |
 | [#65](https://github.com/mfrancza/agentic-development-workflow/issues/65) | End-to-end validation: manufacture a conflict, watch it resolve via the full push trigger; validate the fallback path (existing issue — covers both issue #63 and issue #64) | Issue #63, Issue #130, Issue #131 |
 
