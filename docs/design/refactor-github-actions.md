@@ -4,7 +4,8 @@
 
 ## Summary
 
-The seven agent workflows carry ~940 lines of YAML, much of it inline shell:
+The seven agent workflows carry roughly a thousand lines of YAML, much of it
+inline shell:
 jq pipelines, GraphQL pagination, and multi-branch error-handling policy
 embedded in `run:` blocks, with several scripts duplicated near-verbatim
 across workflows. This design:
@@ -22,7 +23,8 @@ across workflows. This design:
 
 ## Requirements as understood
 
-From issue #33 and its grooming comment:
+From issue #33 and its
+[grooming comment](https://github.com/mfrancza/agentic-development-workflow/issues/33#issuecomment-4887520822):
 
 - The workflows contain a lot of inline shell; refactor the complex scripts
   into **reusable activities**.
@@ -76,16 +78,21 @@ criteria in the issue directly.
 
 **Decision:** Each activity is exposed as a **composite action** under
 `.github/actions/<activity>/action.yml` whose steps are: `actions/setup-node`
-(with npm cache) → `npm ci --prefix .github/scripts` → run the TypeScript
-source with `npx tsx`. No compiled or bundled JavaScript is committed.
+(with npm cache) → `npm ci` → run the TypeScript source with
+`npx --no-install tsx`. Both the `npm ci` and the run step set
+`working-directory: .github/scripts` so `tsx` resolves from the package's own
+`node_modules/.bin`, and `--no-install` guarantees `npx` can never fall back
+to fetching `tsx` from the registry — execution always uses the
+lockfile-pinned version. No compiled or bundled JavaScript is committed.
 
 **Rationale:** The decisive constraint is that most PRs in this repo are
 agent-authored and agent-reviewed. What is reviewed must be what runs. A
 source-only layout keeps every diff to readable TypeScript.
 
 **Alternatives considered:**
-- **Custom JavaScript actions with checked-in `dist/`** (`using: node24` +
-  ncc bundle — the canonical published-action pattern). Rejected: every
+- **Custom JavaScript actions with checked-in `dist/`** (a `using: node`
+  JavaScript action + ncc bundle — the canonical published-action pattern).
+  Rejected: every
   logic change regenerates a large minified bundle that the reviewer agent
   cannot meaningfully audit; nothing inherently prevents `dist/` drifting
   from `src/` (or being maliciously divergent), so CI would need a
@@ -137,11 +144,24 @@ They do not shell out to `gh`.
 respond-review script; error handling becomes structured (status codes,
 typed errors) instead of exit-code-and-regex parsing.
 
-This also improves the output-injection posture required by `AGENTS.md`:
-values flow action-input → env → `process.env` → `core.setOutput`, with no
-shell interpolation anywhere, so the existing `tr -d '\r\n'` sanitization
-workarounds become unnecessary (GITHUB_OUTPUT writing is handled by
-`@actions/core` with delimiter-safe encoding).
+This is a **scoped exception** to the repo convention that GitHub API
+operations go through `gh` (`.github/copilot-instructions.md`, Key
+Technologies). It applies only to the workflow-executed activities in
+`.github/scripts/`; in-container agent scripting (`docker/scripts/`,
+`docker/reviewer/`) and shell steps that remain in workflow YAML keep using
+`gh`. The convention docs are updated to record this split as part of the
+scaffold task (Issue #133).
+
+This also improves the output-injection posture required by `AGENTS.md` —
+narrowly, at the `GITHUB_OUTPUT`-writing step: inside an activity, values
+flow action-input → `process.env` → `core.setOutput()` with no shell
+interpolation, and `@actions/core` writes `GITHUB_OUTPUT` with
+delimiter-safe encoding, so the manual `tr -d '\r\n'` stripping becomes
+unnecessary *within activities*. The rest of the `AGENTS.md` rule is
+unchanged: shell steps that still write user-controlled values to
+`GITHUB_OUTPUT` keep the CR/LF stripping, and workflows must continue to
+pass untrusted values — including activity outputs — into `run:` blocks via
+`env:` and `"$VAR"` references, never by `${{ ... }}` interpolation.
 
 ### Decision 5 — Activity input/output contract
 
