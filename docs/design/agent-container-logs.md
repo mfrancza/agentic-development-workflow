@@ -184,12 +184,14 @@ The trap body **must** follow this sequence to close the race:
 5. Run the `sed -i` redaction pass over the entire `/home/agent/logs/` tree
    (including the just-copied session files).
 
-Any trap messages needed after step 2 must go directly to the log file
-(e.g. `echo "…" >> /home/agent/logs/container.log`) or to the restored
-original stderr (fd 3, before it is closed in step 2). Writing to `stderr`
-after step 2 will fail because fd 2 has been redirected away from the tee
-pipe and, once `exec 3>&-` closes the saved fd, fd 3 is also gone. #125
-must implement this sequence.
+Any trap messages that should appear in `container.log` must be emitted
+before step 2 (before the fds are closed). After step 2, stdout (fd 1) is
+closed; stderr (fd 2) is restored to the original workflow-log stream by
+`exec 2>&3` and is still writable but will **not** appear in
+`container.log`. fd 3 is closed and cannot be written to after
+`exec 3>&-`. Messages intended for `container.log` must therefore use
+`echo "…" >> /home/agent/logs/container.log` directly. #125 must implement
+this sequence.
 
 Why bind-mount rather than `docker cp` from a named volume: `--rm` is
 retained across all workflows for cleanup hygiene, and `docker cp` before
