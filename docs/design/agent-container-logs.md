@@ -230,6 +230,28 @@ Doing this inside the container keeps the token value out of any workflow-side
 shell command (no risk of it appearing in a `set -x` trace) and keeps the
 workflow step body identical across all seven workflows.
 
+**Implementation constraint — safe `sed` substitution (required in #125):**
+Two edge cases must be handled explicitly:
+
+1. **Empty variable:** if `GH_TOKEN` or `ANTHROPIC_API_KEY` is empty (e.g.
+   absent from the environment), a naive `sed -i "s/$GH_TOKEN/…/g"` with an
+   empty pattern matches every character boundary — it corrupts log files by
+   interleaving the replacement string throughout every line. The substitution
+   for each variable **must be skipped when that variable is empty**:
+   ```bash
+   [ -n "${GH_TOKEN:-}" ] && find /home/agent/logs -type f \
+     -exec sed -i "s/$(printf '%s\n' "${GH_TOKEN}" | sed 's/[\/&]/\\&/g')/***REDACTED-GH_TOKEN***/g" {} +
+   ```
+
+2. **Regex/replacement metacharacters:** `GH_TOKEN` and `ANTHROPIC_API_KEY`
+   values can contain characters that have special meaning in `sed` patterns
+   (`/`, `&`, `\`). An unescaped substitution can silently mis-redact or error.
+   The substitution **must escape the secret value** before using it as a `sed`
+   pattern — or use a fixed-string approach (e.g. `perl -pi -e
+   's/\Q$ENV{GH_TOKEN}\E/***REDACTED-GH_TOKEN***/g'`, which treats the value
+   as a literal). If `sed` is used, escape `/`, `&`, and `\` in the pattern
+   and replacement strings before constructing the `sed` expression.
+
 Alternative rejected: redacting in the workflow after `docker run`. Would
 require adding the token to another shell context and duplicating the sed
 block into every workflow.
