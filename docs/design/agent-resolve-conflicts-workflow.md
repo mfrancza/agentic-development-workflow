@@ -47,6 +47,12 @@ From issue #64, its grooming Q&A, and the parent design doc
 7. **Documentation** — AGENTS.md and README.md are updated in the same PR as
    the workflow file.
 
+8. **Permissions** — the workflow must declare `pull-requests: read` explicitly
+   at the top-level `permissions:` block (in addition to `contents: read`).
+   GitHub Actions' `permissions:` block is replacing, not additive; any unlisted
+   scope defaults to `none`, so omitting `pull-requests: read` would cause `gh
+   pr list` to fail with a 403 inside `find-conflicted-prs`.
+
 The grooming notes confirm that this issue can start immediately (the parent
 design is the contract), that `cancel-in-progress: false` is intentional, and
 that the `push`-to-`main` trigger is the correct hook.
@@ -144,11 +150,33 @@ The input value is passed via an `env:` variable (`PR_NUMBER_INPUT`) in the
 never interpolated directly into the `run:` body via `${{ inputs.pr_number }}`,
 consistent with the output-injection hygiene pattern in `AGENTS.md`.
 
+**Safe env wiring for multi-trigger workflows:** `inputs.*` is only defined
+when the trigger is `workflow_dispatch` or `workflow_call`. On a `push` trigger
+the entire `inputs` context is absent, so `${{ inputs.pr_number }}` evaluates
+to an empty string at expression time — however, strict Bash (`set -e -o
+pipefail`) combined with an unset variable and `set -u` would still error.
+The `env:` mapping must therefore use a fallback expression:
+
+```yaml
+env:
+  PR_NUMBER_INPUT: ${{ github.event.inputs.pr_number || '' }}
+```
+
+`github.event.inputs` is always a map (possibly empty) regardless of trigger,
+so this expression is safe on both `push` and `workflow_dispatch` runs and
+always produces an empty string when no input was provided.
+
 ### Decision 6 — Developer agent author login
 
 **Decision:** Enumerate agent-authored PRs by filtering
 `author.login == "app/mfrancza-developer-agent"` in the output of
-`gh pr list --json author`. This matches the check already used in
+`gh pr list --json author --limit 500`. The explicit `--limit 500` overrides
+`gh`'s default cap of 30 results, ensuring that older open agent-authored PRs
+are not silently skipped. 500 is a practical upper bound (a repository with
+more than 500 simultaneously open agent PRs warrants a different strategy);
+the default 30 would silently miss conflicted PRs beyond the newest 30.
+
+This matches the check already used in
 `agent-fix-checks.yml` (`"$AUTHOR" = "app/mfrancza-developer-agent"`), which
 is the canonical trust gate for agent-authored PRs in this repo.
 
