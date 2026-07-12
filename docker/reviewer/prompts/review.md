@@ -41,7 +41,7 @@ Replace `THREAD_GRAPHQL_ID` with the `id` field from the thread object in your p
 
 ## Verdict selection
 
-After resolving addressed threads, choose the verdict for what remains:
+After evaluating open threads and reviewing the diff, choose the verdict for what remains:
 
 - **`REQUEST_CHANGES`** — one or more blocking findings remain: open review threads whose finding is still valid, new correctness bugs, security issues, missing required behavior from the linked issue, or violations of the repo's security defaults (allowlist gating, output-injection hygiene, pinned action SHAs, least-privilege tokens, bash safety, branch-protection immutability). The developer must address these before the PR can merge.
 - **`COMMENT`** — all remaining findings are advisory (nits, style suggestions, questions, informational notes). Nothing blocks merging. Open threads that are advisory-only count here.
