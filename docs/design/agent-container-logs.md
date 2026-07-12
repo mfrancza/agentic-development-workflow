@@ -48,10 +48,13 @@ the same artifacts by bind-mounting a host directory.
 Neither stream alone is sufficient:
 
 - **stdout/stderr** — every `log()` line the entrypoint emits, every message
-  from `gh`/`git`/`docker`, and the final `claude --print` response text. This
-  is what today's workflow log already contains; capturing it as a file lets
-  us bundle it with the session transcript in a single artifact instead of
-  telling debuggers to jump between the workflow-run UI and the artifact.
+  from `gh`/`git` and other tools invoked inside the container, and the final
+  `claude --print` response text. This is what today's workflow log already
+  contains; capturing it as a file lets us bundle it with the session transcript
+  in a single artifact instead of telling debuggers to jump between the
+  workflow-run UI and the artifact. (Note: `docker` output such as `docker run`
+  messages appears on the runner side, not inside the container, and will not
+  be present in `container.log`.)
 - **Claude Code session JSONL** — one file per session at
   `~/.claude/projects/<encoded-cwd>/<session-uuid>.jsonl` (confirmed against
   Claude Code v2.1.150, the version pinned in `docker/Dockerfile`; the #128
@@ -145,8 +148,9 @@ Two mechanisms feed `container.log`:
 
 - **Inside the container:** the entrypoint runs
   `exec > >(tee -a /home/agent/logs/container.log) 2>&1` at the top of
-  `main` — **before** required-env validation and before any other output,
-  immediately after `mkdir -p /home/agent/logs` — so all subsequent output
+  the entrypoint script — **before** required-env validation and before any
+  other output, immediately after `mkdir -p /home/agent/logs` — so all
+  subsequent output
   (including env-validation failure messages) goes to both the container's
   stdout (still visible in the workflow log, unchanged) and the log file.
   Because `tee` writes as the container runs, a mid-run abort still leaves
