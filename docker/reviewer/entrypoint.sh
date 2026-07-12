@@ -228,8 +228,8 @@ printf '\nFull diff (base..head):\n' >> "$CONTEXT_FILE"
 git diff "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 {
     printf '\nExisting open (unresolved) review threads (evaluate each against the current\n'
-    printf 'diff; resolve addressed threads via resolveReviewThread before posting the\n'
-    printf 'review; skip new findings already covered by still-open threads):\n'
+    printf 'diff; post the review first, then resolve addressed threads via\n'
+    printf 'resolveReviewThread; skip new findings already covered by still-open threads):\n'
     printf '%s\n' "${REVIEW_THREADS_JSON}"
     printf '\nCI check status:\n'
     printf '%s\n' "${CHECKS_JSON}"
