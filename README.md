@@ -156,7 +156,7 @@ Run locally against an issue (example — `AGENT_ACTION=implement`):
 # values out of the docker run command text and shell history
 # (the values will still be present in the container environment).
 export GH_TOKEN=$(gh auth token)    # or set from another source
-[ -n "$ANTHROPIC_API_KEY" ] || { read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY; }
+[ -n "${ANTHROPIC_API_KEY:-}" ] || { read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY; }
 
 docker run --rm \
   -e ANTHROPIC_API_KEY \
