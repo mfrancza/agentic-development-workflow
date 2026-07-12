@@ -37,8 +37,8 @@ jobs:
       #      carries body text or inline comments — those are advisory when
       #      nothing remains unresolved. This check runs first so a
       #      summary-carrying clean approval (e.g. "Resolved 3 threads; all
-      #      clean.") still skips. Fail open on GraphQL errors so a transient
-      #      failure doesn't silently suppress a real response.
+      #      clean.") still skips. On GraphQL errors, falls through to the
+      #      bare-approval fallback below rather than failing open.
       #   2. Bare approval (no body, no inline comments): fallback reached only
       #      when the GraphQL call above errored or returned a non-numeric value.
       #      Skip when there is provably nothing to respond to.
