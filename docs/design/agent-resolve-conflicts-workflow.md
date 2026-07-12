@@ -164,12 +164,23 @@ should not block another from being attempted.
 
 ### Decision 8 — Permissions block
 
-**Decision:** The workflow declares `permissions: contents: read` at the
-top level (the repo-wide security default from `AGENTS.md`). The `resolve` job
-needs no additional permissions on the Actions side — all PR writes (comments,
-labels) happen inside the container using the agent token injected as `GH_TOKEN`.
-The `find-conflicted-prs` job reads PRs via `github.token` which already has
-`pull-requests: read` from the default permissions.
+**Decision:** The workflow declares the following at the top level:
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: read
+```
+
+GitHub Actions' `permissions:` block is *replacing*, not additive — declaring
+any explicit scope sets every unlisted scope to `none`. `contents: read` alone
+would give `github.token` no pull-requests scope, causing `gh pr list` in
+`find-conflicted-prs` to fail with a 403. `pull-requests: read` must therefore
+be listed explicitly.
+
+The `resolve` job needs no additional permissions on the Actions side — all PR
+writes (comments, labels) happen inside the container using the agent token
+injected as `GH_TOKEN`.
 
 ## Out of scope
 
