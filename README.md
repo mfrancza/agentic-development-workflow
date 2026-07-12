@@ -155,7 +155,7 @@ Run locally against an issue (example — `AGENT_ACTION=implement`):
 # Export secrets into your shell first (values are read from the environment,
 # not from the command line, so they stay out of shell history and process listings)
 export GH_TOKEN=$(gh auth token)    # or set from another source
-# export ANTHROPIC_API_KEY=...      # if not already in your environment
+# read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY  # if not already set
 
 docker run --rm \
   -e ANTHROPIC_API_KEY \
@@ -197,7 +197,7 @@ Option B — reviewer-agent installation token (matches CI exactly):
 
 If you need the review to appear as coming from the `reviewer-agent` bot, mint a short-lived installation token from the App's private key. You need the **numeric App ID** (visible on the App's settings page at `https://github.com/settings/apps/<app-name>` — it is a plain integer, not the `Iv23.xxx` Client ID) and the private key downloaded in step 1 (the `.pem` file).
 
-> **Note on App ID vs. Client ID:** The CI workflow uses `actions/create-github-app-token`, which accepts *either* the numeric App ID or the `Iv23.xxx` Client ID as its `app-id` input. If your `REVIEWER_APP_ID` repository secret contains the Client ID (valid for that action), it **will not work** as `APP_ID` here — the GitHub JWT API requires the numeric form in the `iss` claim. To find the numeric ID, open the App's settings page and look for the plain-integer "App ID" field; it is distinct from the Client ID shown further down the page.
+> **Note on App ID vs. Client ID:** The CI workflow uses `.github/actions/agent-token`, which calls `actions/create-github-app-token` via the `client-id` input — it expects the `Iv23.xxx` Client ID. If your `REVIEWER_APP_ID` repository secret contains the Client ID (valid for that action), it **will not work** as `APP_ID` here — the GitHub JWT API requires the numeric App ID in the `iss` claim. To find the numeric ID, open the App's settings page and look for the plain-integer "App ID" field; it is distinct from the Client ID shown further down the page.
 
 ```sh
 # Requires: openssl, curl, jq
