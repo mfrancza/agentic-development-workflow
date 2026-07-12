@@ -156,11 +156,11 @@ only when the count is unreasonably large.
 
 ### Decision 5 — `workflow_dispatch` input handling
 
-**Decision:** When `inputs.pr_number` is non-empty (the `workflow_dispatch`
+**Decision:** When `$PR_NUMBER_INPUT` is non-empty (the `workflow_dispatch`
 path), the `find-conflicted-prs` job skips enumeration entirely and polls only
-the specified PR number. On `push` triggers, `inputs.pr_number` is undefined and
-the bash expression `"$PR_NUMBER_INPUT"` evaluates to an empty string, so
-enumeration proceeds normally.
+the specified PR number. On `push` triggers, `$PR_NUMBER_INPUT` is set to an
+empty string (via the `|| ''` fallback in the `env:` mapping described below),
+so enumeration proceeds normally.
 
 The input value is passed via an `env:` variable (`PR_NUMBER_INPUT`) in the
 `run:` step and referenced as `"$PR_NUMBER_INPUT"` inside the script. It is
