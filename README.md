@@ -152,9 +152,14 @@ docker build -t agent-developer ./docker
 Run locally against an issue (example — `AGENT_ACTION=implement`):
 
 ```sh
+# Export secrets into your shell first (values are read from the environment,
+# not from the command line, so they stay out of shell history and process listings)
+export GH_TOKEN=$(gh auth token)    # or set from another source
+# export ANTHROPIC_API_KEY=...      # if not already in your environment
+
 docker run --rm \
-  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-  -e GH_TOKEN="$GH_TOKEN" \
+  -e ANTHROPIC_API_KEY \
+  -e GH_TOKEN \
   -e GITHUB_REPO="owner/repo" \
   -e AGENT_ACTION="implement" \
   -e GITHUB_ISSUE_NUMBER="1" \
@@ -201,6 +206,9 @@ OWNER="your-org-or-user"
 REPO="your-repo"
 KEY_FILE="$HOME/.config/agentic-agents/reviewer-agent.pem"
 
+[ -f "$KEY_FILE" ] && [ -r "$KEY_FILE" ] || \
+  { echo "KEY_FILE not found or not readable: $KEY_FILE"; exit 1; }
+
 _b64url() { openssl enc -base64 -A | tr '+/' '-_' | tr -d '='; }
 now=$(date +%s)
 jwt_header=$(printf '{"alg":"RS256","typ":"JWT"}' | _b64url)
@@ -243,7 +251,7 @@ read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && export ANTHROPIC_API_KEY
 
 *Passing credentials without leaking them*
 
-Use `-e VARNAME` (without `=value`) so Docker reads each secret from your shell environment — the value never appears in the `docker run` command text, shell history, or container process list:
+Use `-e VARNAME` (without `=value`) so Docker reads each secret from your shell environment — the value does not appear in the `docker run` command text or shell history. Note that the secret is still present in the container's environment and visible via `docker inspect` while the container runs:
 
 ```sh
 export GH_TOKEN=$(gh auth token)           # or use Option B above
