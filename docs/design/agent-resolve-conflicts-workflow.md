@@ -167,6 +167,21 @@ The input value is passed via an `env:` variable (`PR_NUMBER_INPUT`) in the
 never interpolated directly into the `run:` body via `${{ inputs.pr_number }}`,
 consistent with the output-injection hygiene pattern in `AGENTS.md`.
 
+**Authorship gate on the `workflow_dispatch` path:** The `workflow_dispatch`
+path skips enumeration, which also skips the `author.login ==
+"app/mfrancza-developer-agent"` filter from Decision 6. This is an intentional
+operator-override design choice (Option B): `workflow_dispatch` requires write
+access on the repository, so any caller is an authenticated operator who is
+explicitly targeting a specific PR number and is trusted to know what they are
+doing. Allowing an operator to run the resolver against a human-authored PR (for
+debugging, testing, or manual assistance) is a valid use case that should not be
+blocked. Implementers should document this behavior in the usage notes so it is
+explicit rather than silent: the manual path intentionally bypasses the
+authorship gate. If future policy requires that even manual invocations be
+restricted to agent-authored PRs, the implementation can add a `gh pr view
+--json author` check in the dispatch branch and exit with a clear error if the
+authorship check fails.
+
 **Safe env wiring for multi-trigger workflows:** `inputs.*` is only defined
 when the trigger is `workflow_dispatch` or `workflow_call`. On a `push` trigger
 the entire `inputs` context is absent; referencing `${{ inputs.pr_number }}`
