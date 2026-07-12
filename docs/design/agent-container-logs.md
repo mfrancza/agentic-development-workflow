@@ -33,7 +33,13 @@ the same artifacts by bind-mounting a host directory.
 5. **Motivating scenario** — understanding agent behavior and debugging
    unexpected container exits. Both require the logs to survive the container,
    including the case where the entrypoint aborts (`set -e` failure, Claude
-   crash, OOM) before its normal exit path.
+   crash, OOM) before its normal exit path. **Limitation:** an OOM kill is
+   delivered as SIGKILL, which bypasses bash EXIT traps entirely — the trap
+   body (session harvest and redaction) will not run and whatever `tee` has
+   already written to the bind-mount is the only artifact that survives. This
+   is acknowledged as an inherent constraint of the trap-based approach; the
+   partially-written `container.log` still covers the up-to-OOM output, which
+   is the most useful part for diagnosing the failure.
 
 ## Design
 
@@ -153,20 +159,37 @@ subsequently flushes that data to `container.log` *after* redaction, leaving
 the final kilobytes of output (most recent `gh`/`git` commands, final Claude
 response) unredacted in the file.
 
+Before installing the tee redirect, the entrypoint **must** save the
+original stderr so it can be restored during the flush sequence:
+
+```bash
+exec 3>&2                                          # save original stderr → fd 3
+exec > >(tee -a /home/agent/logs/container.log) 2>&1
+```
+
 The trap body **must** follow this sequence to close the race:
 
 1. Emit any final log lines that should appear in `container.log` (these
-   must come *before* closing the fd).
-2. `exec >&-` — close bash's stdout fd, signalling EOF into the pipe. tee
-   will drain the pipe and exit cleanly.
+   must come *before* closing the fds).
+2. Close both fds that write into the tee pipe:
+   - `exec >&-` — close bash's stdout fd, signalling EOF on that pipe end.
+   - `exec 2>&3` — restore bash's stderr to the saved original (fd 3),
+     removing it from the tee pipe. Then `exec 3>&-` to close the saved fd.
+   Both fds must be removed from the pipe before calling `wait`; closing only
+   stdout leaves stderr as an open pipe writer and tee will never see EOF,
+   causing `wait` to hang.
 3. `wait` — block until the tee subprocess exits. After `wait` returns,
    `container.log` is fully written.
-4. Run the `sed -i` redaction pass over `/home/agent/logs/`.
-5. Copy `~/.claude/projects/` to `/home/agent/logs/session/`.
+4. Copy `~/.claude/projects/` to `/home/agent/logs/session/`.
+5. Run the `sed -i` redaction pass over the entire `/home/agent/logs/` tree
+   (including the just-copied session files).
 
-Any trap messages needed after step 2 must go to stderr or directly to the
-log file (e.g. `echo "… " >> /home/agent/logs/container.log`) since stdout
-is closed. #125 must implement this sequence.
+Any trap messages needed after step 2 must go directly to the log file
+(e.g. `echo "…" >> /home/agent/logs/container.log`) or to the restored
+original stderr (fd 3, before it is closed in step 2). Writing to `stderr`
+after step 2 will fail because fd 2 has been redirected away from the tee
+pipe and, once `exec 3>&-` closes the saved fd, fd 3 is also gone. #125
+must implement this sequence.
 
 Why bind-mount rather than `docker cp` from a named volume: `--rm` is
 retained across all workflows for cleanup hygiene, and `docker cp` before
