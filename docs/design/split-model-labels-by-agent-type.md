@@ -55,15 +55,18 @@ already established by every other structured label in this repo.
 
 ### Decision 2: Generic labels as issue-wide fallback, not deprecated
 
-**Decision:** Keep `model:opus`, `model:sonnet`, and `model:haiku`. The
-grooming agent continues to apply these generic labels. Per-agent labels
-are set manually when a specific agent-type override is needed.
+**Decision:** Keep `model:opus`, `model:sonnet`, and `model:haiku` as
+manually-applied issue-wide defaults. The grooming agent will emit
+per-agent `model:groom:*` labels (e.g. `model:groom:haiku`) instead of
+generic labels. Per-agent labels for other agent types are set manually
+when a specific agent-type override is needed.
 
-**Rationale:** Settled in the grooming Q&A. This makes the common case —
-one model for the whole issue — require exactly one label, the same as
-today. The grooming agent makes a holistic judgment about issue complexity
-and sets the generic label; it has no per-agent context and should not
-be responsible for per-type overrides.
+**Rationale:** The grooming agent knows it is performing a groom step, so
+emitting a `model:groom:*` label is appropriate — it directly controls the
+model for that step without inadvertently setting an issue-wide default for
+all other agents. This makes the common case — one model for the whole
+issue — still require only one label: the generic `model:*` label remains
+available for humans to apply as an issue-wide default when desired.
 
 **Alternative considered:** Make the grooming agent emit per-agent labels
 for all four types instead of a generic one — rejected because the groomer
@@ -166,28 +169,28 @@ Twelve new per-agent labels; existing generic labels are unchanged.
 | `agent-fix-checks.yml` | `developer` | issue (looked up from PR) | Add issue lookup via `Closes #N`; check `model:developer:*` then `model:[^:]+$` |
 | `agent-respond-review.yml` | `developer` | issue (looked up from PR) | Add issue lookup via `Closes #N`; check `model:developer:*` then `model:[^:]+$` |
 
-## Grooming agent: no functional change, description update only
+## Grooming agent: emit per-agent `model:groom:*` label
 
-The grooming agent's behavior is unchanged: it applies one of `model:haiku`,
-`model:sonnet`, or `model:opus` to the issue based on complexity, and skips
-if any `model:*` label is already present. The skip condition in
-`agents/grooming/label-criteria.json` needs updating: "if any `model:*`
-label is already present" should now mean any generic `model:*` label (the
-groomer should not be blocked by a per-agent label on the issue — those are
-orthogonal, and a human or agent may have added them intentionally alongside
-the groomer's generic label).
+The grooming agent will be updated to emit `model:groom:haiku`,
+`model:groom:sonnet`, or `model:groom:opus` instead of the generic
+`model:haiku`, `model:sonnet`, or `model:opus`. This makes the groomer's
+label step-specific — it directly controls the model used for the groom
+step itself without implying an issue-wide default for other agents.
 
-The criteria file's `action` descriptions will be updated to reflect that
-the generic labels set the issue-wide default and that per-agent overrides
-(`model:<agent-type>:*`) can coexist with them.
+The skip condition in `agents/grooming/label-criteria.json` needs updating:
+the groomer should skip only if a `model:groom:*` label is already present.
+A generic `model:*` or other per-agent label on the issue should not block
+the groomer from applying its own step-specific label (those are orthogonal).
+
+The criteria file's `action` descriptions will be updated to emit
+`model:groom:<model>` labels and to reflect that per-agent overrides can
+coexist with manually-applied generic fallback labels.
 
 ## Out of scope
 
 - **Per-agent-type default model at repo level** — a separate Actions variable
   per agent type (e.g. `DEFAULT_GROOM_MODEL`). `DEFAULT_CLAUDE_MODEL` remains
   the single final fallback for all agents.
-- **Grooming agent emitting per-agent labels** — the groomer continues to emit
-  only generic labels.
 - **New agent types beyond the current four** — additional types follow the
   same pattern when added.
 - **Retroactive relabeling of open issues** — existing generic labels continue
@@ -204,8 +207,8 @@ the generic labels set the issue-wide default and that per-agent overrides
 | [#147](https://github.com/mfrancza/agentic-development-workflow/issues/147) | Terraform: add 12 per-agent model labels; update `AGENTS.md` labels section and `terraform/variables.tf` description | — |
 | [#148](https://github.com/mfrancza/agentic-development-workflow/issues/148) | Issue-based workflow model resolution: update `agent-implement.yml`, `agent-groom.yml`, `agent-design.yml`, `agent-fix-deployment.yml` to the two-tier waterfall | — |
 | [#149](https://github.com/mfrancza/agentic-development-workflow/issues/149) | PR-based workflow model resolution: update `agent-review.yml`; add issue lookup + two-tier resolution to `agent-fix-checks.yml` and `agent-respond-review.yml` | — |
-| [#150](https://github.com/mfrancza/agentic-development-workflow/issues/150) | Grooming criteria update: update `agents/grooming/label-criteria.json` `model:*` action descriptions to reflect per-agent coexistence; relax the skip condition to only block on generic labels | — |
-| [#151](https://github.com/mfrancza/agentic-development-workflow/issues/151) | End-to-end validation: apply a per-agent label (e.g. `model:developer:haiku`) alongside a generic label (e.g. `model:groom:opus`) on a test issue; confirm each agent run picks up the correct model; confirm fallback when only generic label is present | Issues #147, #148, #149, #150 |
+| [#150](https://github.com/mfrancza/agentic-development-workflow/issues/150) | Grooming criteria update: update `agents/grooming/label-criteria.json` to emit `model:groom:*` labels instead of generic `model:*` labels; update skip condition to block only on an existing `model:groom:*` label; update action descriptions | — |
+| [#151](https://github.com/mfrancza/agentic-development-workflow/issues/151) | End-to-end validation: apply a per-agent label (e.g. `model:developer:haiku`) alongside a generic label (e.g. `model:sonnet`) on a test issue; confirm each agent run picks up the correct model; confirm the grooming agent emits a `model:groom:*` label rather than a generic label; confirm fallback when only generic label is present | Issues #147, #148, #149, #150 |
 
 Issues #147–#150 are fully independent and can proceed in parallel. Issue #151
 (end-to-end validation) depends on all four implementation tasks.
