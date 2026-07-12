@@ -263,7 +263,11 @@ injected as `GH_TOKEN`.
   issue #63 and issue #64.
 - `model:*` PR-label overrides for the `resolve-conflicts` action (deferred per
   parent design).
-- Conflict resolution on human-authored PRs.
+- Automatic conflict resolution on human-authored PRs (the `push`-triggered
+  path only processes agent-authored PRs via the `author.login` filter in
+  Decision 6). Note: the `workflow_dispatch` path intentionally bypasses the
+  authorship gate as an operator-override mechanism — see Decision 5 for the
+  rationale and the Option A escape hatch if future policy tightens this.
 
 ## Task breakdown and dependencies
 
