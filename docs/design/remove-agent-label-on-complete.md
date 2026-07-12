@@ -63,10 +63,12 @@ Add one step after the "Run grooming agent" step in `agent-groom.yml`:
   if: success()
   env:
     GH_TOKEN: ${{ steps.setup.outputs.token }}
+    ISSUE_NUMBER: ${{ github.event.issue.number }}
+    GITHUB_REPO: ${{ github.repository }}
   run: |
     set -euo pipefail
-    gh issue edit "${{ github.event.issue.number }}" \
-      --repo "${{ github.repository }}" \
+    gh issue edit "${ISSUE_NUMBER}" \
+      --repo "${GITHUB_REPO}" \
       --remove-label "agent:groom"
 ```
 
@@ -131,6 +133,18 @@ minimal (`contents: read`; the minted token carries its own scopes). No
 payload (no repo checkout required for a label-removal step). No checkout step
 is needed, following the pattern of the `undraft-sub-issues` job in
 `agent-design.yml`.
+
+**Token minting — use `actions/create-github-app-token@<pinned SHA>` directly,
+not the local composite action.** The `undraft-sub-issues` job deliberately
+avoids `./.github/actions/agent-token` for the same reason that applies here:
+on a `pull_request: closed` event, a developer-agent PR that modifies
+`.github/actions/agent-token` could have its modified composite-action code
+executed in this workflow with `DEVELOPER_APP_PRIVATE_KEY` in scope (the
+comment block at the top of `undraft-sub-issues` explains this in detail). The
+mitigation is to call `actions/create-github-app-token` directly at a pinned
+SHA, which avoids any local workspace checkout and removes the code-execution
+path that a merged PR could influence. Implementers must not add a checkout step
+or switch to the local composite action.
 
 **Concurrency:** `agent-pr-merged-pr-{N}` per PR, `cancel-in-progress: false`
 (consistent with other agent workflows).
