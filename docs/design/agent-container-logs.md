@@ -240,7 +240,7 @@ Two edge cases must be handled explicitly:
    for each variable **must be skipped when that variable is empty**:
    ```bash
    [ -n "${GH_TOKEN:-}" ] && find /home/agent/logs -type f \
-     -exec sed -i "s/$(printf '%s\n' "${GH_TOKEN}" | sed 's/[\/&]/\\&/g')/***REDACTED-GH_TOKEN***/g" {} +
+     -exec sed -i "s/$(printf '%s\n' "${GH_TOKEN}" | sed 's/[\/&\\]/\\&/g')/***REDACTED-GH_TOKEN***/g" {} +
    ```
 
 2. **Regex/replacement metacharacters:** `GH_TOKEN` and `ANTHROPIC_API_KEY`
