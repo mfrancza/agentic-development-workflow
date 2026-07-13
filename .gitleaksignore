@@ -9,12 +9,10 @@
 
 # --- terraform/terraform.tfvars.example: docstring placeholder ---
 # Commit 2f3b0989 introduced the file with a `<<-EOT` heredoc showing an
-# operator where to paste the GitHub App private key contents:
-#     -----BEGIN RSA PRIVATE KEY-----
-#     ...paste contents of the .pem downloaded from the App settings page...
-#     -----END RSA PRIVATE KEY-----
-# The literal string between the BEGIN/END markers is documentation, not key
-# material. The file was superseded in later commits and no longer contains
-# any private-key markers. Confirmed by inspection during issue #174.
+# operator where to paste the GitHub App private key contents: RSA BEGIN/END
+# marker lines around a "...paste contents of the .pem downloaded from the App
+# settings page..." placeholder note. The content between the markers is
+# documentation, not key material. The file was superseded in later commits
+# and no longer contains any private-key markers. Confirmed during issue #174.
 2f3b0989747d8283f73eea0802ba8cc2a6941c8e:terraform/terraform.tfvars.example:private-key:8
 2f3b0989747d8283f73eea0802ba8cc2a6941c8e:terraform/terraform.tfvars.example:private-key:18
