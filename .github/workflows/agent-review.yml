@@ -21,19 +21,32 @@ jobs:
   review:
     # Gate differently per event type:
     #
+    # Trust model — fork-headed PRs are excluded entirely on the synchronize
+    #   path. Even though checkout is pinned to the base SHA (trusted code
+    #   runs), the attacker-controlled diff still reaches Claude on every push,
+    #   so the secrets exposure window is real. Both event types now require
+    #   head.repo == base repo to enforce this. Fork contributors may still
+    #   request a review by asking a repo member to apply the label from a
+    #   trusted fork (same-repo) branch, or by opening a PR from a fork and
+    #   having a repo member re-apply the label after each push.
+    #
     # labeled — keep the existing sender-allowlist check: the user who applied
     #   the label must be in vars.AGENT_ALLOWLIST. GitHub has no per-label
     #   permission model and `repository_owner` doesn't work in org repos (it's
     #   the org login, not a user). The allowlist is managed as a Terraform
     #   parameter so usernames are not hardcoded in YAML.
     #
-    # synchronize — check only that agent:review is already on the PR; no
-    #   sender check. The sender on synchronize is the pusher, not the actor
-    #   who applied the label. The label is the authorization artifact: it was
-    #   applied earlier by an allowlisted actor, so its presence is sufficient
-    #   to authorize re-review. See docs/design/re-review-loop.md § 1.
+    # synchronize — check only that agent:review is already on the PR and that
+    #   the head repo matches the base repo (same-repo push); no sender check.
+    #   The sender on synchronize is the pusher, not the actor who applied the
+    #   label. The label is the authorization artifact: it was applied earlier
+    #   by an allowlisted actor, so its presence is sufficient to authorize
+    #   re-review for same-repo pushes. Fork-headed PRs are rejected here to
+    #   prevent an attacker-controlled push from triggering the reviewer with
+    #   secrets in scope on every push. See docs/design/re-review-loop.md § 1.
     if: >
       github.event.pull_request.state == 'open' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       (
         (github.event.action == 'labeled' &&
          github.event.label.name == 'agent:review' &&
