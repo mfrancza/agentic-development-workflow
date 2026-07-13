@@ -2,7 +2,7 @@
 
 A demonstration of AI coding agents integrated into a GitHub issue-based development lifecycle. Each agent has its own GitHub identity, runs in an isolated container per event, and interacts via PR and issue comments — the same channels a human contributor would use.
 
-**This is a demonstration project, not an open project.** Issues and pull requests are limited to collaborators; outside contributions are not accepted. If you want to run this workflow yourself, see [Reproduce this yourself](#reproduce-this-yourself) below.
+**This is a demonstration project, not an open project.** Pull requests are limited to collaborators; outside contributions are not accepted. Issue reports from the public are welcome but may not be acted on. If you want to run this workflow yourself, see [Reproduce this yourself](#reproduce-this-yourself) below.
 
 See [requirements.md](requirements.md) for the full project specification, [AGENTS.md](AGENTS.md) for agent conventions, and [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution policy.
 
