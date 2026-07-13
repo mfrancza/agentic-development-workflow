@@ -281,13 +281,13 @@ them.
 |-------|------|-----------|
 | [#114](https://github.com/mfrancza/agentic-development-workflow/issues/114) | Loop guard in `agent-respond-review.yml`: skip when review state is `approved` and PR has zero unresolved review threads | — |
 | [#115](https://github.com/mfrancza/agentic-development-workflow/issues/115) | Add `synchronize` trigger + per-event `if:` gating to `agent-review.yml` | — |
-| [#116](https://github.com/mfrancza/agentic-development-workflow/issues/116) | Re-review + thread-resolution behavior: rewrite `docker/reviewer/prompts/review.md` (evaluate open threads, post review first, then resolve addressed ones via `resolveReviewThread`); update the "context only" note in `docker/reviewer/entrypoint.sh` | — |
+| [#96](https://github.com/mfrancza/agentic-development-workflow/issues/96) | Re-review + thread-resolution behavior: rewrite `docker/reviewer/prompts/review.md` (evaluate open threads, post review first, then resolve addressed ones via `resolveReviewThread`); update the "context only" note in `docker/reviewer/entrypoint.sh` | — |
 | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117) | Conflicted-PR limitation note in `AGENTS.md` (label description) and `README.md` if applicable | — |
-| [#118](https://github.com/mfrancza/agentic-development-workflow/issues/118) | End-to-end validation on a real PR: apply `agent:review`, push new commits, verify addressed threads get resolved, verify `APPROVE` fires when clean, verify `agent-respond-review` skips on that approve | Issue #114, Issue #115, Issue #116, Issue #117 |
+| [#118](https://github.com/mfrancza/agentic-development-workflow/issues/118) | End-to-end validation on a real PR: apply `agent:review`, push new commits, verify addressed threads get resolved, verify `APPROVE` fires when clean, verify `agent-respond-review` skips on that approve | Issue #114, Issue #115, Issue #96, Issue #117 |
 
-Issues #114, #115, #116, and #117 can proceed in parallel — this document
+Issues #114, #115, #96, and #117 can proceed in parallel — this document
 is the contract between them (`synchronize` trigger surface, prompt
-resolve-then-review order, loop-guard predicate, doc location). Issue #118
+post-first-then-resolve order, loop-guard predicate, doc location). Issue #118
 exercises the full loop end-to-end and is expected to feed small fixes back
 into the implementation tasks.
 
