@@ -14,10 +14,36 @@ concurrency:
 
 jobs:
   respond-review:
-    # Only respond to submitted reviews on PRs authored by the developer agent.
+    # Only respond to submitted reviews on PRs authored by the developer agent
+    # AND written by a trusted review author. Both gates are required:
+    #
+    #   PR-author gate — restricts responses to agent-authored PRs so the
+    #     developer agent never spends its Anthropic budget or contents-write
+    #     token responding to reviews on human-authored PRs.
+    #
+    #   Review-author gate — the review body and inline comments are
+    #     attacker-controlled text that flows into a Claude prompt with a
+    #     contents-write installation token and an Anthropic API key. On a
+    #     public repo any GitHub user can submit a review on any PR, so
+    #     without this gate an outside user could drive prompt injection and
+    #     spend-on-demand against the developer agent. Restrict to
+    #     `vars.AGENT_ALLOWLIST` (Terraform-managed) plus the known reviewer
+    #     bots that post reviews on agent PRs as part of the normal workflow
+    #     (the reviewer agent, and Copilot under either of the login forms it
+    #     uses for review submissions: `copilot-pull-request-reviewer[bot]`
+    #     for top-level review events and `github-copilot[bot]` for inline
+    #     comment threads).
+    #
     # The pull_request_review: submitted trigger already excludes pending/draft
     # reviews, so no need to repeat that check here.
-    if: github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]'
+    if: >
+      github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]' &&
+      (
+        contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.review.user.login) ||
+        github.event.review.user.login == 'mfrancza-reviewer-agent[bot]' ||
+        github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' ||
+        github.event.review.user.login == 'github-copilot[bot]'
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
