@@ -2,7 +2,7 @@
 
 ## Outside contributions
 
-This is a demonstration project — issues and pull requests from outside collaborators are not accepted. If you have found a bug or want to suggest an improvement, you are welcome to open an issue to note it, but please be aware that the maintainers are under no obligation to act on external reports.
+This is a demonstration project — pull requests from outside collaborators are not accepted, and issue reports will not necessarily be acted on. If you have found a bug or want to suggest an improvement, you are welcome to open an issue to note it, but please be aware that the maintainers are under no obligation to act on external reports.
 
 If you want to run the same agent-driven workflow in your own repository, see the [Reproduce this yourself](README.md#reproduce-this-yourself) section of the README. Everything needed to stand up an identical environment is included in this repo.
 
