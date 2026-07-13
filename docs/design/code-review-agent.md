@@ -152,7 +152,9 @@ during a conflict window never triggered `agent-respond-review`, and the event
 is not replayed after resolution). Consequence for this design: if a PR
 becomes conflicted, `synchronize` re-reviews stop until the conflict is
 resolved. Mitigation: re-applying the `agent:review` label after resolving
-conflicts restarts the review; document this in `AGENTS.md`.
+conflicts restarts the review; document this in `AGENTS.md` and `README.md`. See
+[`docs/design/re-review-loop.md`](re-review-loop.md) (issue #41) for the
+end-to-end documentation of the re-review loop and this limitation's user-facing note.
 
 ## Out of scope
 
