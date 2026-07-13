@@ -1,10 +1,16 @@
 # Contributing
 
-## Getting started
+## Outside contributions
+
+This is a demonstration project — issues and pull requests from outside collaborators are not accepted. If you have found a bug or want to suggest an improvement, you are welcome to open an issue to note it, but please be aware that the maintainers are under no obligation to act on external reports.
+
+If you want to run the same agent-driven workflow in your own repository, see the [Reproduce this yourself](README.md#reproduce-this-yourself) section of the README. Everything needed to stand up an identical environment is included in this repo.
+
+## Collaborator workflow
+
+Collaborators (those with write access to this repository) follow the workflow below.
 
 See [README.md](README.md) for setup instructions and [AGENTS.md](AGENTS.md) for the agent-collaboration conventions used in this project.
-
-## Workflow
 
 1. **Branch from `main`** — create a short, descriptive branch name (e.g. `fix/typo-in-readme` or `feature/reviewer-container`).
 2. **Open a pull request** against `main` when the work is ready for review. Fill in enough context for a reviewer to understand what changed and why.
