@@ -16,3 +16,12 @@
 # and no longer contains any private-key markers. Confirmed during issue #174.
 2f3b0989747d8283f73eea0802ba8cc2a6941c8e:terraform/terraform.tfvars.example:private-key:8
 2f3b0989747d8283f73eea0802ba8cc2a6941c8e:terraform/terraform.tfvars.example:private-key:18
+
+# --- .gitleaksignore: intermediate branch commit with verbatim markers ---
+# Commit 89565bad introduced this file with an explanatory comment that quoted
+# the RSA BEGIN/END marker lines verbatim (documentation, not key material).
+# The comment was reworded to prose in commit 836d7a2, but gitleaks scans full
+# history (--all), so the old commit remains in scope. This entry silences that
+# frozen historical occurrence. It becomes moot once the branch is merged and
+# deleted, but is harmless to keep.
+89565bad583821cac39f64ac9224cc3034d6b6ac:.gitleaksignore:private-key:13
