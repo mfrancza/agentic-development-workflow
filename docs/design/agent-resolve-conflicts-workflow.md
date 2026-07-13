@@ -25,8 +25,11 @@ From issue #64, its grooming Q&A, and the parent design doc
    past it, making `push` to `main` the reliable signal (see the PR #26 gotcha
    in the parent design doc).
 
-2. **Enumeration** — enumerate open PRs authored by the developer agent. Only
-   agent-authored PRs are touched; human PRs are excluded by this authorship gate.
+2. **Enumeration** — enumerate open PRs authored by the developer agent. On the
+   `push`-triggered path, only agent-authored PRs are touched; human PRs are
+   excluded by the `author.login` authorship gate in Decision 6. The
+   `workflow_dispatch` path bypasses this gate as an intentional
+   operator-override — see Decision 5 for the rationale.
 
 3. **Mergeable polling** — GitHub computes mergeability asynchronously. A PR's
    `mergeable` field returns `UNKNOWN` immediately after a push. The workflow must
@@ -170,7 +173,7 @@ consistent with the output-injection hygiene pattern in `AGENTS.md`.
 **Authorship gate on the `workflow_dispatch` path:** The `workflow_dispatch`
 path skips enumeration, which also skips the `author.login ==
 "app/mfrancza-developer-agent"` filter from Decision 6. This is an intentional
-operator-override design choice (Option B): `workflow_dispatch` requires write
+operator-override design choice: `workflow_dispatch` requires write
 access on the repository, so any caller is an authenticated operator who is
 explicitly targeting a specific PR number and is trusted to know what they are
 doing. Allowing an operator to run the resolver against a human-authored PR (for
@@ -267,7 +270,7 @@ injected as `GH_TOKEN`.
   path only processes agent-authored PRs via the `author.login` filter in
   Decision 6). Note: the `workflow_dispatch` path intentionally bypasses the
   authorship gate as an operator-override mechanism — see Decision 5 for the
-  rationale and the Option A escape hatch if future policy tightens this.
+  rationale and the approach for tightening this if future policy requires it.
 
 ## Task breakdown and dependencies
 
