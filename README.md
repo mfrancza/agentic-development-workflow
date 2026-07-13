@@ -22,7 +22,7 @@ The complete flow from issue to deployment is:
 **issue → groom → (design →) implement → CI → review → respond → merge → deploy**
 
 - A human opens an issue and optionally applies `agent:groom` to classify it and surface clarifying questions.
-- For complex issues the groomer labels them `plan`; a human applies `agent:design` to produce a design document and draft sub-issues before implementation begins.
+- For complex issues the groomer applies the `plan` label; a human applies `agent:design` to produce a design document and draft sub-issues before implementation begins.
 - A human applies `agent:developer` to trigger implementation on a fresh branch; the agent opens a PR.
 - CI runs automatically; on failure the agent is re-invoked (`fix-checks`) to diagnose and push fixes.
 - A human (or the agent itself) applies `agent:review` to request a code review from the reviewer agent.
@@ -95,7 +95,7 @@ Notes on the diagram:
 
 ## Reproduce this yourself
 
-The steps below describe how to wire up the same workflow in your own GitHub repository. All configuration is in this repo — fork it, follow the steps, and you will have an identical agent-driven development environment.
+The steps below describe how to wire up the same workflow in your own GitHub repository. Most repo-side configuration (Terraform settings, GitHub Actions workflows, and agent images) is in this repo — fork it and follow the steps; a few one-time manual steps outside version control (creating GitHub Apps, adding secrets) are also required and are covered in the steps below.
 
 ### 1. Create the agent GitHub Apps (one-time, manual)
 
