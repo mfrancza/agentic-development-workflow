@@ -15,6 +15,7 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 ├── README.md                         # Setup and operator guide
 ├── CONTRIBUTING.md                   # PR workflow and branch-protection notes
 ├── requirements.md                   # Project specification / MVP requirements
+├── .gitleaksignore                   # Fingerprint allowlist for the secret-scan CI job
 ├── agents/
 │   └── grooming/
 │       └── label-criteria.json       # Label definitions used by the grooming agent
@@ -126,6 +127,7 @@ The following patterns are already used across this repo. A review must flag any
 - **Fail-loud on ambiguous input.** When a workflow input can be malformed (e.g. more than one `model:*` label on a single issue), the workflow exits with `::error::` and a human-readable message rather than silently picking one value. Silent fallbacks hide bugs and make behaviour dependent on label ordering.
 - **Bash safety in inline scripts.** Inline `run:` scripts start with `set -euo pipefail` and follow the **Shell Script Conventions** above. Scripts that depend on specific env vars should validate them with `${VAR:?message}` at the top of the relevant function or script (this pattern is used in `docker/scripts/entrypoint.sh`; inline workflow scripts that don't rely on caller-supplied vars don't need it). Multi-step scripts long enough to warrant it should be extracted into `docker/scripts/` or `.github/actions/` rather than inlined.
 - **Branch-protection immutability.** Reviews reject changes that would weaken the `main-protection` ruleset in [`terraform/main.tf`](terraform/main.tf) — required approvals, linear history, no force-push, admin push block — unless the PR explicitly justifies the change. Agents must not be able to merge their own PRs or push directly to `main`.
+- **History-wide secret scanning.** The [`.github/workflows/secret-scan.yml`](.github/workflows/secret-scan.yml) workflow runs `gitleaks git --log-opts="--all"` on every push, every PR against `main`, weekly on cron, and on manual dispatch. It scans the entire reachable commit graph (checkout uses `fetch-depth: 0`), not just the diff. Known false positives (documentation placeholders in historical commits) are silenced by fingerprint in [`.gitleaksignore`](.gitleaksignore) — never by broad path or regex allowlists, which would also hide real secrets in the same file. Adding a fingerprint requires a comment explaining why the finding is not a real secret.
 
 ## Adding a New Agent Action
 
@@ -141,7 +143,7 @@ The following patterns are already used across this repo. A review must flag any
 At minimum, before opening a PR, check whether your change alters any of the following. If it does, update `AGENTS.md`, and update `README.md` too when the change is user-visible for someone setting up the repo:
 
 - The set of `AGENT_ACTION` values, their env vars, or their trigger events.
-- Workflow files under `.github/workflows/` (triggers, gating conditions, secrets, env vars passed to the container).
+- Workflow files under `.github/workflows/` (triggers, gating conditions, secrets, env vars passed to the container). Also update the doc when adding or removing an entry in [`.gitleaksignore`](.gitleaksignore) — an allowlisted fingerprint is a review-relevant deviation, not silent config.
 - Labels that gate or configure agent behaviour (`agent:*`, `model:*`, grooming labels).
 - Terraform variables, resources, or Actions variables (`AGENT_ALLOWLIST`, `DEFAULT_CLAUDE_MODEL`, branch-protection rules).
 - Required GitHub App permissions or repo Actions secrets.
