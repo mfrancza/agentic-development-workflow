@@ -30,11 +30,13 @@ jobs:
     #     `vars.AGENT_ALLOWLIST` (Terraform-managed) plus the known reviewer
     #     bots that post reviews on agent PRs as part of the normal workflow.
     #     For Copilot the login in the pull_request_review event payload is
-    #     `Copilot` — observed empirically as the run actor on every
-    #     Copilot-triggered run (e.g. runs 29297753380, 29298656975), even
-    #     though the REST API renders the same reviews as
-    #     `copilot-pull-request-reviewer[bot]`. Both REST-form logins are kept
-    #     defensively in case GitHub changes the payload representation.
+    #     `Copilot` — observed empirically as the actor on every
+    #     Copilot-triggered run (evidence recorded in PR #182), even though
+    #     the REST API renders the same reviews as
+    #     `copilot-pull-request-reviewer[bot]`. Both REST-form logins
+    #     (`copilot-pull-request-reviewer[bot]` and `github-copilot[bot]`)
+    #     are kept defensively in case GitHub changes the payload
+    #     representation.
     #
     # The pull_request_review: submitted trigger already excludes pending/draft
     # reviews, so no need to repeat that check here.
