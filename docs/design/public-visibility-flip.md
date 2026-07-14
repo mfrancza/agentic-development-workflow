@@ -231,13 +231,16 @@ implementer verifies at the point of writing HCL. Two branches:
   **all external contributors** (`all_external_contributors`, strictest of
   the three GitHub options).
 - **(b) Provider does not support it** — add the manual step to the flip
-  runbook (Settings → Actions → General → "Fork pull request workflows" →
-  "Require approval for all external contributors") and document it in
-  `AGENTS.md` alongside the other manual-at-flip steps.
+  runbook (Settings → Actions → General → "Fork pull request workflows from
+  outside collaborators" → "Require approval for all outside collaborators")
+  and document it in `AGENTS.md` alongside the other manual-at-flip steps.
 
-Both branches meet the issue's requirement; the choice is a mechanical one
-based on provider capability. The implementer records which branch was taken
-in the flip runbook so future reviewers can find it.
+**Branch taken: (b).** Provider `integrations/github` v6.12.1 (the installed
+version; constraint `~> 6.2`) does not expose the
+`fork-pr-contributor-approval` endpoint in
+`github_actions_repository_permissions` or any sibling resource — the
+attribute is absent from the provider schema. The setting is applied manually
+at flip time (runbook step 7).
 
 ### Decision 5: Interaction limit stays a manual `gh api PUT` at flip time
 
@@ -317,8 +320,8 @@ this order on flip day:
    - Historical-run sweep/accept decision is recorded as a comment on #177.
 2. Merge **Prep PR 1** (visibility + `allowed_actions`: the `visibility =
    "public"` and `github_actions_repository_permissions` changes from
-   #183/#184, plus the Terraform portion of #185 if applicable — no
-   `security_and_analysis` block; see Task breakdown).
+   #183/#184 — no `security_and_analysis` block; see Task breakdown). Issue
+   #185 has no Terraform artefact (Decision 4 branch b applies).
 3. Merge the docs PR (#186) — order does not matter relative to (2).
 4. From a shell with maintainer admin credentials — **config state 1
    (visibility only, `security_and_analysis` block absent):** confirm the
@@ -338,9 +341,12 @@ this order on flip day:
    enable both features manually via Settings → Code security and Analysis.
    Complete this step immediately; do not leave the repo public without push
    protection active.
-7. If Decision 4 branch (b) applies: set the fork-PR approval policy in the
-   GitHub UI (Settings → Actions → General → "Fork pull request workflows" →
-   "Require approval for all external contributors").
+7. Set the fork-PR approval policy in the GitHub UI: Settings → Actions →
+   General → "Fork pull request workflows from outside collaborators" →
+   select **"Require approval for all outside collaborators"** (the third,
+   strictest option). This is a manual step because provider
+   `integrations/github` v6.12.1 does not expose the
+   `fork-pr-contributor-approval` endpoint (Decision 4 branch b).
 8. Run the manual `gh api PUT interaction-limits` command from Decision 5.
 9. Work through the verification checklist (Decision 6). Comment the results
    on the flip-execution sub-issue.
