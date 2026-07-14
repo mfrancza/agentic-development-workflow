@@ -1,0 +1,27 @@
+# Gitleaks fingerprint allowlist. Format: <commit-sha>:<file>:<rule-id>:<line>
+#
+# Each entry below is a manually reviewed false positive. Before adding an
+# entry, verify that the "leak" is genuinely a placeholder / example and not a
+# real secret. If you need to allowlist an active file (as opposed to a frozen
+# historical commit), prefer an inline `# gitleaks:allow` comment or a path
+# allowlist in .gitleaks.toml — a fingerprint entry only silences that exact
+# commit/file/line, so future changes to the same file are still scanned.
+
+# --- terraform/terraform.tfvars.example: docstring placeholder ---
+# Commit 2f3b0989 introduced the file with a `<<-EOT` heredoc showing an
+# operator where to paste the GitHub App private key contents: RSA BEGIN/END
+# marker lines around a "...paste contents of the .pem downloaded from the App
+# settings page..." placeholder note. The content between the markers is
+# documentation, not key material. The file was superseded in later commits
+# and no longer contains any private-key markers. Confirmed during issue #174.
+2f3b0989747d8283f73eea0802ba8cc2a6941c8e:terraform/terraform.tfvars.example:private-key:8
+2f3b0989747d8283f73eea0802ba8cc2a6941c8e:terraform/terraform.tfvars.example:private-key:18
+
+# --- .gitleaksignore: intermediate branch commit with verbatim markers ---
+# Commit 89565bad introduced this file with an explanatory comment that quoted
+# the RSA BEGIN/END marker lines verbatim (documentation, not key material).
+# The comment was reworded to prose in commit 836d7a2, but gitleaks scans full
+# history (--all), so the old commit remains in scope. This entry silences that
+# frozen historical occurrence. It becomes moot once the branch is merged and
+# deleted, but is harmless to keep.
+89565bad583821cac39f64ac9224cc3034d6b6ac:.gitleaksignore:private-key:13
