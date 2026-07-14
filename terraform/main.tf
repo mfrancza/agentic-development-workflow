@@ -194,6 +194,30 @@ locals {
   }
 }
 
+# Restrict which Actions can run in this repository. Every third-party action
+# used across .github/workflows/ is actions/* (GitHub-owned) — see the audit
+# in docs/design/public-visibility-flip.md. Setting allowed_actions = "selected"
+# with github_owned_allowed = true and an empty patterns_allowed covers all
+# current workflows with zero configured-pattern surface.
+#
+# verified_allowed = false is deliberate: the "verified creators" list is a
+# broad GitHub-managed set; admitting it would widen the policy for no current
+# benefit (Decision 3 in the design doc). If a future workflow adds a non-GitHub
+# action, the workflow author must extend patterns_allowed here (full-SHA pin,
+# per AGENTS.md convention) — the workflow will fail with a "not allowed" error
+# if the pattern is missing, which is loud and easily traced.
+resource "github_actions_repository_permissions" "this" {
+  repository      = github_repository.this.name
+  enabled         = true
+  allowed_actions = "selected"
+
+  allowed_actions_config {
+    github_owned_allowed = true
+    verified_allowed     = false
+    patterns_allowed     = []
+  }
+}
+
 resource "github_issue_label" "automation" {
   for_each = local.automation_labels
 
