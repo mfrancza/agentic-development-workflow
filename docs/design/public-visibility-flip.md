@@ -103,15 +103,16 @@ action, the workflow author must also extend `patterns_allowed` in
 
 ## Design
 
-### Decision 1: Stage the flip as a single Terraform config PR, applied in a human session
+### Decision 1: Stage the flip as two held Terraform prep PRs, applied in a human session
 
 **Options considered.**
 
-- **(a) One prep PR, single apply** *(chosen)* — modify `terraform/main.tf`
-  in one PR that includes `visibility = "public"`, `security_and_analysis`,
-  and `github_actions_repository_permissions`. Merge only when the maintainer
-  is ready to flip; then `terraform plan` (review) → `terraform apply` in one
-  session; then the manual `gh api PUT interaction-limits` call.
+- **(a) Held prep config, single session** *(chosen)* — stage the Terraform
+  changes across two held prep PRs (reviewed but not merged to `main` until
+  flip day): Prep PR 1 carries `visibility = "public"` and
+  `github_actions_repository_permissions`; Prep PR 2 carries only the
+  `security_and_analysis` block. Merge each PR immediately before the
+  corresponding `terraform plan` + `apply` inside the flip session.
 - **(b) Multiple staged PRs merged over time** — each concern (visibility,
   security_and_analysis, actions restrictions) in its own PR, cumulative on
   `main`. Rejected: puts the repo in a broken intermediate state if any
@@ -123,23 +124,21 @@ action, the workflow author must also extend `patterns_allowed` in
   cadence: the same guarantee comes from not merging the prep PR until the
   flip window.
 
-Option (a) keeps the review surface concentrated (one PR, one `terraform
-plan` diff) and the state transition contained within a single human-run
-session. Note: the apply sequence inside the session requires two config
-states (see Decision 2), so "single apply" is not accurate — "single
-session" is. The trade-off — "the prep PR sits open until flip day" — is
-small: the design PR (this document) is what merges first; the
-implementation PR is prepared and reviewed but held for the flip day. This
-matches the "irreversible; needs human sign-off" property of the issue
-itself.
+Option (a) keeps the state transition contained within a single human-run
+session. The two-PR structure (see Decision 2) gives the reviewer visibility
+into both config states before the session while ensuring each state is applied
+in the correct sequence. The trade-off — "both prep PRs sit open until flip
+day" — is small: the design PR (this document) is what merges first; the
+implementation PRs are prepared, reviewed, and held for the flip day. This
+matches the "irreversible; needs human sign-off" property of the issue itself.
 
 ### Decision 2: `security_and_analysis` block on `github_repository.this`
 
 Provider `integrations/github ~> 6.2` accepts a `security_and_analysis`
 block. The block only supports enabling secret scanning on public repos or
 private repos with GHAS — this repo has neither today, which is why the
-block is added *together with* the visibility flip in the same PR. Concrete
-shape:
+block is applied in a separate held prep PR (Prep PR 2) after the repo is
+already public (see the Known limitation paragraph below). Concrete shape:
 
 ```hcl
 security_and_analysis {
@@ -163,29 +162,30 @@ gitleaks workflow, which stays in place (different detection engine, useful
 overlap).
 
 **Known limitation — two config states required:**
-The GitHub API returns HTTP 422 when `security_and_analysis` settings are
-included in the same PATCH request as a `private → public` visibility flip. In
-provider v6.12.1, `resourceGithubRepositoryUpdate` sends the
-`security_and_analysis` PATCH before the visibility update — so the 422 fires
-while the repo is still private, the visibility flip never executes, and a
-second apply of the identical config fails the same way. Partial state after
-the failed apply: the repo is still private, but `allowed_actions` may already
-have narrowed.
+The GitHub API rejects `security_and_analysis` changes while the repo is
+private, and provider v6.12.1 sends that PATCH before the visibility update.
+In `resourceGithubRepositoryUpdate`, the `security_and_analysis` PATCH fires
+first — while the repo is still private — so the 422 fires, the visibility
+flip never executes, and a second apply of the identical config fails the same
+way. Partial state after the failed apply: the repo is still private, but
+`allowed_actions` may already have narrowed.
 
 Recovery requires **two config states, not two applies of the same config**:
 
-- **State 1 — visibility only:** the held prep PR's first config state omits
-  the `security_and_analysis` block entirely. `terraform apply` flips
-  `visibility` to `"public"` and narrows `allowed_actions`; the repo goes
-  public cleanly.
-- **State 2 — security settings:** the `security_and_analysis` block is then
-  added (e.g. the prep PR's second commit, or a small follow-up PR merged
-  within the same flip session). A second `terraform plan` + `apply` enables
-  secret scanning and push protection now that the repo is public.
+- **State 1 — visibility only:** the `security_and_analysis` block is absent.
+  `terraform apply` flips `visibility` to `"public"` and narrows
+  `allowed_actions`; the repo goes public cleanly.
+- **State 2 — security settings:** the `security_and_analysis` block is added
+  and a second `terraform plan` + `apply` enables secret scanning and push
+  protection now that the repo is public.
 
-The held prep PR should carry this as two sequenced commits so the reviewer
-can see both states before the session. The flip runbook (steps 5–6) reflects
-this two-state sequence.
+Both config states are staged across two held prep PRs: **Prep PR 1** carries
+`visibility = "public"` and `github_actions_repository_permissions` (State 1;
+merged at runbook step 2), and **Prep PR 2** carries only the
+`security_and_analysis` block (State 2; merged at runbook step 6 after the
+repo is public). Both PRs are prepared and reviewed before the session so the
+reviewer sees both states up front. The flip runbook (steps 4–6) reflects this
+two-state sequence.
 
 **Fallback:** If the state-2 apply still refuses (provider issue #1941
 reported "Secret Scanning can only be changed on org owned repositories" for
@@ -268,17 +268,22 @@ completes and comments on before closing #177:
 - [ ] Label-triggered agent workflow runs — apply `agent:groom` (or any
       `agent:*` label) to a real issue post-flip and confirm the workflow
       dispatches and reaches the container.
-- [ ] Test fork PR job gate — have a collaborator open a PR from their fork
-      (note: the interaction limit is already active at this point; use a
-      collaborator account so the limit does not block the test). The
-      expected behaviour depends on the trigger: for `pull_request` triggers
-      (e.g. `agent-design.yml`'s undraft job, `agent-respond-review.yml`),
-      the fork-PR approval policy holds the run pending approval — confirm the
-      run appears as "Waiting" rather than executing. For `pull_request_target`
-      triggers (e.g. `agent-review.yml`), the fork-PR approval policy does not
-      apply; confirm the job fires but is skipped at the job-level `if:`
-      head-repo / PR-author gate. Both mechanisms contribute defence-in-depth
-      for different trigger types.
+- [ ] Test fork PR job gate — use a collaborator account (the interaction
+      limit is active; a non-collaborator cannot open a PR at this point).
+      Have the collaborator open a fork PR, then submit a review on that PR.
+      Expected behaviour by trigger type:
+      - **`pull_request` triggers** (`agent-design.yml` undraft job): the
+        fork-PR approval policy holds the run — confirm it appears as
+        "Waiting" rather than executing.
+      - **`pull_request_review` triggers** (`agent-respond-review.yml`):
+        runs in the base-branch context and is not held by the fork-PR
+        approval policy — confirm the job fires but is skipped at the
+        job-level `if:` (PR-author identity gate).
+      - **`pull_request_target` triggers** (`agent-review.yml`): similarly
+        runs in the base-branch context, not approval-gated — confirm the
+        job fires but is skipped at the job-level `if:` (head-repo gate).
+      All three mechanisms contribute defence-in-depth for different trigger
+      types.
 - [ ] Interaction limit rejects a non-collaborator — ask a non-collaborator
       GitHub account to try opening an issue or PR; confirm GitHub rejects
       it with the interaction-limits message.
@@ -298,8 +303,10 @@ this order on flip day:
    - Issues #172–#175 (prep siblings) are closed (already done).
    - Issue #176 is closed with the reminder workflow live.
    - Historical-run sweep/accept decision is recorded as a comment on #177.
-2. Merge the Terraform prep PR (the combined #183/#184 held PR, plus the
-   Terraform portion of #185 if applicable — see Task breakdown).
+2. Merge **Prep PR 1** (visibility + `allowed_actions`: the `visibility =
+   "public"` and `github_actions_repository_permissions` changes from
+   #183/#184, plus the Terraform portion of #185 if applicable — no
+   `security_and_analysis` block; see Task breakdown).
 3. Merge the docs PR (#186) — order does not matter relative to (2).
 4. From a shell with maintainer admin credentials — **config state 1
    (visibility only, `security_and_analysis` block absent):** confirm the
@@ -309,9 +316,9 @@ this order on flip day:
 5. `terraform -chdir=terraform apply` (state 1) → repo becomes public;
    `allowed_actions` narrows. Apply should succeed cleanly because
    `security_and_analysis` is absent from this state.
-6. **Config state 2 (security settings):** advance to the second config state
-   — the prep PR's second commit or a follow-up PR merged within this session
-   — which adds the `security_and_analysis` block. Run
+6. **Config state 2 (security settings):** merge **Prep PR 2** (the
+   `security_and_analysis` block only, from issue #183; this PR was prepared
+   and reviewed before the session). Run
    `terraform -chdir=terraform plan` → review the diff (should show only the
    `secret_scanning` and `secret_scanning_push_protection` additions). Then
    `terraform -chdir=terraform apply` → secret scanning and push protection
@@ -358,14 +365,19 @@ this order on flip day:
 | [#186](https://github.com/mfrancza/agentic-development-workflow/issues/186) | Docs: `README.md` + `AGENTS.md` — flip runbook, security defaults now in effect, manual `gh api PUT interaction-limits` step, cross-reference to #176 reminder workflow | — |
 | [#187](https://github.com/mfrancza/agentic-development-workflow/issues/187) | Flip execution + verification checklist (human-run session): merge prep PRs, `terraform plan` + `apply`, manual interaction-limit call, three-item post-flip verification | Issue #183, Issue #184, Issue #185, Issue #186 |
 
-**Critical:** Issues #183, #184, and (if #185 takes the Terraform path) the
-Terraform portion of #185 must be implemented in a **single held Terraform
-prep PR**. The PR is prepared and reviewed but not merged to `main` until
-the flip session (Decision 1, option a). Merging the Terraform changes ahead
-of the session as separate PRs recreates rejected option (b): any
-`terraform apply` between merges — including applies triggered by unrelated
-config changes — would perform the irreversible visibility flip outside the
-planned session.
+**Critical:** The Terraform changes must be staged across **two held prep PRs**
+(Decision 1, option a) — both prepared and reviewed before the session but not
+merged until flip day:
+
+- **Prep PR 1:** `visibility = "public"` and `github_actions_repository_permissions`
+  from issues #183 and #184 (plus the Terraform portion of #185 if applicable).
+  No `security_and_analysis` block. Merged at runbook step 2.
+- **Prep PR 2:** `security_and_analysis` block only from issue #183.
+  Merged at runbook step 6, after the repo is public.
+
+Merging `visibility = "public"` to `main` before the flip session recreates
+rejected option (b): any unrelated `terraform apply` would perform the
+irreversible visibility flip outside the planned session.
 
 Issue #186 (docs) and the manual-runbook result of #185 (if applicable) are
 independent and may merge to `main` ahead of the flip session — neither
@@ -373,11 +385,12 @@ triggers a state change. Issue #187 is the human-run flip session that gates
 the epic close.
 
 **Timing note on #187's blocked-by edges:** Although #187 is blocked by
-#183–#185, those issues only close when the held prep PR merges — which
-happens inside #187's flip session at runbook step 2. The blocked-by edges
-are satisfied during the session, not before it. Any process or agent
-honoring blocked-by edges strictly should treat the issues as done once the
-prep PR is prepared and reviewed; they close mid-session via the merge.
+#183–#185, those issues only close when the held prep PRs merge — Prep PR 1
+at runbook step 2 and Prep PR 2 at runbook step 6, both inside #187's flip
+session. The blocked-by edges are satisfied during the session, not before it.
+Any process or agent honoring blocked-by edges strictly should treat the issues
+as done once both prep PRs are prepared and reviewed; they close mid-session
+via the merges.
 
 Dependencies are recorded natively as GitHub blocked-by relationships on the
 issues.
