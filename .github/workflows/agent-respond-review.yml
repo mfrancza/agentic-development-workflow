@@ -28,11 +28,15 @@ jobs:
     #     without this gate an outside user could drive prompt injection and
     #     spend-on-demand against the developer agent. Restrict to
     #     `vars.AGENT_ALLOWLIST` (Terraform-managed) plus the known reviewer
-    #     bots that post reviews on agent PRs as part of the normal workflow
-    #     (the reviewer agent, and Copilot under either of the login forms it
-    #     uses for review submissions: `copilot-pull-request-reviewer[bot]`
-    #     for top-level review events and `github-copilot[bot]` for inline
-    #     comment threads).
+    #     bots that post reviews on agent PRs as part of the normal workflow.
+    #     For Copilot the login in the pull_request_review event payload is
+    #     `Copilot` — observed empirically as the actor on every
+    #     Copilot-triggered run (evidence recorded in PR #182), even though
+    #     the REST API renders the same reviews as
+    #     `copilot-pull-request-reviewer[bot]`. Both REST-form logins
+    #     (`copilot-pull-request-reviewer[bot]` and `github-copilot[bot]`)
+    #     are kept defensively in case GitHub changes the payload
+    #     representation.
     #
     # The pull_request_review: submitted trigger already excludes pending/draft
     # reviews, so no need to repeat that check here.
@@ -41,6 +45,7 @@ jobs:
       (
         contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.review.user.login) ||
         github.event.review.user.login == 'mfrancza-reviewer-agent[bot]' ||
+        github.event.review.user.login == 'Copilot' ||
         github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' ||
         github.event.review.user.login == 'github-copilot[bot]'
       )
