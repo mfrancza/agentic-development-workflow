@@ -25,7 +25,8 @@ jobs:
     #   Even though checkout is pinned to the base SHA (trusted code runs), the
     #   attacker-controlled diff still reaches Claude on every push, so the
     #   secrets exposure window is real. Both event types require
-    #   head.repo == base repo to enforce this. Fork contributors may still
+    #   github.event.pull_request.head.repo.full_name == github.repository to
+    #   enforce this. Fork contributors may still
     #   request a review by asking a repo member to cherry-pick / create a
     #   same-repo branch from the fork's changes, open a new PR from that
     #   branch in the base repo, and then apply the agent:review label to that
