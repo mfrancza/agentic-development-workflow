@@ -269,21 +269,30 @@ completes and comments on before closing #177:
       `agent:*` label) to a real issue post-flip and confirm the workflow
       dispatches and reaches the container.
 - [ ] Test fork PR job gate — use a collaborator account (the interaction
-      limit is active; a non-collaborator cannot open a PR at this point).
-      Have the collaborator open a fork PR, then submit a review on that PR.
-      Expected behaviour by trigger type:
-      - **`pull_request` triggers** (`agent-design.yml` undraft job): the
-        fork-PR approval policy holds the run — confirm it appears as
-        "Waiting" rather than executing.
+      limit is active after step 8; a non-collaborator cannot open a PR at
+      this point). Have the collaborator open a fork PR on their own fork.
+      Then: (a) submit a review on the fork PR; (b) have an allowlisted user
+      apply the `agent:review` label to the fork PR; (c) close the fork PR.
+      Expected observations:
       - **`pull_request_review` triggers** (`agent-respond-review.yml`):
-        runs in the base-branch context and is not held by the fork-PR
-        approval policy — confirm the job fires but is skipped at the
-        job-level `if:` (PR-author identity gate).
-      - **`pull_request_target` triggers** (`agent-review.yml`): similarly
-        runs in the base-branch context, not approval-gated — confirm the
-        job fires but is skipped at the job-level `if:` (head-repo gate).
-      All three mechanisms contribute defence-in-depth for different trigger
-      types.
+        submitting the review fires the workflow in base-branch context —
+        confirm the job fires but is **skipped** at the job-level `if:`
+        (PR-author identity gate).
+      - **`pull_request_target` triggers** (`agent-review.yml`): applying
+        the `agent:review` label fires the workflow in base-branch context —
+        confirm the job fires but is **skipped** at the job-level `if:`
+        (head-repo gate).
+      - **`pull_request` triggers** (`agent-design.yml` undraft job): closing
+        the fork PR fires the undraft job — confirm it is **skipped** at the
+        job-level `if:` gate.
+      **Approval-policy observation:** the "require approval for all external
+      contributors" policy cannot be verified using a collaborator account
+      (collaborators are not external contributors; their runs are not held
+      for approval regardless of trigger). Two options: (i) insert a
+      non-collaborator test *between* runbook steps 7 (policy applied) and
+      8 (interaction limit active) — confirm a non-collaborator fork-PR run
+      appears as "Waiting"; or (ii) record the policy as
+      **configured-but-not-verified** in the checklist comment.
 - [ ] Interaction limit rejects a non-collaborator — ask a non-collaborator
       GitHub account to try opening an issue or PR; confirm GitHub rejects
       it with the interaction-limits message.
