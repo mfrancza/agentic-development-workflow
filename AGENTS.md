@@ -85,7 +85,7 @@ Only usernames (and agent bot identities like `<developer-agent-app-slug>[bot]`)
 - **Developer agent container** — implemented at [`docker/`](docker/).
 - **Terraform** for repo settings, branch protection, and per-workflow config — implemented at [`terraform/`](terraform/). Agent App identities are configured out of band (see README).
 - **GitHub Actions workflows** for each agent action — implemented at [`.github/workflows/`](.github/workflows/).
-- **Local development guide** for running the developer and reviewer agents locally — see the Setup section of [README.md](README.md).
+- **Local development guide** for running the developer and reviewer agents locally — see the [Reproduce this yourself](README.md#reproduce-this-yourself) section of [README.md](README.md).
 
 ## Claude Code Identity
 
