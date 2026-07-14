@@ -290,8 +290,11 @@ completes and comments on before closing #177:
       (collaborators are not external contributors; their runs are not held
       for approval regardless of trigger). Two options: (i) insert a
       non-collaborator test *between* runbook steps 7 (policy applied) and
-      8 (interaction limit active) — confirm a non-collaborator fork-PR run
-      appears as "Waiting"; or (ii) record the policy as
+      8 (interaction limit active) — have the non-collaborator close their
+      fork PR (which fires `agent-design.yml`'s undraft job via
+      `pull_request: [closed]`, the only subscribed event a non-collaborator
+      can trigger without the `agent:review` label or a review action) and
+      confirm the run appears as "Waiting"; or (ii) record the policy as
       **configured-but-not-verified** in the checklist comment.
 - [ ] Interaction limit rejects a non-collaborator — ask a non-collaborator
       GitHub account to try opening an issue or PR; confirm GitHub rejects
