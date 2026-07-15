@@ -221,15 +221,14 @@ workflow that omits the pattern update — the workflow will fail with a
 ### Decision 4: Fork-PR approval policy — Terraform if the provider exposes it, else runbook
 
 The Terraform `github` provider's coverage of the fork-PR approval policy
-(`PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-approval`,
-introduced in the GitHub API in 2025) may or may not be in `~> 6.2` — the
-implementer verifies at the point of writing HCL. Two branches:
+(`PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-approval`)
+may or may not be in `~> 6.2` — the implementer verifies at the point of
+writing HCL. Two branches:
 
 - **(a) Provider supports it** — add the setting to
   `github_actions_repository_permissions` (or the sibling resource,
   whichever the provider exposes). Set the policy to require approval for
-  **all external contributors** (`all_external_contributors`, strictest of
-  the three GitHub options).
+  **all outside collaborators** (the strictest of the three GitHub options).
 - **(b) Provider does not support it** — add the manual step to the flip
   runbook (Settings → Actions → General → "Fork pull request workflows from
   outside collaborators" → "Require approval for all outside collaborators")

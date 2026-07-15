@@ -143,11 +143,11 @@ The following patterns are already used across this repo. A review must flag any
 
 ## Manual repository settings
 
-The following settings are not managed by Terraform (the provider does not
-expose the relevant endpoints) and must be applied manually by a maintainer
-with admin credentials at flip time. See the flip-day runbook in
+The following settings must be applied manually by a maintainer with admin
+credentials at flip time — each for a different reason (see the decision
+entries in
 [`docs/design/public-visibility-flip.md`](docs/design/public-visibility-flip.md)
-for the required sequencing.
+for details). See the same doc for the required sequencing.
 
 - **Fork-PR approval policy.** The `integrations/github` Terraform provider
   (v6.12.1; constraint `~> 6.2`) does not expose the
