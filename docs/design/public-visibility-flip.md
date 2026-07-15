@@ -53,8 +53,9 @@ Before the flip can proceed:
    provider upgrade required.
 3. **Fork-PR approval policy.** Require approval for **all outside
    collaborators** (the strictest of GitHub's three options; applied
-   manually via the UI — see Decision 4). Matters for any future CI-style workflow that fires on fork
-   PRs; today's agent workflows already exclude fork heads at the job-level
+   manually via the UI — see Decision 4).
+   Matters for any future CI-style workflow that fires on fork PRs;
+   today's agent workflows already exclude fork heads at the job-level
    `if:` (explicit head-repo check or PR-author identity), but the repo-wide
    Actions setting is defence in depth.
 4. **`allowed_actions` tightening.** From `all` to a narrower policy. Every
@@ -320,7 +321,7 @@ this order on flip day:
 2. Merge **Prep PR 1** (visibility + `allowed_actions`: the `visibility =
    "public"` and `github_actions_repository_permissions` changes from
    #183/#184 — no `security_and_analysis` block; see Task breakdown). Issue
-   #185 has no Terraform artefact (Decision 4 branch b applies).
+   #185 has no Terraform artefact (Decision 4 branch (b) applies).
 3. Merge the docs PR (#186) — order does not matter relative to (2).
 4. From a shell with maintainer admin credentials — **config state 1
    (visibility only, `security_and_analysis` block absent):** confirm the
@@ -345,7 +346,7 @@ this order on flip day:
    select **"Require approval for all outside collaborators"** (the third,
    strictest option). This is a manual step because provider
    `integrations/github` v6.12.1 does not expose the
-   `fork-pr-approval` endpoint (Decision 4 branch b).
+   `fork-pr-approval` endpoint (Decision 4 branch (b)).
 8. Run the manual `gh api PUT interaction-limits` command from Decision 5.
 9. Work through the verification checklist (Decision 6). Comment the results
    on the flip-execution sub-issue.

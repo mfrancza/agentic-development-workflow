@@ -151,7 +151,7 @@ for details). See the same doc for the required sequencing.
 
 - **Fork-PR approval policy.** The `integrations/github` Terraform provider
   (v6.12.1; constraint `~> 6.2`) does not expose the
-  `fork-pr-approval` endpoint (Decision 4 branch b). Set this in
+  `fork-pr-approval` endpoint (Decision 4 branch (b)). Set this in
   the GitHub UI after the repo is public: Settings → Actions → General →
   "Fork pull request workflows from outside collaborators" → select
   **"Require approval for all outside collaborators"** (the strictest of the
