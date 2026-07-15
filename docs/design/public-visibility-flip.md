@@ -51,9 +51,9 @@ Before the flip can proceed:
    Enable via the `github` provider's `security_and_analysis` block if the
    installed version (`~> 6.2`, currently 6.12.1) supports it — it does; no
    provider upgrade required.
-3. **Fork-PR approval policy.** Require approval for **all external
-   contributors** (`all_external_contributors`, the strictest of GitHub's
-   three options). Matters for any future CI-style workflow that fires on fork
+3. **Fork-PR approval policy.** Require approval for **all outside
+   collaborators** (the strictest of GitHub's three options; applied
+   manually via the UI — see Decision 4). Matters for any future CI-style workflow that fires on fork
    PRs; today's agent workflows already exclude fork heads at the job-level
    `if:` (explicit head-repo check or PR-author identity), but the repo-wide
    Actions setting is defence in depth.
