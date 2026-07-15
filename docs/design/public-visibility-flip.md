@@ -221,7 +221,7 @@ workflow that omits the pattern update — the workflow will fail with a
 ### Decision 4: Fork-PR approval policy — Terraform if the provider exposes it, else runbook
 
 The Terraform `github` provider's coverage of the fork-PR approval policy
-(`PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-contributor-approval`,
+(`PUT /repos/{owner}/{repo}/actions/permissions/fork-pr-approval`,
 introduced in the GitHub API in 2025) may or may not be in `~> 6.2` — the
 implementer verifies at the point of writing HCL. Two branches:
 
@@ -237,7 +237,7 @@ implementer verifies at the point of writing HCL. Two branches:
 
 **Branch taken: (b).** Provider `integrations/github` v6.12.1 (the installed
 version; constraint `~> 6.2`) does not expose the
-`fork-pr-contributor-approval` endpoint in
+`fork-pr-approval` endpoint in
 `github_actions_repository_permissions` or any sibling resource — the
 attribute is absent from the provider schema. The setting is applied manually
 at flip time (runbook step 7).
@@ -346,7 +346,7 @@ this order on flip day:
    select **"Require approval for all outside collaborators"** (the third,
    strictest option). This is a manual step because provider
    `integrations/github` v6.12.1 does not expose the
-   `fork-pr-contributor-approval` endpoint (Decision 4 branch b).
+   `fork-pr-approval` endpoint (Decision 4 branch b).
 8. Run the manual `gh api PUT interaction-limits` command from Decision 5.
 9. Work through the verification checklist (Decision 6). Comment the results
    on the flip-execution sub-issue.
