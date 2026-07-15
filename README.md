@@ -334,3 +334,86 @@ The entrypoint clones the repo read-only, gathers the diff against the merge-bas
 - Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_CLAUDE_MODEL` Actions variables.
 - Claude model override via `model:<name>` labels on issues and PRs (reviewer agent).
 - Local run guides for the developer agent ([Build the developer agent container](#4-build-the-developer-agent-container)) and the reviewer agent ([Build and run the reviewer agent container](#5-build-and-run-the-reviewer-agent-container)).
+
+## Security defaults
+
+The following security settings are active on this repository after completing the public-flip runbook below. See [AGENTS.md](AGENTS.md#repo-specific-security-defaults) for the full list of security patterns the reviewer agent and human reviewers enforce on every PR.
+
+- **Secret scanning** — GitHub natively scans the full commit history for secret patterns and posts alerts; enabled via `security_and_analysis` in [`terraform/main.tf`](terraform/main.tf). Complements the existing [`secret-scan.yml`](.github/workflows/secret-scan.yml) gitleaks workflow (different detection engine; both are active).
+- **Push protection** — GitHub blocks pushes containing detected secret patterns at the git server before they enter the history; enabled alongside secret scanning in `terraform/main.tf`.
+- **`allowed_actions = "selected"`, GitHub-owned only** — only GitHub-owned actions (e.g., `actions/*`, `github/*`) are permitted to run in workflows; local actions under `./.github/actions/` are referenced by path and are not subject to the `allowed_actions` policy. Configured via `github_actions_repository_permissions` in `terraform/main.tf` with `github_owned_allowed = true`, `verified_allowed = false`, and an empty `patterns_allowed`. If a workflow adds a non-GitHub, non-local action, the author must also extend `patterns_allowed` in `terraform/main.tf` with a full-SHA pin — omitting the entry causes a loud workflow failure, not a silent bypass.
+- **Fork-PR approval policy: all external contributors** — workflow runs triggered by fork PRs from external contributors (users without write access) require explicit approval before running; set to `all_external_contributors` via Settings → Actions → General or Terraform (see issue [#185](https://github.com/mfrancza/agentic-development-workflow/issues/185)).
+- **Interaction limit: `collaborators_only`** — non-collaborators cannot open issues or PRs; applied manually at flip time and renewed every six months via the reminder-issue workflow ([#176](https://github.com/mfrancza/agentic-development-workflow/issues/176)). See the [public-flip runbook](#public-flip-runbook) for the exact renewal command.
+
+## Public-flip runbook
+
+This is the step-by-step procedure the maintainer follows to flip the repository from private to public and activate the security defaults above. Run these steps in order from a shell with maintainer admin credentials. The flip is irreversible — once git history is public it is cached externally and cannot be un-exposed.
+
+See the design document at [`docs/design/public-visibility-flip.md`](docs/design/public-visibility-flip.md) for the full rationale and decision log.
+
+### Pre-flip gate check (step 1)
+
+Confirm all of the following before continuing:
+
+- Issues [#125](https://github.com/mfrancza/agentic-development-workflow/issues/125) (agent-log redaction) and [#128](https://github.com/mfrancza/agentic-development-workflow/issues/128) (redaction e2e validation) are closed and redaction is confirmed live.
+- Issue [#176](https://github.com/mfrancza/agentic-development-workflow/issues/176) is closed with the reminder-issue workflow deployed and tested.
+- All sibling sub-issues of [#171](https://github.com/mfrancza/agentic-development-workflow/issues/171) are closed.
+- Historical workflow-run sweep decision is recorded as a comment on [#177](https://github.com/mfrancza/agentic-development-workflow/issues/177) (review accumulated logs via Settings → Actions → Management; delete any logs containing sensitive data, or explicitly accept that they become world-readable).
+
+### Terraform state 1 — visibility flip
+
+- Merge **Prep PR 1**: contains `visibility = "public"` and `github_actions_repository_permissions` (from issues [#183](https://github.com/mfrancza/agentic-development-workflow/issues/183) and [#184](https://github.com/mfrancza/agentic-development-workflow/issues/184), plus the Terraform portion of [#185](https://github.com/mfrancza/agentic-development-workflow/issues/185) if it landed in branch (a)). This PR must **not** include the `security_and_analysis` block.
+- Confirm the docs PR (issue [#186](https://github.com/mfrancza/agentic-development-workflow/issues/186), merged as [#191](https://github.com/mfrancza/agentic-development-workflow/pull/191)) is already merged — if you are reading this runbook from `main`, this step is already satisfied. Order relative to Prep PR 1 does not matter.
+- Confirm the `security_and_analysis` block is absent from the current Terraform config. Then plan and review:
+  ```bash
+  terraform -chdir=terraform plan
+  ```
+  The diff must show only the visibility flip and `allowed_actions` change — nothing else.
+- Apply state 1:
+  ```bash
+  terraform -chdir=terraform apply
+  ```
+  The repo becomes public and `allowed_actions` narrows to GitHub-owned only.
+
+### Terraform state 2 — security settings
+
+- Merge **Prep PR 2**: contains only the `security_and_analysis` block (from issue [#183](https://github.com/mfrancza/agentic-development-workflow/issues/183); prepared and reviewed before the session).
+- Plan and review:
+  ```bash
+  terraform -chdir=terraform plan
+  ```
+  The diff must show only the `secret_scanning` and `secret_scanning_push_protection` additions.
+- Apply state 2:
+  ```bash
+  terraform -chdir=terraform apply
+  ```
+  Secret scanning and push protection are enabled.
+- **If this apply fails** (provider limitation on user-owned repos): enable both features manually via Settings → Code security and Analysis. Do not leave the repo public without push protection active — complete this before continuing.
+
+### Fork-PR approval policy
+
+- If issue [#185](https://github.com/mfrancza/agentic-development-workflow/issues/185) landed in branch (b) (the Terraform provider does not expose the fork-PR approval policy): set it in the GitHub UI — Settings → Actions → General → "Fork pull request workflows" → select "Require approval for all external contributors".
+
+### Interaction limit
+
+The `gh api PUT` call requires the repo to be public — the state 1 apply above must be complete first.
+
+```bash
+gh api -X PUT repos/mfrancza/agentic-development-workflow/interaction-limits \
+  -f limit=collaborators_only \
+  -f expiry=six_months
+```
+
+This blocks non-collaborators from opening issues or PRs for six months. For renewal, follow the reminder-issue workflow ([#176](https://github.com/mfrancza/agentic-development-workflow/issues/176)).
+
+### Post-flip verification
+
+Work through the checklist below and comment the results on the flip-execution issue ([#187](https://github.com/mfrancza/agentic-development-workflow/issues/187)):
+
+- **Label-triggered workflow** — apply `agent:groom` (or any `agent:*` label) to a real issue and confirm the workflow dispatches and the container starts.
+- **Fork PR job gate** — open a fork PR from a collaborator account; submit a review and apply `agent:review` to the fork PR; confirm the `agent-review.yml` job fires but is skipped by the head-repo `if:` gate (the label-triggered path must also skip; the collaborator's fork-PR run must not start the reviewer container).
+- **Interaction-limit rejection** — ask a non-collaborator GitHub account to try opening an issue or PR; confirm GitHub returns the interaction-limits rejection message.
+
+### Close the epic
+
+Close [#177](https://github.com/mfrancza/agentic-development-workflow/issues/177) once all verification checks pass.
