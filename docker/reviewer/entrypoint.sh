@@ -18,6 +18,56 @@ set -euo pipefail
 #     developer image; no `AGENT_ACTION` dispatch — this image does one thing.
 # =============================================================================
 
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+
+log() {
+    echo "[reviewer] $(date -Iseconds) $*"
+}
+
+# -----------------------------------------------------------------------------
+# Log capture setup
+# -----------------------------------------------------------------------------
+# Create /home/agent/logs/ before any output so env-validation failures
+# are also captured in container.log (not just the normal-exit path).
+mkdir -p /home/agent/logs
+
+exec 3>&2                                         # save original stderr → fd 3
+exec > >(tee -a /home/agent/logs/container.log) 2>&1
+
+_capture_logs() {
+    # Emit a final log line while stdout/stderr still flow through tee.
+    log "Harvesting session files and redacting secrets"
+
+    # Close both fds writing into the tee pipe so tee reaches EOF and exits.
+    exec >&-   # close stdout → EOF on the tee pipe's write end
+    exec 2>&3  # restore stderr to the saved original fd 3 (removes from pipe)
+    exec 3>&-  # close the saved original fd
+
+    # Wait for tee to flush and exit before touching container.log.
+    wait
+
+    # Copy Claude session JSONL files to /home/agent/logs/session/.
+    # Guard with || true — a run that never invoked Claude has no projects dir.
+    mkdir -p /home/agent/logs/session
+    cp -r "${HOME}/.claude/projects/." /home/agent/logs/session/ 2>/dev/null || true
+
+    # Redact known secret values.  Skip each substitution when the variable is
+    # empty to avoid a sed empty-pattern match that corrupts every line.
+    if [ -n "${GH_TOKEN:-}" ]; then
+        _escaped_token=$(printf '%s\n' "${GH_TOKEN}" | sed 's/[\/&\\]/\\&/g')
+        find /home/agent/logs -type f \
+            -exec sed -i "s/${_escaped_token}/***REDACTED-GH_TOKEN***/g" {} +
+    fi
+    if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+        _escaped_key=$(printf '%s\n' "${ANTHROPIC_API_KEY}" | sed 's/[\/&\\]/\\&/g')
+        find /home/agent/logs -type f \
+            -exec sed -i "s/${_escaped_key}/***REDACTED-ANTHROPIC_API_KEY***/g" {} +
+    fi
+}
+trap '_capture_logs' EXIT
+
 # Required environment variables
 : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
@@ -36,10 +86,6 @@ export GH_TOKEN
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
-
-log() {
-    echo "[reviewer] $(date -Iseconds) $*"
-}
 
 run_claude() {
     local prompt_file="$1"
@@ -117,7 +163,7 @@ log "Computing diff ${BASE_SHA}..HEAD"
 CONTEXT_FILE="$(mktemp)"
 # Ensure the temp file is removed on all exit paths (normal, error, SIGINT, …)
 # so that `set -e` failures before the explicit `rm -f` below don't leak it.
-trap 'rm -f "$CONTEXT_FILE"' EXIT
+trap 'rm -f "$CONTEXT_FILE"; _capture_logs' EXIT
 
 # --- Gather existing review threads WITH IDs. GraphQL is the only place the
 #     thread IDs (used by #41's resolve-thread flow) surface; the REST
