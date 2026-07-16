@@ -22,15 +22,6 @@ resource "github_repository" "this" {
   description = "Agentic development workflow — AI agents in an issue-based SDLC"
   visibility  = "public"
 
-  security_and_analysis {
-    secret_scanning {
-      status = "enabled"
-    }
-    secret_scanning_push_protection {
-      status = "enabled"
-    }
-  }
-
   has_issues   = true
   has_wiki     = false
   has_projects = false
