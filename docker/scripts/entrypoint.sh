@@ -55,7 +55,7 @@ _capture_logs() {
             -exec sed -i "s/${_escaped_key}/***REDACTED-ANTHROPIC_API_KEY***/g" {} +
     fi
 }
-trap '_capture_logs' EXIT
+trap '_exit_code=$?; _capture_logs || true; exit $_exit_code' EXIT
 
 # Required environment variables
 : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"

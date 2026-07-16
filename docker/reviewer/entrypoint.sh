@@ -66,7 +66,7 @@ _capture_logs() {
             -exec sed -i "s/${_escaped_key}/***REDACTED-ANTHROPIC_API_KEY***/g" {} +
     fi
 }
-trap '_capture_logs' EXIT
+trap '_exit_code=$?; _capture_logs || true; exit $_exit_code' EXIT
 
 # Required environment variables
 : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
@@ -163,7 +163,7 @@ log "Computing diff ${BASE_SHA}..HEAD"
 CONTEXT_FILE="$(mktemp)"
 # Ensure the temp file is removed on all exit paths (normal, error, SIGINT, …)
 # so that `set -e` failures before the explicit `rm -f` below don't leak it.
-trap 'rm -f "$CONTEXT_FILE"; _capture_logs' EXIT
+trap '_exit_code=$?; rm -f "$CONTEXT_FILE" || true; _capture_logs || true; exit $_exit_code' EXIT
 
 # --- Gather existing review threads WITH IDs. GraphQL is the only place the
 #     thread IDs (used by #41's resolve-thread flow) surface; the REST
