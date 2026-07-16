@@ -145,6 +145,32 @@ The following patterns are already used across this repo. A review must flag any
 3. Add a workflow in `.github/workflows/` that builds the image and runs the container with the new `AGENT_ACTION`.
 4. Document the new action (env vars, trigger, labels) here in AGENTS.md and — if it affects setup — in README.md.
 
+## Manual repository settings
+
+The following settings must be applied manually by a maintainer with admin
+credentials at flip time — each for a different reason (see the decision
+entries in
+[`docs/design/public-visibility-flip.md`](docs/design/public-visibility-flip.md)
+for details). See the same doc for the required sequencing.
+
+- **Fork-PR approval policy.** The `integrations/github` Terraform provider
+  (v6.12.1; constraint `~> 6.2`) does not expose the
+  `fork-pr-approval` endpoint (Decision 4 branch (b)). Set this in
+  the GitHub UI after the repo is public: Settings → Actions → General →
+  "Fork pull request workflows from outside collaborators" → select
+  **"Require approval for all outside collaborators"** (the strictest of the
+  three options). This is runbook step 7.
+- **Interaction limit.** No identity holds `administration:write` in Actions,
+  so `collaborators_only` is set manually via:
+  ```
+  gh api -X PUT repos/mfrancza/agentic-development-workflow/interaction-limits \
+    -f limit=collaborators_only \
+    -f expiry=six_months
+  ```
+  The [#176 reminder-issue workflow](https://github.com/mfrancza/agentic-development-workflow/issues/176)
+  handles renewal reminders. This call must be made after the repo is public
+  (runbook step 8).
+
 ## Keeping Documentation Current
 
 **Whenever you make a change that affects how agents are configured, triggered, or run, update the docs in the same PR.** Documentation drift makes onboarding painful and makes agent runs unpredictable.
