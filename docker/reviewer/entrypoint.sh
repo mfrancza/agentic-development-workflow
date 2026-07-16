@@ -56,12 +56,12 @@ _capture_logs() {
     # Redact known secret values.  Skip each substitution when the variable is
     # empty to avoid a sed empty-pattern match that corrupts every line.
     if [ -n "${GH_TOKEN:-}" ]; then
-        _escaped_token=$(printf '%s\n' "${GH_TOKEN}" | sed 's/[\/&\\]/\\&/g')
+        _escaped_token=$(printf '%s\n' "${GH_TOKEN}" | sed 's/[.^$*\\/]/\\&/g; s/\[/\\[/g')
         find /home/agent/logs -type f \
             -exec sed -i "s/${_escaped_token}/***REDACTED-GH_TOKEN***/g" {} +
     fi
     if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-        _escaped_key=$(printf '%s\n' "${ANTHROPIC_API_KEY}" | sed 's/[\/&\\]/\\&/g')
+        _escaped_key=$(printf '%s\n' "${ANTHROPIC_API_KEY}" | sed 's/[.^$*\\/]/\\&/g; s/\[/\\[/g')
         find /home/agent/logs -type f \
             -exec sed -i "s/${_escaped_key}/***REDACTED-ANTHROPIC_API_KEY***/g" {} +
     fi

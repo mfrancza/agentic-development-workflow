@@ -106,6 +106,7 @@ When running the container locally, pass your own `GH_TOKEN` (see [README.md](RE
 - Logging uses the `log()` helper in `entrypoint.sh` (`echo "[agent] $(date -Iseconds) $*"`).
 - Git identity inside the container is `claude-dev-agent[bot]`.
 - Required env vars are validated with `${VAR:?message}` at the top of each function.
+- Both entrypoints capture merged stdout/stderr to `/home/agent/logs/container.log` via `tee` and harvest Claude session JSONL files into `/home/agent/logs/session/` on exit (best-effort, via an EXIT trap). Known secret values (`GH_TOKEN`, `ANTHROPIC_API_KEY`) are redacted from all files under `/home/agent/logs/` before the container exits. To collect logs, bind-mount a host directory to `/home/agent/logs/` when running the container (e.g. `-v "$(pwd)/logs:/home/agent/logs"` in a local `docker run`; the workflow bind-mount is wired in PR #126).
 
 ## Code Review Standards
 
