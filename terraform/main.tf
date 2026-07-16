@@ -22,6 +22,20 @@ resource "github_repository" "this" {
   description = "Agentic development workflow — AI agents in an issue-based SDLC"
   visibility  = "public"
 
+  # Config state 2 of the public flip (docs/design/public-visibility-flip.md,
+  # Decision 2): only applicable once the repo is public. GitHub rejects these
+  # settings on a private non-GHAS repo, and the provider sends this PATCH
+  # before any visibility change — so this block must merge and apply strictly
+  # after the state-1 apply that flips visibility.
+  security_and_analysis {
+    secret_scanning {
+      status = "enabled"
+    }
+    secret_scanning_push_protection {
+      status = "enabled"
+    }
+  }
+
   has_issues   = true
   has_wiki     = false
   has_projects = false
