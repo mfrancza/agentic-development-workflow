@@ -65,6 +65,8 @@ flowchart TD
     PlanCheck -- "no" --> DevLabel{"Apply <code>agent:developer</code>?<br/>(user must be in AGENT_ALLOWLIST)"}:::human
 
     DesignLabel -- "yes" --> Design["<b>Designer agent</b><br/>(AGENT_ACTION=design)<br/>creates <code>design/issue-{N}</code>,<br/>writes design doc, opens PR,<br/>creates sub-issues labeled <code>draft</code>"]:::agent
+    DesignLabel -- "no" --> WaitDesign([Wait for user]):::human
+    WaitDesign -- "agent:design applied later" --> DesignLabel
     Design --> DesignMerge["Human reviews and merges<br/>design PR<br/>(<code>draft</code> auto-removed from sub-issues)"]:::human
     DesignMerge --> DevLabel
 
@@ -78,7 +80,7 @@ flowchart TD
 
     CI -- "yes" --> ReviewLabel{"Apply <code>agent:review</code>?<br/>(human or developer agent;<br/>re-fires on each push while labeled)"}:::human
     ReviewLabel -- "yes" --> ReviewerAgent["<b>Reviewer agent</b><br/>reviews PR changes,<br/>posts review"]:::agent
-    ReviewLabel -- "no (human reviews directly)" --> Review{"PR review submitted"}:::system
+    ReviewLabel -- "no (human reviews directly)" --> Review{"PR review submitted"}:::human
     ReviewerAgent --> Review
 
     Review -- "changes requested" --> Respond["<b>Developer agent</b><br/>(AGENT_ACTION=respond-review)<br/>addresses feedback,<br/>pushes updates"]:::agent
