@@ -49,7 +49,7 @@ After evaluating open threads and reviewing the diff, choose the verdict for wha
 
 When in doubt between `COMMENT` and `REQUEST_CHANGES`, ask: would this issue, if shipped, cause a bug, security problem, or broken agent run? If yes, use `REQUEST_CHANGES`.
 
-An open review thread that is still valid counts against `APPROVE` and toward `REQUEST_CHANGES` (if blocking) or `COMMENT` (if advisory). Only threads you have resolved in this run — or threads that were already resolved before this run — are clear.
+An open review thread that is still valid counts against `APPROVE` and toward `REQUEST_CHANGES` (if blocking) or `COMMENT` (if advisory). A thread you have judged addressed in this run is clear for verdict purposes even though it will not be formally resolved until after the review is posted (step 9). Threads that were already resolved before this run are also clear.
 
 ## Anchoring inline comments
 
