@@ -57,16 +57,21 @@ resource "github_actions_variable" "agent_allowlist" {
   value         = jsonencode(var.agent_allowlist)
 }
 
-# Expose the default Claude model as a repository Actions variable so all
-# workflows can pass it to the agent container via CLAUDE_MODEL. The
+# Expose the default model as a repository Actions variable so all
+# workflows can pass it to the agent container via AGENT_MODEL. The
 # agent-implement, agent-groom, and agent-fix-deployment workflows can
 # additionally override this per-issue via a `model:<name>` label
 # (e.g. model:opus, model:haiku); other workflows always use this repo-wide
 # default.
-resource "github_actions_variable" "default_claude_model" {
+resource "github_actions_variable" "default_model" {
   repository    = github_repository.this.name
-  variable_name = "DEFAULT_CLAUDE_MODEL"
-  value         = var.default_claude_model
+  variable_name = "DEFAULT_MODEL"
+  value         = var.default_model
+}
+
+moved {
+  from = github_actions_variable.default_claude_model
+  to   = github_actions_variable.default_model
 }
 
 # Protection for the default branch via a repository ruleset (the modern
@@ -126,7 +131,7 @@ resource "github_repository_ruleset" "main" {
 #    placeholder trigger until that workflow lands.
 #  - model:<name> overrides (agent-implement / agent-groom /
 #    agent-fix-deployment prefer these over the GitHub Actions repository
-#    variable `vars.DEFAULT_CLAUDE_MODEL` (not a Terraform variable); apply
+#    variable `vars.DEFAULT_MODEL` (not a Terraform variable); apply
 #    at most one per issue).
 #  - grooming labels (the grooming agent applies these based on issue
 #    content — see agents/grooming/label-criteria.json).
@@ -161,15 +166,15 @@ locals {
 
     "model:sonnet" = {
       color       = "1d76db"
-      description = "Run agents on this issue with Claude Sonnet (overrides DEFAULT_CLAUDE_MODEL)."
+      description = "Run agents on this issue with Claude Sonnet (overrides DEFAULT_MODEL)."
     }
     "model:opus" = {
       color       = "1d76db"
-      description = "Run agents on this issue with Claude Opus (overrides DEFAULT_CLAUDE_MODEL)."
+      description = "Run agents on this issue with Claude Opus (overrides DEFAULT_MODEL)."
     }
     "model:haiku" = {
       color       = "1d76db"
-      description = "Run agents on this issue with Claude Haiku (overrides DEFAULT_CLAUDE_MODEL)."
+      description = "Run agents on this issue with Claude Haiku (overrides DEFAULT_MODEL)."
     }
 
     "question" = {
