@@ -126,8 +126,8 @@ resource "github_repository_ruleset" "main" {
 #    placeholder trigger until that workflow lands.
 #  - model:<name> overrides (agent-implement / agent-groom /
 #    agent-fix-deployment prefer these over the GitHub Actions repository
-#    variable `vars.DEFAULT_CLAUDE_MODEL` (not a Terraform variable); covers
-#    both Anthropic Claude and OpenAI models; apply at most one per issue).
+#    variable `vars.DEFAULT_CLAUDE_MODEL` (not a Terraform variable); apply
+#    at most one per issue).
 #  - grooming labels (the grooming agent applies these based on issue
 #    content — see agents/grooming/label-criteria.json).
 #  - workflow labels (`human-required` signals that an agent has escalated to
@@ -170,34 +170,6 @@ locals {
     "model:haiku" = {
       color       = "1d76db"
       description = "Run agents on this issue with Claude Haiku (overrides DEFAULT_CLAUDE_MODEL)."
-    }
-
-    # OpenAI model overrides — GPT-5.6 series (current frontier, released
-    # June 2026), o-series reasoning models, and GPT-4.1 (proven, broad
-    # knowledge with excellent instruction following and tool calling).
-    "model:gpt-5.6-sol" = {
-      color       = "1d76db"
-      description = "Run agents on this issue with OpenAI gpt-5.6-sol (overrides DEFAULT_CLAUDE_MODEL)."
-    }
-    "model:gpt-5.6-terra" = {
-      color       = "1d76db"
-      description = "Run agents on this issue with OpenAI gpt-5.6-terra (overrides DEFAULT_CLAUDE_MODEL)."
-    }
-    "model:gpt-5.6-luna" = {
-      color       = "1d76db"
-      description = "Run agents on this issue with OpenAI gpt-5.6-luna (overrides DEFAULT_CLAUDE_MODEL)."
-    }
-    "model:o3" = {
-      color       = "1d76db"
-      description = "Run agents on this issue with OpenAI o3 (overrides DEFAULT_CLAUDE_MODEL)."
-    }
-    "model:o4-mini" = {
-      color       = "1d76db"
-      description = "Run agents on this issue with OpenAI o4-mini (overrides DEFAULT_CLAUDE_MODEL)."
-    }
-    "model:gpt-4.1" = {
-      color       = "1d76db"
-      description = "Run agents on this issue with OpenAI gpt-4.1 (overrides DEFAULT_CLAUDE_MODEL)."
     }
 
     "question" = {
