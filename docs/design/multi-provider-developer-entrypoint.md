@@ -60,12 +60,17 @@ model names are decided here — those belong to issues #81 and #82.
   cached `$AGENT_PROVIDER` (set in the preamble — see Decision 3) to
   `run_anthropic` (implemented) or `run_openai` (stub).
 
-`run_anthropic()` contains the exact `claude --print
---dangerously-skip-permissions --model ... --max-turns ...
---system-prompt-file ...` invocation that lives in `run_claude()` today —
-lifted verbatim, with `$CLAUDE_MODEL` / `$CLAUDE_MAX_TURNS` renamed to their
-`AGENT_*` counterparts. `run_openai()` is a stub that logs
-`"OpenAI runner not yet implemented (see issue #81)"` and exits non-zero.
+`run_anthropic()` contains the exact invocation that lives in `run_claude()` today — lifted verbatim, with `$CLAUDE_MODEL` / `$CLAUDE_MAX_TURNS` renamed to their `AGENT_*` counterparts:
+
+```bash
+claude --print \
+  --dangerously-skip-permissions \
+  --model ... \
+  --max-turns ... \
+  --system-prompt-file ...
+```
+
+`run_openai()` is a stub that logs `"OpenAI runner not yet implemented (see issue #81)"` and exits non-zero.
 
 **Alternatives considered:**
 
