@@ -192,8 +192,8 @@ Current` standard:
   still mentions `DEFAULT_CLAUDE_MODEL` in prose. Leave that for #82 to
   rename in one pass with the Terraform/workflow changes — mixing the
   Actions-variable rename into #80 would step on #82's scope.
-- `README.md`, section 4 `docker run` example: replace `-e
-  CLAUDE_MODEL="sonnet"` with `-e AGENT_MODEL="sonnet"` in the developer
+- `README.md`, section 4 `docker run` example: replace
+  `-e CLAUDE_MODEL="sonnet"` with `-e AGENT_MODEL="sonnet"` in the developer
   container run example. Same for the "Optional" line further down.
 
 The reviewer image's mentions of `CLAUDE_MODEL` / `CLAUDE_MAX_TURNS`
