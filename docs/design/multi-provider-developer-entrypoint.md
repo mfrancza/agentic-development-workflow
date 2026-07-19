@@ -92,7 +92,9 @@ claude --print \
 
 **Decision:** The `resolve_provider` case statement enumerates
 `sonnet | opus | haiku` → `anthropic`. No OpenAI model names appear yet;
-that is #81/#82's decision (which OpenAI models to add). The unknown-model
+that is #81's decision (which OpenAI models to add to the `case` statement —
+done alongside the `run_openai` implementation). Issue #82 is responsible for
+provisioning the corresponding GitHub `model:*` label names. The unknown-model
 error message lists exactly the supported values (`sonnet, opus, haiku`),
 generated from a single source of truth (a local variable or the case-arm
 list itself) so it stays in sync when models are added.
@@ -212,8 +214,9 @@ are #83's scope and stay untouched here.
 
 - The OpenAI runner itself (`run_openai` body, Codex CLI wiring, prompt
   assembly, sandbox flags) — issue #81.
-- OpenAI model names in the allowlist — issue #82 (label provisioning +
-  the model list to pre-populate).
+- OpenAI model names in the allowlist (`case` statement) — issue #81 (added
+  alongside the `run_openai` implementation).
+- GitHub `model:*` label provisioning for OpenAI models — issue #82.
 - Terraform variable rename (`default_claude_model` →
   `default_model`), Actions variable rename (`DEFAULT_CLAUDE_MODEL` →
   `DEFAULT_MODEL`), all five workflow env passes, `OPENAI_API_KEY` secret
