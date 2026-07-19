@@ -20,7 +20,7 @@ with the parallel Terraform/workflows task (#82).
 
 ## Requirements as understood
 
-From issue #80 and its grooming Q&A, the deliverables are:
+From issue #80 and its grooming notes, the deliverables are:
 
 - **Dispatch skeleton.** Rename `run_claude()` → `run_agent()`. Move the
   current `claude ... --print` invocation into a new `run_anthropic()`
