@@ -65,7 +65,7 @@ run_agent() {
             run_openai "$prompt_file" "$@"
             ;;
         *)
-            log "ERROR: Unknown provider '${AGENT_PROVIDER}'"
+            log "ERROR: Unknown provider '${AGENT_PROVIDER}'" >&2
             exit 1
             ;;
     esac
