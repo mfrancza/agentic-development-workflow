@@ -62,7 +62,7 @@ run_agent() {
             run_anthropic "$prompt_file" "$@"
             ;;
         openai)
-            run_openai
+            run_openai "$prompt_file" "$@"
             ;;
         *)
             log "ERROR: Unknown provider '${AGENT_PROVIDER}'"
