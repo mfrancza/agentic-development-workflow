@@ -7,21 +7,13 @@ set -euo pipefail
 # Each invocation is a short-lived container triggered by a GitHub event.
 # =============================================================================
 
-# Required environment variables
-: "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
-: "${GH_TOKEN:?GH_TOKEN is required}"
-: "${GITHUB_REPO:?GITHUB_REPO is required}"
-: "${AGENT_ACTION:?AGENT_ACTION is required (implement|fix-checks|respond-review|fix-deployment|groom|design)}"
-
-# Optional configuration
-CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
-CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-100}"
+# Optional configuration (accept old names as a transient fallback; see #82)
+AGENT_MODEL="${AGENT_MODEL:-${CLAUDE_MODEL:-sonnet}}"
+AGENT_MAX_TURNS="${AGENT_MAX_TURNS:-${CLAUDE_MAX_TURNS:-100}}"
 REVIEWERS="${REVIEWERS:-}"
 
 SCRIPTS_DIR="/opt/agent"
 WORK_DIR="/home/agent/work"
-
-export GH_TOKEN
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -31,17 +23,54 @@ log() {
     echo "[agent] $(date -Iseconds) $*"
 }
 
-run_claude() {
+resolve_provider() {
+    local model="$1"
+    case "$model" in
+        sonnet|opus|haiku)
+            echo "anthropic"
+            ;;
+        *)
+            log "ERROR: Unknown model '${model}'. Supported values: sonnet, opus, haiku" >&2
+            exit 1
+            ;;
+    esac
+}
+
+run_anthropic() {
     local prompt_file="$1"
     shift
     local user_prompt="$*"
 
     printf '%s\n' "$user_prompt" | claude --print \
         --dangerously-skip-permissions \
-        --model "$CLAUDE_MODEL" \
-        --max-turns "$CLAUDE_MAX_TURNS" \
+        --model "$AGENT_MODEL" \
+        --max-turns "$AGENT_MAX_TURNS" \
         --system-prompt-file "${SCRIPTS_DIR}/prompts/${prompt_file}"
 }
+
+run_openai() {
+    log "ERROR: OpenAI runner not yet implemented (see issue #81)" >&2
+    exit 1
+}
+
+run_agent() {
+    local prompt_file="$1"
+    shift
+
+    case "$AGENT_PROVIDER" in
+        anthropic)
+            run_anthropic "$prompt_file" "$@"
+            ;;
+        openai)
+            run_openai "$prompt_file" "$@"
+            ;;
+        *)
+            log "ERROR: Unknown provider '${AGENT_PROVIDER}'" >&2
+            exit 1
+            ;;
+    esac
+}
+
 setup_repo() {
     git config --global user.name "claude-dev-agent[bot]"
     git config --global user.email "claude-dev-agent[bot]@users.noreply.github.com"
@@ -55,6 +84,28 @@ setup_repo() {
     gh repo clone "$GITHUB_REPO" "$WORK_DIR"
     cd "$WORK_DIR"
 }
+
+# -----------------------------------------------------------------------------
+# Preamble: resolve provider and validate credentials/required vars
+# (before any gh call, clone, or Claude invocation)
+# -----------------------------------------------------------------------------
+
+# 1. Resolve the provider from AGENT_MODEL; unknown model → fail loud
+AGENT_PROVIDER="$(resolve_provider "$AGENT_MODEL")"
+
+# 2. Validate the selected provider's API key
+case "$AGENT_PROVIDER" in
+    anthropic)
+        : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
+        ;;
+esac
+
+# 3. Validate remaining required vars
+: "${GH_TOKEN:?GH_TOKEN is required}"
+: "${GITHUB_REPO:?GITHUB_REPO is required}"
+: "${AGENT_ACTION:?AGENT_ACTION is required (implement|fix-checks|respond-review|fix-deployment|groom|design)}"
+
+export GH_TOKEN
 
 # -----------------------------------------------------------------------------
 # Actions
@@ -82,7 +133,7 @@ action_implement() {
     git checkout -b "$BRANCH_NAME"
 
     log "Running Claude to implement solution"
-    run_claude "implement.md" \
+    run_agent "implement.md" \
         "Implement a solution for this GitHub issue.
 
 Repository: ${GITHUB_REPO}
@@ -119,7 +170,7 @@ action_fix_checks() {
     FAILURE_DETAILS="$(gh pr checks "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" 2>/dev/null || echo "No details available")"
 
     log "Running Claude to fix check failures"
-    run_claude "respond-to-checks.md" \
+    run_agent "respond-to-checks.md" \
         "The following CI checks failed on PR #${GITHUB_PR_NUMBER}:
 
 ${FAILURE_DETAILS}
@@ -156,7 +207,7 @@ action_respond_review() {
     HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
 
     log "Running Claude to address review feedback"
-    run_claude "respond-to-review.md" \
+    run_agent "respond-to-review.md" \
         "Address review feedback on PR #${GITHUB_PR_NUMBER} in ${GITHUB_REPO}.
 
 Branch: ${BRANCH_NAME}
@@ -276,7 +327,7 @@ action_fix_deployment() {
     git checkout -b "$FIX_BRANCH"
 
     log "Running Claude to fix deployment"
-    run_claude "fix-deployment.md" \
+    run_agent "fix-deployment.md" \
         "Deployment failed on main for issue #${GITHUB_ISSUE_NUMBER}.
 
 Workflow run: ${GITHUB_RUN_ID}
@@ -329,7 +380,7 @@ action_design() {
     git checkout -b "$BRANCH_NAME"
 
     log "Running Claude to produce design"
-    run_claude "design.md" \
+    run_agent "design.md" \
         "Design a solution for this GitHub issue.
 
 Repository: ${GITHUB_REPO}
@@ -379,7 +430,7 @@ action_groom() {
     EXISTING_LABELS="$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(", ")')"
 
     log "Running Claude to groom issue"
-    run_claude "groom.md" \
+    run_agent "groom.md" \
         "Groom GitHub issue #${GITHUB_ISSUE_NUMBER} in ${GITHUB_REPO}.
 
 Issue title: ${ISSUE_TITLE}

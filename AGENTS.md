@@ -70,7 +70,7 @@ The developer container is a single image dispatched by `AGENT_ACTION`. Required
 | `respond-review`  | `GITHUB_PR_NUMBER`                                                            |
 | `fix-deployment`  | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                        |
 
-Optional: `AGENT_MODEL` (default `sonnet`), `CLAUDE_MAX_TURNS` (default `100`).
+Optional: `AGENT_MODEL` (default `sonnet`), `AGENT_MAX_TURNS` (default `100`).
 
 The **reviewer image** at [`docker/reviewer/`](docker/reviewer/) does not use `AGENT_ACTION` — it performs exactly one action (review a PR) and dispatches nothing else. Required env: `ANTHROPIC_API_KEY`, `GH_TOKEN`, `GITHUB_REPO`, `GITHUB_PR_NUMBER`; optional `AGENT_MODEL` / `CLAUDE_MAX_TURNS` (same defaults as the developer image so `model:*` labels behave identically). The reviewer image deliberately ships no `git-askpass.sh` and has no `git commit` / `git push` code paths — the no-write guarantee is structural (image) as well as token-scoped (Contents: read on the reviewer App); see [`docs/design/reviewer-container.md`](docs/design/reviewer-container.md) decision 3. Claude posts the review via `gh api` and the entrypoint verifies afterwards that a review by the reviewer app exists on the PR head SHA — exiting non-zero otherwise (decision 1).
 
