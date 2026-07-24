@@ -137,7 +137,7 @@ cp terraform.tfvars.example terraform.tfvars
 #   repo_owner           — GitHub user or org that owns the repo
 #   repo_name            — repository name (default: agentic-development-workflow)
 #   agent_allowlist      — GitHub usernames permitted to trigger agent workflows
-#   default_claude_model — repo-wide default Claude model (e.g. "sonnet")
+#   default_model        — repo-wide default model (e.g. "sonnet")
 
 export GITHUB_TOKEN=$(gh auth token)  # or any token with `repo` scope
 
@@ -154,7 +154,7 @@ terraform apply
 Terraform will:
 - Codify repo settings (squash-merge only, delete branch on merge, etc.).
 - Apply branch protection on `main` via a repository ruleset (PR review required, no force pushes, no deletion, linear history — direct pushes to `main` blocked for everyone, admins included; admins can bypass review only via PR merges).
-- Publish `AGENT_ALLOWLIST` and `DEFAULT_CLAUDE_MODEL` as repo-level Actions variables so workflows reference them without hardcoding values in YAML.
+- Publish `AGENT_ALLOWLIST` and `DEFAULT_MODEL` as repo-level Actions variables so workflows reference them without hardcoding values in YAML.
 - Create the labels consumed by the agent workflows (`agent:developer`, `agent:groom`, `agent:review`, `agent:design`, `model:sonnet`/`opus`/`haiku`, the grooming labels `question`/`bug`/`enhancement`/`dependency upgrade`/`do`/`plan`, `human-required` for issues/PRs needing a human in the loop, and `draft` for sub-issues scoped by an unmerged design) so they show up in the GitHub label picker on issue and pull request creation.
 
 If `terraform apply` errors with `422 already_exists` on a default GitHub label (`bug`, `enhancement`, `question` — these ship pre-created on new repos), import them and re-apply:
@@ -176,6 +176,7 @@ Run once after `terraform apply`, and again whenever you rotate a key:
 gh secret set DEVELOPER_APP_ID         --body "<developer App Client ID>"  # the Iv23.xxx Client ID, not the numeric App ID
 gh secret set DEVELOPER_APP_PRIVATE_KEY < ~/.config/agentic-agents/developer-agent.pem
 gh secret set ANTHROPIC_API_KEY        --body "<anthropic api key>"
+gh secret set OPENAI_API_KEY           --body "<openai api key>"      # optional if using Anthropic only
 
 # Required for the reviewer agent (used by agent-review.yml)
 gh secret set REVIEWER_APP_ID          --body "<reviewer App Client ID>"   # the Iv23.xxx Client ID, not the numeric App ID
@@ -207,7 +208,7 @@ docker run --rm \
   -e GITHUB_REPO="owner/repo" \
   -e AGENT_ACTION="implement" \
   -e GITHUB_ISSUE_NUMBER="1" \
-  -e CLAUDE_MODEL="sonnet" \
+  -e AGENT_MODEL="sonnet" \
   agent-developer
 ```
 
@@ -335,7 +336,7 @@ docker run --rm \
   agent-reviewer
 ```
 
-Optional: `-e CLAUDE_MODEL="sonnet"` and `-e CLAUDE_MAX_TURNS="100"` (both default to these values, matching the CI workflow knobs).
+Optional: `-e AGENT_MODEL="sonnet"` and `-e CLAUDE_MAX_TURNS="100"` (both default to these values, matching the CI workflow knobs).
 
 The entrypoint clones the repo read-only, gathers the diff against the merge-base, fetches open review threads and CI check status, invokes Claude, then verifies that a review by the authenticated GitHub identity was posted against the PR head SHA — exiting non-zero if the agent did not complete the review.
 
@@ -344,7 +345,7 @@ The entrypoint clones the repo read-only, gathers the diff against the merge-bas
 - Developer agent container with six actions: `implement`, `groom`, `design`, `fix-checks`, `respond-review`, `fix-deployment`.
 - Grooming agent with label criteria in [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json).
 - GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/).
-- Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_CLAUDE_MODEL` Actions variables.
+- Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_MODEL` Actions variables.
 - Claude model override via `model:<name>` labels on issues (developer/grooming/fix-deployment runs) and PRs (reviewer agent runs).
 - Local run guides for the developer agent ([Build the developer agent container](#4-build-the-developer-agent-container)) and the reviewer agent ([Build and run the reviewer agent container](#5-build-and-run-the-reviewer-agent-container)).
 

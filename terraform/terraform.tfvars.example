@@ -8,4 +8,4 @@ agent_allowlist = [
   "<developer-agent-app-slug>[bot]",
   "<reviewer-agent-app-slug>[bot]",
 ]
-default_claude_model = "sonnet"
+default_model = "sonnet"
