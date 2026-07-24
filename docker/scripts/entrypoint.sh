@@ -49,7 +49,7 @@ run_anthropic() {
 }
 
 run_openai() {
-    log "OpenAI runner not yet implemented (see issue #81)"
+    log "ERROR: OpenAI runner not yet implemented (see issue #81)" >&2
     exit 1
 }
 
