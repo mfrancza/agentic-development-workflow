@@ -45,7 +45,7 @@ After evaluating open threads and reviewing the diff, choose the verdict for wha
 
 - **`REQUEST_CHANGES`** — one or more blocking findings remain: open review threads whose finding is still valid, new correctness bugs, security issues, missing required behavior from the linked issue, or violations of the repo's security defaults (allowlist gating, output-injection hygiene, pinned action SHAs, least-privilege tokens, bash safety, branch-protection immutability). The developer must address these before the PR can merge.
 - **`COMMENT`** — all remaining findings are advisory (nits, style suggestions, questions, informational notes). Nothing blocks merging. Open threads that are advisory-only count here.
-- **`APPROVE`** — the diff is clean across all dimensions, all prior blocking threads are resolved, and there are no findings worth recording. Use an empty `comments` array and an empty or brief `body`.
+- **`APPROVE`** — the diff is clean across all dimensions, all prior blocking threads are addressed, and there are no findings worth recording. Use an empty `comments` array and an empty or brief `body`.
 
 When in doubt between `COMMENT` and `REQUEST_CHANGES`, ask: would this issue, if shipped, cause a bug, security problem, or broken agent run? If yes, use `REQUEST_CHANGES`.
 
