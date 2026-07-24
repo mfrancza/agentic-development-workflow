@@ -30,7 +30,7 @@ resolve_provider() {
             echo "anthropic"
             ;;
         *)
-            log "ERROR: Unknown model '${model}'. Supported values: sonnet, opus, haiku"
+            log "ERROR: Unknown model '${model}'. Supported values: sonnet, opus, haiku" >&2
             exit 1
             ;;
     esac
