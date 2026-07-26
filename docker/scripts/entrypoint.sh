@@ -92,6 +92,7 @@ setup_repo() {
 
 # 1. Resolve the provider from AGENT_MODEL; unknown model → fail loud
 AGENT_PROVIDER="$(resolve_provider "$AGENT_MODEL")"
+export -n AGENT_PROVIDER  # keep script-local; unexport in case it was inherited from the environment
 
 # 2. Validate the selected provider's API key
 case "$AGENT_PROVIDER" in
