@@ -106,24 +106,25 @@ Prompt-level flow (updated `review.md`):
 1. Read the diff + open review threads + CI status from the built context.
 2. For each open thread, judge whether the finding is now addressed by the
    current diff (line moved, code deleted, logic corrected).
-3. **Resolve addressed threads** via the GraphQL `resolveReviewThread`
-   mutation, one call per thread ID.
-4. Choose the verdict for what remains:
+3. Choose the verdict for what remains:
    - `REQUEST_CHANGES` if there are open blocking findings (existing
      unresolved threads deemed still valid, or new blocking findings on
      new code);
    - `COMMENT` if only advisory findings remain;
    - `APPROVE` if nothing blocking or advisory-worth-noting remains.
-5. **Post the review** as a single `POST /pulls/{n}/reviews` call, carrying
+4. **Post the review** as a single `POST /pulls/{n}/reviews` call, carrying
    any new inline comments and the verdict. This preserves the
    single-review-per-run atomicity from `reviewer-container.md` decision 2.
+   If this call fails, abort — do not proceed to thread resolution.
+5. **Resolve addressed threads** via the GraphQL `resolveReviewThread`
+   mutation, one call per thread ID. Do this **after** the review is posted.
 
-Order matters: **resolve first, then post the review**. If resolves fail
-mid-run, the review is not yet posted, so the next re-review run sees the
-same open-thread set and can retry — no drift between the verdict and the
-thread state. If the review posted first and resolves then failed, we would
-have an `APPROVE` with visibly-unresolved threads, which contradicts the
-loop guard below.
+Order matters: **post the review first, then resolve threads**. If the
+review post fails, the run aborts before any thread resolutions — the next
+re-review starts from the same open-thread state with no drift. If thread
+resolutions fail after the review lands, the next re-review can retry —
+worst case is a thread that remains open but could have been resolved.
+A resolution failure is non-fatal: the review already stands.
 
 **Alternatives considered.**
 
@@ -280,13 +281,13 @@ them.
 |-------|------|-----------|
 | [#114](https://github.com/mfrancza/agentic-development-workflow/issues/114) | Loop guard in `agent-respond-review.yml`: skip when review state is `approved` and PR has zero unresolved review threads | — |
 | [#115](https://github.com/mfrancza/agentic-development-workflow/issues/115) | Add `synchronize` trigger + per-event `if:` gating to `agent-review.yml` | — |
-| [#116](https://github.com/mfrancza/agentic-development-workflow/issues/116) | Re-review + thread-resolution behavior: rewrite `docker/reviewer/prompts/review.md` (evaluate open threads, resolve addressed ones via `resolveReviewThread`, verdict-after-resolve); update the "context only" note in `docker/reviewer/entrypoint.sh` | — |
+| [#96](https://github.com/mfrancza/agentic-development-workflow/issues/96) | Re-review + thread-resolution behavior: rewrite `docker/reviewer/prompts/review.md` (evaluate open threads, post review first, then resolve addressed ones via `resolveReviewThread`); update the "context only" note in `docker/reviewer/entrypoint.sh` | — |
 | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117) | Conflicted-PR limitation note in `AGENTS.md` (label description) and `README.md` if applicable | — |
-| [#118](https://github.com/mfrancza/agentic-development-workflow/issues/118) | End-to-end validation on a real PR: apply `agent:review`, push new commits, verify addressed threads get resolved, verify `APPROVE` fires when clean, verify `agent-respond-review` skips on that approve | Issue #114, Issue #115, Issue #116, Issue #117 |
+| [#118](https://github.com/mfrancza/agentic-development-workflow/issues/118) | End-to-end validation on a real PR: apply `agent:review`, push new commits, verify addressed threads get resolved, verify `APPROVE` fires when clean, verify `agent-respond-review` skips on that approve | Issue #114, Issue #115, Issue #96, Issue #117 |
 
-Issues #114, #115, #116, and #117 can proceed in parallel — this document
+Issues #114, #115, #96, and #117 can proceed in parallel — this document
 is the contract between them (`synchronize` trigger surface, prompt
-resolve-then-review order, loop-guard predicate, doc location). Issue #118
+post-first-then-resolve order, loop-guard predicate, doc location). Issue #118
 exercises the full loop end-to-end and is expected to feed small fixes back
 into the implementation tasks.
 
