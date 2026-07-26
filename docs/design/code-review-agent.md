@@ -46,6 +46,10 @@ creation.
   least-privilege target is part of [#36](https://github.com/mfrancza/agentic-development-workflow/issues/36)
   — PR conversation comments only need Pull requests (write), so Issues can
   likely be trimmed to read; Checks (read) is harmless to keep for CI context.
+  Note (issue #203): the `resolveReviewThread` mutation requires Contents
+  (write), which the reviewer app deliberately does not have; thread
+  resolution is executed by a workflow step in `agent-review.yml` using the
+  workflow `GITHUB_TOKEN` instead — see `re-review-loop.md` decision 2.
 - **Secrets:** `REVIEWER_APP_ID` and `REVIEWER_APP_PRIVATE_KEY`, minted into
   short-lived installation tokens with `actions/create-github-app-token`,
   exactly like the developer app.

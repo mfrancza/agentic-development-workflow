@@ -28,6 +28,19 @@ set -euo pipefail
 CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
 CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-100}"
 
+# File where Claude records the GraphQL IDs (one per line) of review threads
+# whose findings are addressed. The reviewer token deliberately lacks the
+# Contents: write permission that the resolveReviewThread mutation requires
+# (see docs/design/reviewer-container.md decision 3), so the container never
+# resolves threads itself — the workflow mounts this path and resolves the
+# recorded IDs with its own token after the container exits. Truncate/create
+# it up front so an empty file always exists, distinguishing "nothing to
+# resolve" from "container died before recording".
+RESOLVE_THREADS_FILE="${RESOLVE_THREADS_FILE:-/tmp/resolve-threads.txt}"
+export RESOLVE_THREADS_FILE
+mkdir -p "$(dirname "$RESOLVE_THREADS_FILE")"
+: > "$RESOLVE_THREADS_FILE"
+
 SCRIPTS_DIR="/opt/agent"
 WORK_DIR="/home/agent/work"
 
@@ -125,9 +138,10 @@ trap 'rm -f "$CONTEXT_FILE"' EXIT
 #     Only unresolved (open) threads are fetched — resolved threads are not
 #     actionable and including all threads can cause context-limit failures on
 #     PRs with many comments. Per updated design decision 4 (superseded by
-#     re-review-loop.md / issue #116), the prompt evaluates each open thread
-#     and resolves addressed ones via resolveReviewThread before posting the
-#     new review.
+#     re-review-loop.md / issue #116, amended by issue #203), the prompt
+#     evaluates each open thread and records addressed ones to
+#     RESOLVE_THREADS_FILE before posting the new review; the workflow
+#     resolves the recorded threads afterwards.
 OWNER="${GITHUB_REPO%%/*}"
 REPO_NAME="${GITHUB_REPO#*/}"
 
@@ -227,9 +241,10 @@ git diff --name-only "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 printf '\nFull diff (base..head):\n' >> "$CONTEXT_FILE"
 git diff "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 {
-    printf '\nExisting open (unresolved) review threads (evaluate each against the current diff;\n'
-    printf 'post the review first, then resolve addressed threads via resolveReviewThread;\n'
-    printf 'skip new findings already covered by still-open threads):\n'
+    printf '\nExisting open (unresolved) review threads (evaluate each against the current\n'
+    printf 'diff; append the GraphQL id of each addressed thread to %s,\n' "${RESOLVE_THREADS_FILE}"
+    printf 'one id per line, before posting the review; skip new findings already\n'
+    printf 'covered by still-open threads):\n'
     printf '%s\n' "${REVIEW_THREADS_JSON}"
     printf '\nCI check status:\n'
     printf '%s\n' "${CHECKS_JSON}"
@@ -242,6 +257,9 @@ git diff "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 log "Running Claude to review PR"
 run_claude "review.md" "$CONTEXT_FILE"
 rm -f "$CONTEXT_FILE"
+
+RESOLVE_COUNT="$(grep -c . "$RESOLVE_THREADS_FILE")" || true
+log "Threads recorded for resolution: ${RESOLVE_COUNT:-0}"
 
 # -----------------------------------------------------------------------------
 # Verify the review was posted (design decision 1)

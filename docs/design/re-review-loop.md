@@ -126,6 +126,19 @@ resolutions fail after the review lands, the next re-review can retry —
 worst case is a thread that remains open but could have been resolved.
 A resolution failure is non-fatal: the review already stands.
 
+**Amended (issue #203):** the in-container `resolveReviewThread` calls in
+step 5 never worked — the mutation requires a token with Contents: write
+([community discussion #44650](https://github.com/orgs/community/discussions/44650)),
+and the reviewer app token is deliberately Contents: read-only (the no-push
+guarantee in `reviewer-container.md` decision 3). Resolution moved to
+`agent-review.yml`: the container records addressed thread IDs to a mounted
+file (before posting the review), and a workflow step resolves them with the
+workflow's `GITHUB_TOKEN` — which never enters the container — after the
+container exits. The post-first ordering above is preserved end-to-end:
+resolution still happens only after the review is posted, and if the resolve
+step fails the affected threads simply stay open and the next re-review run
+records them again — self-healing, no drift.
+
 **Alternatives considered.**
 
 - *Entrypoint decides which threads are addressed.* Rejected — the

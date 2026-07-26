@@ -66,6 +66,15 @@ threads and resolves addressed ones (post the review first, then resolve
 addressed threads via `resolveReviewThread`). See
 `docs/design/re-review-loop.md` (decision 2) for the full rationale.
 
+**Amended (issue #203):** the in-container `resolveReviewThread` calls always
+failed with `FORBIDDEN` — the mutation requires a token with Contents: write,
+which the reviewer app deliberately lacks (decision 3 above). The container now
+records the GraphQL IDs of addressed threads to the file at
+`RESOLVE_THREADS_FILE` (mounted by `agent-review.yml`), and a workflow step
+resolves them with the workflow's `GITHUB_TOKEN` after the container exits.
+The token layer of decision 3 is preserved: no write-capable token ever enters
+the container.
+
 ### 5. Knobs match the developer image
 
 `CLAUDE_MODEL` (default `sonnet`) and `CLAUDE_MAX_TURNS` (default 100) keep
