@@ -174,20 +174,44 @@ jobs:
           fi
           OWNER="${REPO%%/*}"
           NAME="${REPO#*/}"
-          # Paginate only if PRs with >100 threads become plausible — same
-          # posture as the loop guard in agent-respond-review.yml.
-          OPEN_IDS="$(gh api graphql \
-            -F owner="$OWNER" -F name="$NAME" -F number="$PR_NUMBER" \
-            -f query='
-              query($owner: String!, $name: String!, $number: Int!) {
-                repository(owner: $owner, name: $name) {
-                  pullRequest(number: $number) {
-                    reviewThreads(first: 100) { nodes { id isResolved } }
+          # Paginate through all review threads (100 per page) so PRs with
+          # >100 threads are fully covered — recorded IDs past the first page
+          # would otherwise be skipped by the intersection check below and
+          # never resolved. Same cursor pattern as the thread fetch in
+          # docker/reviewer/entrypoint.sh: CURSOR starts as the JSON literal
+          # `null` so `after: null` on the first page is equivalent to
+          # omitting the argument.
+          OPEN_IDS=""
+          CURSOR=null
+          while true; do
+            PAGE_JSON="$(gh api graphql \
+              -F owner="$OWNER" -F name="$NAME" -F number="$PR_NUMBER" \
+              -F cursor="$CURSOR" \
+              -f query='
+                query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+                  repository(owner: $owner, name: $name) {
+                    pullRequest(number: $number) {
+                      reviewThreads(first: 100, after: $cursor) {
+                        pageInfo { endCursor hasNextPage }
+                        nodes { id isResolved }
+                      }
+                    }
                   }
-                }
-              }' \
-            --jq '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id')"
+                }')"
+            PAGE_IDS="$(printf '%s' "$PAGE_JSON" | \
+              jq -r '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id')"
+            OPEN_IDS="${OPEN_IDS}${OPEN_IDS:+$'\n'}${PAGE_IDS}"
+            HAS_NEXT="$(printf '%s' "$PAGE_JSON" | \
+              jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
+            [ "$HAS_NEXT" = "true" ] || break
+            CURSOR="$(printf '%s' "$PAGE_JSON" | \
+              jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')"
+          done
           FAILED=0
+          # sort -u dedupes recorded IDs: OPEN_IDS is snapshotted before the
+          # loop, so a duplicate line would otherwise pass the is-open check
+          # and issue a second mutation for an already-resolved thread.
+          # Process substitution (not a pipe) keeps FAILED in this shell.
           while IFS= read -r THREAD_ID; do
             [ -n "$THREAD_ID" ] || continue
             if ! [[ "$THREAD_ID" =~ ^[A-Za-z0-9_=-]+$ ]]; then
@@ -211,7 +235,7 @@ jobs:
               echo "::error::Failed to resolve review thread ${THREAD_ID}"
               FAILED=1
             fi
-          done < "$RESOLVE_FILE"
+          done < <(sort -u "$RESOLVE_FILE")
           # Fail loudly if any resolve failed. The review is already posted at
           # this point, but the affected threads simply stay open and the next
           # re-review run records them again — self-healing.
