@@ -10,8 +10,10 @@ on:
   pull_request_target:
     types: [labeled, synchronize]
 
-permissions:
-  contents: read
+# Deny-all at the workflow level; the write scopes the resolve step needs are
+# granted on the review job itself so any future job added to this workflow
+# starts with no permissions.
+permissions: {}
 
 concurrency:
   group: agent-review-pr-${{ github.event.pull_request.number }}
@@ -58,6 +60,20 @@ jobs:
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # contents: write + pull-requests: write are for the "Resolve addressed
+    # review threads" step only. The resolveReviewThread GraphQL mutation
+    # requires a token with Contents: write
+    # (github.com/orgs/community/discussions/44650), and the reviewer app token
+    # is deliberately Contents: read-only — the no-push guarantee in
+    # docs/design/reviewer-container.md decision 3 — so the container records
+    # addressed thread IDs to a mounted file and this job's GITHUB_TOKEN
+    # resolves them afterwards. GITHUB_TOKEN never enters the container; only
+    # trusted base-branch workflow code runs in job steps (pull_request_target
+    # + checkout pinned to the base SHA with persist-credentials: false), so
+    # the write scope is not exposed to PR-authored code.
+    permissions:
+      contents: write
+      pull-requests: write
 
     steps:
       # Checkout must precede the local agent-token action: the runner resolves
@@ -125,6 +141,12 @@ jobs:
           GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
           AGENT_MODEL: ${{ steps.model.outputs.agent_model }}
         run: |
+          # The container records the GraphQL IDs of addressed review threads
+          # into this mounted directory; the resolve step below reads them.
+          # chmod 777 because the container's non-root `agent` user does not
+          # necessarily share the runner's uid.
+          mkdir -p "$RUNNER_TEMP/reviewer-output"
+          chmod 777 "$RUNNER_TEMP/reviewer-output"
           docker run --rm \
             -e GH_TOKEN \
             -e ANTHROPIC_API_KEY \
@@ -132,4 +154,93 @@ jobs:
             -e GITHUB_REPO \
             -e GITHUB_PR_NUMBER \
             -e AGENT_MODEL \
+            -e RESOLVE_THREADS_FILE=/agent-output/resolve-threads.txt \
+            -v "$RUNNER_TEMP/reviewer-output:/agent-output" \
             agent-reviewer:ci
+
+      - name: Resolve addressed review threads
+        # Runs with the workflow GITHUB_TOKEN (see the permissions comment at
+        # the top of this file), not the reviewer app token — so threads show
+        # as resolved by github-actions[bot]. The recorded IDs are
+        # agent-generated output derived from PR content, so they are treated
+        # as untrusted: each ID is format-checked and intersected against the
+        # PR's actual open threads before the mutation is issued.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          RESOLVE_FILE="$RUNNER_TEMP/reviewer-output/resolve-threads.txt"
+          if [ ! -s "$RESOLVE_FILE" ]; then
+            echo "No review threads recorded for resolution."
+            exit 0
+          fi
+          OWNER="${REPO%%/*}"
+          NAME="${REPO#*/}"
+          # Paginate through all review threads (100 per page) so PRs with
+          # >100 threads are fully covered — recorded IDs past the first page
+          # would otherwise be skipped by the intersection check below and
+          # never resolved. Same cursor pattern as the thread fetch in
+          # docker/reviewer/entrypoint.sh: CURSOR starts as the JSON literal
+          # `null` so `after: null` on the first page is equivalent to
+          # omitting the argument.
+          OPEN_IDS=""
+          CURSOR=null
+          while true; do
+            PAGE_JSON="$(gh api graphql \
+              -F owner="$OWNER" -F name="$NAME" -F number="$PR_NUMBER" \
+              -F cursor="$CURSOR" \
+              -f query='
+                query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
+                  repository(owner: $owner, name: $name) {
+                    pullRequest(number: $number) {
+                      reviewThreads(first: 100, after: $cursor) {
+                        pageInfo { endCursor hasNextPage }
+                        nodes { id isResolved }
+                      }
+                    }
+                  }
+                }')"
+            PAGE_IDS="$(printf '%s' "$PAGE_JSON" | \
+              jq -r '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id')"
+            OPEN_IDS="${OPEN_IDS}${OPEN_IDS:+$'\n'}${PAGE_IDS}"
+            HAS_NEXT="$(printf '%s' "$PAGE_JSON" | \
+              jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
+            [ "$HAS_NEXT" = "true" ] || break
+            CURSOR="$(printf '%s' "$PAGE_JSON" | \
+              jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')"
+          done
+          FAILED=0
+          # sort -u dedupes recorded IDs: OPEN_IDS is snapshotted before the
+          # loop, so a duplicate line would otherwise pass the is-open check
+          # and issue a second mutation for an already-resolved thread.
+          # Process substitution (not a pipe) keeps FAILED in this shell.
+          while IFS= read -r THREAD_ID; do
+            [ -n "$THREAD_ID" ] || continue
+            if ! [[ "$THREAD_ID" =~ ^[A-Za-z0-9_=-]+$ ]]; then
+              echo "::warning::Skipping a recorded line that is not a well-formed thread ID."
+              continue
+            fi
+            if ! grep -qxF "$THREAD_ID" <<< "$OPEN_IDS"; then
+              echo "::warning::Recorded thread ID ${THREAD_ID} is not an open review thread on PR #${PR_NUMBER}; skipping."
+              continue
+            fi
+            if gh api graphql \
+              -F threadId="$THREAD_ID" \
+              -f query='
+                mutation($threadId: ID!) {
+                  resolveReviewThread(input: { threadId: $threadId }) {
+                    thread { id isResolved }
+                  }
+                }' > /dev/null; then
+              echo "Resolved review thread ${THREAD_ID}"
+            else
+              echo "::error::Failed to resolve review thread ${THREAD_ID}"
+              FAILED=1
+            fi
+          done < <(sort -u "$RESOLVE_FILE")
+          # Fail loudly if any resolve failed. The review is already posted at
+          # this point, but the affected threads simply stay open and the next
+          # re-review run records them again — self-healing.
+          exit "$FAILED"
