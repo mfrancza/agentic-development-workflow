@@ -21,8 +21,11 @@ iterative steps such as review-response cycles and post-merge fixes.
    label remaining signals the design work is incomplete and may need to be
    restarted.
 3. **`agent:developer`** — remove the label when the developer's PR is
-   **closed** (merged or abandoned). The developer's iterative loop —
-   `respond-review`, `fix-checks`, `fix-deployment` — terminates at PR close.
+   **closed** (merged or abandoned). The developer's PR-scoped iterative loop —
+   `respond-review`, `fix-checks` — terminates at PR close. (`fix-deployment` is
+   triggered by `deployment_status` events and may fire after a PR is
+   merged/closed; it is a separate post-merge path, not part of the PR-scoped
+   loop, and is not label-driven.)
    For abandoned PRs the label should be removed just as for merged PRs:
    the agent is definitively done, and re-triggering is a deliberate human
    action.
@@ -151,10 +154,15 @@ or switch to the local composite action.
 
 ### Decision 5: What if the label is already absent or the issue is closed?
 
-`gh issue edit --remove-label` exits 0 whether or not the label was present
-before the call. Removing a label that is not there is a no-op. Similarly, the
-call succeeds for a closed issue as long as the token has Issues: write. No
-special handling needed.
+`gh issue edit --remove-label` is *intended* to be idempotent, but in practice
+the CLI may exit non-zero when the label is already absent (the existing
+`undraft-sub-issues` job in `agent-design.yml` already handles this case
+explicitly). Implementers should tolerate the "label already absent" outcome
+as non-fatal — for example, by re-checking whether the label is still present
+after a non-zero exit and only propagating the error if the label is confirmed
+still there — while still failing loudly on genuine API or permission errors.
+Similarly, `gh issue edit` succeeds for a closed issue as long as the token has
+Issues: write.
 
 ## Out of scope
 
