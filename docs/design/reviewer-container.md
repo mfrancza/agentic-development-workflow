@@ -77,11 +77,14 @@ the container.
 
 ### 5. Knobs match the developer image
 
-`CLAUDE_MODEL` (default `sonnet`) and `CLAUDE_MAX_TURNS` (default 100) keep
+`AGENT_MODEL` (default `sonnet`) and `AGENT_MAX_TURNS` (default 100) keep
 the developer entrypoint's semantics so the `model:*` label plumbing in #40
-works identically for both images. No `AGENT_ACTION` dispatch: the reviewer
-image does exactly one thing, and #41 extends the same code path (richer
-context in, thread actions out) rather than adding a second action.
+works identically for both images. The entrypoint uses the same fallback
+chain as the developer image — `AGENT_MODEL="${AGENT_MODEL:-${CLAUDE_MODEL:-sonnet}}"` —
+so containers that still pass the old `CLAUDE_MODEL` name continue to work
+during any transient migration window. No `AGENT_ACTION` dispatch: the
+reviewer image does exactly one thing, and #41 extends the same code path
+(richer context in, thread actions out) rather than adding a second action.
 
 ## Task breakdown and dependencies
 

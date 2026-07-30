@@ -14,7 +14,7 @@ set -euo pipefail
 #   - Decision 1: Claude posts the review; the entrypoint only verifies.
 #   - Decision 3: no `git-askpass.sh`, no `git config user.*`, no credential
 #     helper for push, no `git commit` / `git push` anywhere in this image.
-#   - Decision 5: `CLAUDE_MODEL` / `CLAUDE_MAX_TURNS` knobs mirror the
+#   - Decision 5: `AGENT_MODEL` / `AGENT_MAX_TURNS` knobs mirror the
 #     developer image; no `AGENT_ACTION` dispatch — this image does one thing.
 # =============================================================================
 
@@ -24,9 +24,9 @@ set -euo pipefail
 : "${GITHUB_REPO:?GITHUB_REPO is required (owner/repo)}"
 : "${GITHUB_PR_NUMBER:?GITHUB_PR_NUMBER is required}"
 
-# Optional configuration
-CLAUDE_MODEL="${CLAUDE_MODEL:-sonnet}"
-CLAUDE_MAX_TURNS="${CLAUDE_MAX_TURNS:-100}"
+# Optional configuration (accept old names as a transient fallback; see #199/#200)
+AGENT_MODEL="${AGENT_MODEL:-${CLAUDE_MODEL:-sonnet}}"
+AGENT_MAX_TURNS="${AGENT_MAX_TURNS:-${CLAUDE_MAX_TURNS:-100}}"
 
 # File where Claude records the GraphQL IDs (one per line) of review threads
 # whose findings are addressed. The reviewer token deliberately lacks the
@@ -60,8 +60,8 @@ run_claude() {
 
     claude --print \
         --dangerously-skip-permissions \
-        --model "$CLAUDE_MODEL" \
-        --max-turns "$CLAUDE_MAX_TURNS" \
+        --model "$AGENT_MODEL" \
+        --max-turns "$AGENT_MAX_TURNS" \
         --system-prompt-file "${SCRIPTS_DIR}/prompts/${prompt_file}" \
         < "$user_prompt_file"
 }
