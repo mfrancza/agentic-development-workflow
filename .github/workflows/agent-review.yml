@@ -10,20 +10,10 @@ on:
   pull_request_target:
     types: [labeled, synchronize]
 
-# contents: write + pull-requests: write are for the "Resolve addressed review
-# threads" step only. The resolveReviewThread GraphQL mutation requires a token
-# with Contents: write (github.com/orgs/community/discussions/44650), and the
-# reviewer app token is deliberately Contents: read-only — the no-push
-# guarantee in docs/design/reviewer-container.md decision 3 — so the container
-# records addressed thread IDs to a mounted file and this workflow's
-# GITHUB_TOKEN resolves them afterwards. GITHUB_TOKEN never enters the
-# container; only trusted base-branch workflow code runs in job steps
-# (pull_request_target + checkout pinned to the base SHA with
-# persist-credentials: false), so the write scope is not exposed to PR-authored
-# code.
-permissions:
-  contents: write
-  pull-requests: write
+# Deny-all at the workflow level; the write scopes the resolve step needs are
+# granted on the review job itself so any future job added to this workflow
+# starts with no permissions.
+permissions: {}
 
 concurrency:
   group: agent-review-pr-${{ github.event.pull_request.number }}
@@ -70,6 +60,20 @@ jobs:
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    # contents: write + pull-requests: write are for the "Resolve addressed
+    # review threads" step only. The resolveReviewThread GraphQL mutation
+    # requires a token with Contents: write
+    # (github.com/orgs/community/discussions/44650), and the reviewer app token
+    # is deliberately Contents: read-only — the no-push guarantee in
+    # docs/design/reviewer-container.md decision 3 — so the container records
+    # addressed thread IDs to a mounted file and this job's GITHUB_TOKEN
+    # resolves them afterwards. GITHUB_TOKEN never enters the container; only
+    # trusted base-branch workflow code runs in job steps (pull_request_target
+    # + checkout pinned to the base SHA with persist-credentials: false), so
+    # the write scope is not exposed to PR-authored code.
+    permissions:
+      contents: write
+      pull-requests: write
 
     steps:
       # Checkout must precede the local agent-token action: the runner resolves
