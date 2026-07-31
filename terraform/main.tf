@@ -126,13 +126,14 @@ resource "github_repository_ruleset" "main" {
 #    these; applying one routes the issue or PR to that agent). Note that
 #    `agent:developer`, `agent:groom`, and `agent:design` are applied to
 #    issues, while `agent:review` is applied to PRs to request a review from
-#    the code review agent (triggers agent-review.yml). Note: the
-#    designer-agent workflow does not yet exist; `agent:design` is a reserved
-#    placeholder trigger until that workflow lands.
+#    the code review agent (triggers agent-review.yml).
 #  - model:<name> overrides (agent-implement / agent-groom /
 #    agent-fix-deployment prefer these over the GitHub Actions repository
 #    variable `vars.DEFAULT_MODEL` (not a Terraform variable); apply
-#    at most one per issue).
+#    at most one per issue). Covers both Anthropic (Claude) and OpenAI
+#    models; OpenAI runtime routing is tracked in issue #81 — applying an
+#    OpenAI model:* label before that lands will cause the job to exit with
+#    "Unknown model".
 #  - grooming labels (the grooming agent applies these based on issue
 #    content — see agents/grooming/label-criteria.json).
 #  - workflow labels (`human-required` signals that an agent has escalated to
@@ -175,6 +176,27 @@ locals {
     "model:haiku" = {
       color       = "1d76db"
       description = "Run agents on this issue with Claude Haiku (overrides DEFAULT_MODEL)."
+    }
+
+    "model:gpt-5.6-sol" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with OpenAI gpt-5.6-sol (overrides DEFAULT_MODEL)."
+    }
+    "model:gpt-5.6-terra" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with OpenAI gpt-5.6-terra (overrides DEFAULT_MODEL)."
+    }
+    "model:gpt-5.6-luna" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with OpenAI gpt-5.6-luna (overrides DEFAULT_MODEL)."
+    }
+    "model:gpt-5" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with OpenAI gpt-5 (overrides DEFAULT_MODEL)."
+    }
+    "model:o3" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with OpenAI o3 (overrides DEFAULT_MODEL)."
     }
 
     "question" = {
