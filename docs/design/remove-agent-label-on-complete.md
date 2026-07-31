@@ -7,7 +7,7 @@
 Each `agent:*` routing label currently persists on the issue indefinitely after
 the agent finishes its work. This design adds automatic cleanup so that each
 agent removes its own routing label once its task is fully done — including any
-iterative steps such as review-response cycles and post-merge fixes.
+iterative steps such as review-response cycles.
 
 ## Requirements (from issue #45 grooming Q&A)
 
@@ -78,9 +78,10 @@ Add one step after the "Run grooming agent" step in `agent-groom.yml`:
 `if: success()` is the default for steps but is stated explicitly for clarity:
 the label stays when any preceding step fails.
 
-The developer-agent App already has Issues: read/write, so no permission change
-is needed. The `permissions:` block in the workflow controls `GITHUB_TOKEN`, not
-the custom minted token — no change needed there either.
+The developer-agent App must have Issues: write for the minted token to edit
+issue labels; verify this is configured before implementation. The `permissions:`
+block in the workflow controls `GITHUB_TOKEN`, not the custom minted token — no
+change needed there either.
 
 ### Decision 3: `agent:design` cleanup — extend the `undraft-sub-issues` job in `agent-design.yml`
 
