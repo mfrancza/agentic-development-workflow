@@ -126,15 +126,14 @@ resource "github_repository_ruleset" "main" {
 #    these; applying one routes the issue or PR to that agent). Note that
 #    `agent:developer`, `agent:groom`, and `agent:design` are applied to
 #    issues, while `agent:review` is applied to PRs to request a review from
-#    the code review agent (triggers agent-review.yml). Note: the
-#    designer-agent workflow does not yet exist; `agent:design` is a reserved
-#    placeholder trigger until that workflow lands.
+#    the code review agent (triggers agent-review.yml).
 #  - model:<name> overrides (agent-implement / agent-groom /
 #    agent-fix-deployment prefer these over the GitHub Actions repository
 #    variable `vars.DEFAULT_MODEL` (not a Terraform variable); apply
 #    at most one per issue). Covers both Anthropic (Claude) and OpenAI
-#    models; the runner dispatches to the appropriate CLI based on the
-#    model identifier.
+#    models; OpenAI runtime routing is tracked in issue #81 — applying an
+#    OpenAI model:* label before that lands will cause the job to exit with
+#    "Unknown model".
 #  - grooming labels (the grooming agent applies these based on issue
 #    content — see agents/grooming/label-criteria.json).
 #  - workflow labels (`human-required` signals that an agent has escalated to
