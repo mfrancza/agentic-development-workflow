@@ -45,13 +45,15 @@ is a "the previous stage finished; apply the next stage's label" event.
 Enumerated exhaustively (matching the trigger labels defined in
 `terraform/main.tf`):
 
-| # | Upstream signal | Label to apply | Gate |
-|---|---|---|---|
-| 1 | `issues.opened` | `agent:groom` | `groom` |
-| 2 | `issues.labeled` where label is `plan` | `agent:design` | `design` |
-| 3 | `issues.labeled` where label is `do` | `agent:developer` | `developer` |
-| 4 | `issues.unlabeled` where label is `draft` | `agent:developer` | `developer` |
-| 5 | `pull_request.opened` on an agent-created branch | `agent:review` | `review` |
+| # | Upstream signal | Label to apply | Gate | Sender gate? |
+|---|---|---|---|---|
+| 1 | `issues.opened` | `agent:groom` | `groom` | No (any actor may open an issue) |
+| 2 | `issues.labeled` where label is `plan` | `agent:design` | `design` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` |
+| 3 | `issues.labeled` where label is `do` | `agent:developer` | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` |
+| 4 | `issues.unlabeled` where label is `draft` | `agent:developer` | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` |
+| 5 | `pull_request.opened` on an agent-created branch | `agent:review` | `review` | No (head-repo guard covers fork PRs; see Decision 5) |
+
+Transitions #2, #3, and #4 are triggered by `issues.labeled` or `issues.unlabeled` events. GitHub has no per-label permission model, so any collaborator with triage permission can apply or remove labels. Without a sender check, a triage collaborator could apply `plan` or `do` (or remove `draft`) and cause the auto-trigger job to apply `agent:design` / `agent:developer` under the developer-agent App identity — which is in `AGENT_ALLOWLIST` — and thereby trigger an agent run, spending Anthropic credits, without ever being in the allowlist themselves. The `AGENT_ALLOWLIST` sender gate (required for all `issues.labeled`-triggered workflows by the repo-specific security standard in `AGENTS.md`) closes this gap.
 
 Transition #4 exists because the un-draft job in `agent-design.yml` removes
 the `draft` label from every sub-issue when the design PR merges — that
@@ -110,7 +112,7 @@ jobs (one per row of the transitions table). Each job:
 
 - has its own `on:` filter for the upstream signal (or a shared `on:` with
   per-job `if:` predicates — see below),
-- gates on `fromJSON(vars.AUTO_TRIGGER_AGENTS).<key> == true`,
+- gates on `fromJSON(vars.AUTO_TRIGGER_AGENTS).<key> == true`, and — for jobs triggered by `issues.labeled` or `issues.unlabeled` (transitions #2, #3, #4) — additionally on `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` per `AGENTS.md`'s repo-specific security standard (see transitions table above),
 - mints a developer-agent installation token via
   `./.github/actions/agent-token`, and
 - applies the target label with `gh issue edit --add-label` or
