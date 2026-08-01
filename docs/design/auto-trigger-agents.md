@@ -93,7 +93,15 @@ variable "auto_trigger_agents" {
 
 exposed as a JSON-encoded Actions variable `AUTO_TRIGGER_AGENTS` via
 `github_actions_variable`. Workflows gate with
-`fromJSON(vars.AUTO_TRIGGER_AGENTS).<key> == true`.
+`vars.AUTO_TRIGGER_AGENTS != '' && fromJSON(vars.AUTO_TRIGGER_AGENTS).<key> == true`.
+
+The leading `vars.AUTO_TRIGGER_AGENTS != ''` check is required. If the workflow
+is merged before `terraform apply` has run (i.e., the variable does not yet
+exist in the repo), `vars.AUTO_TRIGGER_AGENTS` evaluates to the empty string
+and `fromJSON('')` throws a runtime error. The non-empty guard short-circuits
+first and ensures the workflow fails **closed** (condition is `false`) rather
+than erroring out. The implementation in issue #155 must use this two-part
+form for every job's `if:` predicate.
 
 **Alternatives considered.**
 
@@ -145,6 +153,19 @@ whether to apply `agent:developer`. Decoupled, testable one file at a time.
 `./.github/actions/agent-token` (same pattern as
 `agent-groom.yml` / `agent-design.yml` / `agent-implement.yml`) and uses that
 token to apply the label.
+
+**Exception — transition #5 (`pull_request.opened`):** the composite action
+`./.github/actions/agent-token` is a local action and requires a repository
+checkout to resolve. For `pull_request.opened`, checking out the repository
+at the PR's head SHA means executing PR-authored workflow files with
+secrets (the App credentials) in scope — a supply-chain risk. Transition
+#5's job must instead call `actions/create-github-app-token` directly (the
+same approach `agent-design.yml`'s `pull_request.closed` handler already
+uses), without any `actions/checkout` step. This is the only job in
+`agent-auto-trigger.yml` that deviates from the composite-action pattern;
+all four `issues`-triggered jobs (transitions #1–#4) check out the default
+branch (trusted code, not PR-authored) and can safely use the composite
+action.
 
 This matters because the downstream workflows (`agent-groom.yml`,
 `agent-design.yml`, `agent-implement.yml`, `agent-review.yml`) gate on
