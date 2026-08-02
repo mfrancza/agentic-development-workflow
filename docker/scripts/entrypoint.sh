@@ -66,7 +66,7 @@ run_openai() {
 
 ${user_prompt}"
 
-    printf '%s' "$combined" | codex exec \
+    printf '%s\n' "$combined" | codex exec \
         --model "$AGENT_MODEL" \
         --sandbox workspace-write \
         -
