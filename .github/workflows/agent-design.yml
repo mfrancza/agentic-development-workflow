@@ -223,4 +223,29 @@ jobs:
           fi
 
           echo "Removing agent:design label from parent issue #${PARENT_ISSUE}."
-          gh issue edit "$PARENT_ISSUE" --repo "${GITHUB_REPO}" --remove-label "agent:design"
+          if ! gh issue edit "${PARENT_ISSUE}" --repo "${GITHUB_REPO}" --remove-label "agent:design"; then
+            # Distinguish benign from operational failure: if the label is still
+            # present after the failed removal, it's an operational error
+            # (permissions, rate-limit, transient API error) and we must fail
+            # loudly.  If the label is already absent the edit command may have
+            # exited non-zero simply because the label wasn't there, which is a
+            # no-op that we treat as a warning and continue.
+            #
+            # Capture the re-check output and exit code explicitly — do NOT use
+            # a pipe (`gh api ... | grep`) because set -e is suppressed in `if`
+            # conditions and the pipe exit status is the *last* command's, which
+            # would treat a failed `gh api` call as "label absent" and exit 0
+            # even though the label may still be present.
+            _recheck_status=0
+            _recheck_output="$(gh api "repos/${GITHUB_REPO}/issues/${PARENT_ISSUE}" \
+                --jq 'any(.labels[]; .name == "agent:design")')" || _recheck_status=$?
+            if [ "${_recheck_status}" -ne 0 ]; then
+              echo "::error::Failed to remove agent:design label from issue #${PARENT_ISSUE}, and the re-check API call also failed (check token permissions and API rate limits)."
+              exit 1
+            elif [ "${_recheck_output}" = "true" ]; then
+              echo "::error::Failed to remove agent:design label from issue #${PARENT_ISSUE} and the label is still present. Check token permissions and API rate limits."
+              exit 1
+            else
+              echo "::warning::Could not remove agent:design label from issue #${PARENT_ISSUE} — the label was already absent (non-fatal)."
+            fi
+          fi
