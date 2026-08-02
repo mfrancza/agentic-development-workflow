@@ -24,6 +24,13 @@ RUN curl -fsSL -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
 ARG CLAUDE_CODE_VERSION=2.1.150
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
+# Install OpenAI Codex CLI. Pin to a specific version so workflow runs are
+# reproducible; override at build time with --build-arg if you want a different
+# release. Kept in sync with docker/Dockerfile so the reviewer and developer
+# images ship the same Codex release.
+ARG CODEX_CLI_VERSION=0.146.0
+RUN npm install -g "@openai/codex@${CODEX_CLI_VERSION}"
+
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent
 
