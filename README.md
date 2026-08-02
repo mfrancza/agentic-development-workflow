@@ -336,7 +336,7 @@ docker run --rm \
   agent-reviewer
 ```
 
-Optional: `-e AGENT_MODEL="sonnet"` and `-e CLAUDE_MAX_TURNS="100"` (both default to these values, matching the CI workflow knobs).
+Optional: `-e AGENT_MODEL="sonnet"` and `-e AGENT_MAX_TURNS="100"` (both default to these values, matching the CI workflow knobs).
 
 The entrypoint clones the repo read-only, gathers the diff against the merge-base, fetches open review threads and CI check status, invokes Claude, then verifies that a review by the authenticated GitHub identity was posted against the PR head SHA — exiting non-zero if the agent did not complete the review.
 
