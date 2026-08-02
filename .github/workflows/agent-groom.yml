@@ -87,3 +87,13 @@ jobs:
             -e GITHUB_ISSUE_NUMBER \
             -e AGENT_MODEL \
             agent-developer:ci
+
+      - name: Remove agent:groom label
+        if: success()
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+        run: |
+          set -euo pipefail
+          gh issue edit "${{ github.event.issue.number }}" \
+            --repo "${{ github.repository }}" \
+            --remove-label "agent:groom"
