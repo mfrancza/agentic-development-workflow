@@ -29,8 +29,11 @@ resolve_provider() {
         sonnet|opus|haiku)
             echo "anthropic"
             ;;
+        gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5|o3)
+            echo "openai"
+            ;;
         *)
-            log "ERROR: Unknown model '${model}'. Supported values: sonnet, opus, haiku" >&2
+            log "ERROR: Unknown model '${model}'. Supported values: sonnet, opus, haiku, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5, o3" >&2
             exit 1
             ;;
     esac
@@ -49,8 +52,24 @@ run_anthropic() {
 }
 
 run_openai() {
-    log "ERROR: OpenAI runner not yet implemented (see issue #81)" >&2
-    exit 1
+    local prompt_file="$1"
+    shift
+    local user_prompt="$*"
+
+    local system_prompt combined
+    system_prompt="$(cat "${SCRIPTS_DIR}/prompts/${prompt_file}")"
+    # Codex exec has no --system-prompt flag; prepend the per-action system
+    # prompt to the task prompt with a clear separator.
+    combined="${system_prompt}
+
+---
+
+${user_prompt}"
+
+    printf '%s' "$combined" | codex exec \
+        --model "$AGENT_MODEL" \
+        --sandbox workspace-write \
+        -
 }
 
 run_agent() {
@@ -98,6 +117,9 @@ export -n AGENT_PROVIDER  # keep script-local; unexport in case it was inherited
 case "$AGENT_PROVIDER" in
     anthropic)
         : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
+        ;;
+    openai)
+        : "${OPENAI_API_KEY:?OPENAI_API_KEY is required}"
         ;;
 esac
 
