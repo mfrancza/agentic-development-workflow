@@ -4,31 +4,136 @@ set -euo pipefail
 # =============================================================================
 # Reviewer Agent Entrypoint
 #
-# Runs a single Claude review pass on a PR: clones the repo read-only, checks
-# out the PR head, gathers context (diff vs merge-base, existing review
-# threads with IDs, CI check status), invokes Claude with the `review.md`
-# system prompt, and — after Claude exits — verifies that a review by this
-# bot identity was recorded against the PR head SHA. Exits non-zero if not.
+# Runs a single review pass on a PR: clones the repo read-only, checks out
+# the PR head, gathers context (diff vs merge-base, existing review threads
+# with IDs, CI check status), invokes the agent with the `review.md` system
+# prompt, and — after the agent exits — verifies that a review by this bot
+# identity was recorded against the PR head SHA. Exits non-zero if not.
 #
 # Design contract: docs/design/reviewer-container.md
-#   - Decision 1: Claude posts the review; the entrypoint only verifies.
+#   - Decision 1: the agent posts the review; the entrypoint only verifies.
 #   - Decision 3: no `git-askpass.sh`, no `git config user.*`, no credential
 #     helper for push, no `git commit` / `git push` anywhere in this image.
 #   - Decision 5: `AGENT_MODEL` / `AGENT_MAX_TURNS` knobs mirror the
 #     developer image; no `AGENT_ACTION` dispatch — this image does one thing.
 # =============================================================================
 
-# Required environment variables
-: "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
+# Optional configuration (accept old names as a transient fallback; see #82)
+AGENT_MODEL="${AGENT_MODEL:-${CLAUDE_MODEL:-sonnet}}"
+AGENT_MAX_TURNS="${AGENT_MAX_TURNS:-${CLAUDE_MAX_TURNS:-100}}"
+
+SCRIPTS_DIR="/opt/agent"
+WORK_DIR="/home/agent/work"
+
+# -----------------------------------------------------------------------------
+# Helpers
+# -----------------------------------------------------------------------------
+
+log() {
+    echo "[reviewer] $(date -Iseconds) $*"
+}
+
+# resolve_provider: maps a model name to its provider string ("anthropic" or
+# "openai"). Fails loudly on unknown models — consistent with the fail-loud
+# security default.
+#
+# NOTE: This function is duplicated in docker/scripts/entrypoint.sh (developer
+# image). Keep both in sync when adding a model. Per design decision 2 in
+# docs/design/multi-provider-models.md, if a third image ever requires it,
+# promote to a shared lib COPYed into both images.
+resolve_provider() {
+    local model="$1"
+    case "$model" in
+        sonnet|opus|haiku)
+            echo "anthropic"
+            ;;
+        gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5|o3)
+            echo "openai"
+            ;;
+        *)
+            log "ERROR: Unknown model '${model}'. Supported values: sonnet, opus, haiku, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5, o3" >&2
+            exit 1
+            ;;
+    esac
+}
+
+run_anthropic() {
+    local prompt_file="$1"
+    local user_prompt_file="$2"
+
+    claude --print \
+        --dangerously-skip-permissions \
+        --model "$AGENT_MODEL" \
+        --max-turns "$AGENT_MAX_TURNS" \
+        --system-prompt-file "${SCRIPTS_DIR}/prompts/${prompt_file}" \
+        < "$user_prompt_file"
+}
+
+run_openai() {
+    local prompt_file="$1"
+    local user_prompt_file="$2"
+
+    local system_prompt
+    system_prompt="$(cat "${SCRIPTS_DIR}/prompts/${prompt_file}")"
+    # Codex exec has no --system-prompt flag; prepend the per-action system
+    # prompt to the task prompt with a clear separator.
+    # Sandbox is workspace-write: confines any file writes to the workspace,
+    # preserving the structural no-write guarantee (no git-askpass.sh, no
+    # push credentials in the image, Contents-read-only reviewer token).
+    {
+        printf '%s\n\n---\n\n' "$system_prompt"
+        cat "$user_prompt_file"
+    } | codex exec \
+        --model "$AGENT_MODEL" \
+        --sandbox workspace-write \
+        -
+}
+
+run_agent() {
+    local prompt_file="$1"
+    local user_prompt_file="$2"
+
+    case "$AGENT_PROVIDER" in
+        anthropic)
+            run_anthropic "$prompt_file" "$user_prompt_file"
+            ;;
+        openai)
+            run_openai "$prompt_file" "$user_prompt_file"
+            ;;
+        *)
+            log "ERROR: Unknown provider '${AGENT_PROVIDER}'" >&2
+            exit 1
+            ;;
+    esac
+}
+
+# -----------------------------------------------------------------------------
+# Preamble: resolve provider and validate credentials/required vars
+# (before any gh call, clone, or agent invocation)
+# -----------------------------------------------------------------------------
+
+# 1. Resolve the provider from AGENT_MODEL; unknown model → fail loud
+AGENT_PROVIDER="$(resolve_provider "$AGENT_MODEL")"
+export -n AGENT_PROVIDER  # keep script-local; unexport in case it was inherited from the environment
+
+# 2. Validate the selected provider's API key
+case "$AGENT_PROVIDER" in
+    anthropic)
+        : "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}"
+        ;;
+    openai)
+        : "${OPENAI_API_KEY:?OPENAI_API_KEY is required}"
+        ;;
+esac
+
+# 3. Validate remaining required vars
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GITHUB_REPO:?GITHUB_REPO is required (owner/repo)}"
 : "${GITHUB_PR_NUMBER:?GITHUB_PR_NUMBER is required}"
 
-# Optional configuration (accept old names as a transient fallback; see #199/#200)
-AGENT_MODEL="${AGENT_MODEL:-${CLAUDE_MODEL:-sonnet}}"
-AGENT_MAX_TURNS="${AGENT_MAX_TURNS:-${CLAUDE_MAX_TURNS:-100}}"
+export GH_TOKEN
 
-# File where Claude records the GraphQL IDs (one per line) of review threads
+# File where the agent records the GraphQL IDs (one per line) of review threads
 # whose findings are addressed. The reviewer token deliberately lacks the
 # Contents: write permission that the resolveReviewThread mutation requires
 # (see docs/design/reviewer-container.md decision 3), so the container never
@@ -40,31 +145,6 @@ RESOLVE_THREADS_FILE="${RESOLVE_THREADS_FILE:-/tmp/resolve-threads.txt}"
 export RESOLVE_THREADS_FILE
 mkdir -p "$(dirname "$RESOLVE_THREADS_FILE")"
 : > "$RESOLVE_THREADS_FILE"
-
-SCRIPTS_DIR="/opt/agent"
-WORK_DIR="/home/agent/work"
-
-export GH_TOKEN
-
-# -----------------------------------------------------------------------------
-# Helpers
-# -----------------------------------------------------------------------------
-
-log() {
-    echo "[reviewer] $(date -Iseconds) $*"
-}
-
-run_claude() {
-    local prompt_file="$1"
-    local user_prompt_file="$2"
-
-    claude --print \
-        --dangerously-skip-permissions \
-        --model "$AGENT_MODEL" \
-        --max-turns "$AGENT_MAX_TURNS" \
-        --system-prompt-file "${SCRIPTS_DIR}/prompts/${prompt_file}" \
-        < "$user_prompt_file"
-}
 
 # -----------------------------------------------------------------------------
 # Review
@@ -199,7 +279,7 @@ done
 # --- Gather CI check status. `gh pr checks` exits non-zero when checks are
 #     failing/pending, but still emits JSON on stdout. Capture stdout regardless
 #     of exit status (|| true), then default to '[]' only if the output is
-#     actually empty — preserving the CI context Claude needs when checks fail.
+#     actually empty — preserving the CI context the agent needs when checks fail.
 log "Fetching CI check status"
 CHECKS_JSON="$(gh pr checks "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" \
     --json name,state,link,workflow,startedAt,completedAt 2>/dev/null)" || true
@@ -251,11 +331,11 @@ git diff "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 } >> "$CONTEXT_FILE"
 
 # -----------------------------------------------------------------------------
-# Invoke Claude
+# Invoke agent
 # -----------------------------------------------------------------------------
 
-log "Running Claude to review PR"
-run_claude "review.md" "$CONTEXT_FILE"
+log "Running agent to review PR (provider: ${AGENT_PROVIDER})"
+run_agent "review.md" "$CONTEXT_FILE"
 rm -f "$CONTEXT_FILE"
 
 RESOLVE_COUNT="$(grep -c . "$RESOLVE_THREADS_FILE")" || true
@@ -268,7 +348,7 @@ log "Threads recorded for resolution: ${RESOLVE_COUNT:-0}"
 # Look for at least one review authored by this bot against the PR head SHA.
 # Filtering on commit_id (rather than just \"any review by us\") means a stale
 # review from an earlier head — e.g. if the workflow re-runs after new commits
-# but before Claude posts — does not falsely satisfy the check.
+# but before the agent posts — does not falsely satisfy the check.
 
 log "Verifying a review by ${REVIEWER_LOGIN} exists on ${HEAD_SHA}"
 # Use `jq -s` to aggregate across all pages rather than applying `--jq` once
