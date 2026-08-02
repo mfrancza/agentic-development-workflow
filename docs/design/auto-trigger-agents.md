@@ -55,6 +55,8 @@ Enumerated exhaustively (matching the trigger labels defined in
 
 Transitions #2, #3, and #4 are triggered by `issues.labeled` or `issues.unlabeled` events. GitHub has no per-label permission model, so any collaborator with triage permission can apply or remove labels. Without a sender check, a triage collaborator could apply `plan` or `do` (or remove `draft`) and cause the auto-trigger job to apply `agent:design` / `agent:developer` under the developer-agent App identity — which is in `AGENT_ALLOWLIST` — and thereby trigger an agent run, spending Anthropic credits, without ever being in the allowlist themselves. The `AGENT_ALLOWLIST` sender gate (required for all `issues.labeled`-triggered workflows by the repo-specific security standard in `AGENTS.md`) closes this gap.
 
+Transition #1 (`issues.opened`) is a deliberate exception to the allowlist model and a documented behavioral change. Today `AGENTS.md` states "Only usernames (and agent bot identities) in the Terraform-managed `AGENT_ALLOWLIST` Actions variable can trigger `agent:groom`" — because currently `agent:groom` is applied by hand by an allowlisted user. When `auto_trigger_agents.groom` is `true`, this workflow applies `agent:groom` on every `issues.opened` event regardless of who opened the issue; that is the intended behavior: automatically grooming all incoming issues, including those from non-allowlisted collaborators or (on public repos) any GitHub user. Adding an allowlist gate on the issue opener would largely defeat the feature — operators who want only allowlisted users to trigger grooming should leave `auto_trigger_agents.groom = false` and continue applying labels by hand. The operator who enables this switch explicitly accepts the broadened trigger model. The `AGENTS.md` update in issue #154 must document this behavioral change and clarify that the allowlist restriction for `agent:groom` does not apply when `auto_trigger_agents.groom = true`.
+
 Transition #4 exists because the un-draft job in `agent-design.yml` removes
 the `draft` label from every sub-issue when the design PR merges — that
 removal is the natural signal to start implementation on each unblocked
@@ -157,7 +159,8 @@ token to apply the label.
 **Exception — transition #5 (`pull_request.opened`):** the composite action
 `./.github/actions/agent-token` is a local action and requires a repository
 checkout to resolve. For `pull_request.opened`, checking out the repository
-at the PR's head SHA means executing PR-authored workflow files with
+at the PR's head SHA means executing PR-authored repository code — in
+particular local actions like `./.github/actions/agent-token` — with
 secrets (the App credentials) in scope — a supply-chain risk. Transition
 #5's job must instead call `actions/create-github-app-token` directly (the
 same approach `agent-design.yml`'s `pull_request.closed` handler already
