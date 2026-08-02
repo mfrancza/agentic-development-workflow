@@ -37,7 +37,7 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 
 ## MVP Workflow
 
-1. User opens a GitHub issue. Applying the `agent:groom` label runs the grooming agent (`AGENT_ACTION=groom`), which adds classification labels and clarifying notes based on [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json).
+1. User opens a GitHub issue. Applying the `agent:groom` label runs the grooming agent (`AGENT_ACTION=groom`), which adds classification labels and clarifying notes based on [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json). The `agent:groom` label is automatically removed on success so the run is not repeated; re-apply it to re-groom. On failure the label is left in place so the issue can be re-triggered without manual re-labeling.
 2. For issues labeled `plan` by the grooming agent, applying the `agent:design` label runs the designer agent (`AGENT_ACTION=design`), which creates the `design/issue-{N}` branch, writes a design document in `docs/design/`, creates draft sub-issues with dependencies, and opens a PR. Sub-issues are labeled `draft` until the design PR merges. When the `design/issue-{N}` PR merges, `agent-design.yml` automatically removes the `draft` label from all sub-issues of the parent issue.
 3. Applying the `agent:developer` label triggers the developer agent (`AGENT_ACTION=implement`), which creates the `agent/issue-{N}` branch, writes a solution, and opens a PR. The workflow skips with a log line if the issue is labeled `draft` (see the `draft` label description in **Labels**).
 4. On CI failures against an agent-authored PR, the `agent-fix-checks` workflow re-invokes the container with `AGENT_ACTION=fix-checks`. **Note:** `agent-fix-checks.yml` is currently wired to `on.workflow_run.workflows: ["CI"]`; it will not fire until a workflow named `CI` exists in the repo (the entry is a placeholder — update the workflow list or add a `CI` workflow when CI lands).
@@ -78,7 +78,7 @@ The **reviewer image** at [`docker/reviewer/`](docker/reviewer/) does not use `A
 
 ## Labels
 
-- `agent:groom` — triggers the grooming agent on the issue.
+- `agent:groom` — triggers the grooming agent on the issue. On success, the label is automatically removed from the issue so the grooming run is not repeated; to re-groom an issue, re-apply the label. If the run fails the label is intentionally left in place so the issue can be re-triggered without manual re-labeling.
 - `agent:design` — triggers the designer agent (`AGENT_ACTION=design`) to write a design document on a `design/issue-{N}` branch, open a PR, and create sub-issues labeled `draft` with dependency tracking. Intended for issues the groomer classifies as `plan`. When a `design/issue-{N}` PR merges, `agent-design.yml` automatically removes the `draft` label from all sub-issues of the parent issue, unblocking the developer agent for each one.
 - `agent:developer` — triggers the developer agent to implement the issue.
 - `agent:review` — applied to a PR to request a review from the code review agent. Triggers `agent-review.yml`, which builds `docker/reviewer/` and runs the reviewer container with the `reviewer-agent` App identity.

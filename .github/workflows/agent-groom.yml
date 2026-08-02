@@ -92,8 +92,10 @@ jobs:
         if: success()
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          gh issue edit "${{ github.event.issue.number }}" \
-            --repo "${{ github.repository }}" \
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPO" \
             --remove-label "agent:groom"
