@@ -61,14 +61,16 @@ The developer workflows build the container from [`docker/`](docker/) and mint a
 
 The developer container is a single image dispatched by `AGENT_ACTION`. Required environment variables:
 
-| Action            | Required vars (in addition to `ANTHROPIC_API_KEY`, `GH_TOKEN`, `GITHUB_REPO`) |
-|-------------------|-------------------------------------------------------------------------------|
-| `implement`       | `GITHUB_ISSUE_NUMBER`                                                         |
-| `groom`           | `GITHUB_ISSUE_NUMBER`                                                         |
-| `design`          | `GITHUB_ISSUE_NUMBER`                                                         |
-| `fix-checks`      | `GITHUB_PR_NUMBER`                                                            |
-| `respond-review`  | `GITHUB_PR_NUMBER`                                                            |
-| `fix-deployment`  | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                        |
+| Action            | Required vars (in addition to the provider API key, `GH_TOKEN`, `GITHUB_REPO`) |
+|-------------------|--------------------------------------------------------------------------------|
+| `implement`       | `GITHUB_ISSUE_NUMBER`                                                          |
+| `groom`           | `GITHUB_ISSUE_NUMBER`                                                          |
+| `design`          | `GITHUB_ISSUE_NUMBER`                                                          |
+| `fix-checks`      | `GITHUB_PR_NUMBER`                                                             |
+| `respond-review`  | `GITHUB_PR_NUMBER`                                                             |
+| `fix-deployment`  | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                         |
+
+Provider/key mapping: `ANTHROPIC_API_KEY` for Anthropic models (e.g. `model:sonnet`, `model:opus`, `model:haiku`); `OPENAI_API_KEY` for OpenAI models (e.g. `model:o3`). The entrypoint infers the provider from the resolved model name and validates that the corresponding key is set.
 
 Optional: `AGENT_MODEL` (default `sonnet`), `AGENT_MAX_TURNS` (default `100`).
 
