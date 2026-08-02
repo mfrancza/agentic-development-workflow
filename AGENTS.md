@@ -26,7 +26,7 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 │   │   ├── git-askpass.sh            # Token-based git credential helper
 │   │   └── prompts/                  # One system prompt per AGENT_ACTION
 │   └── reviewer/                     # Reviewer agent image — separate from the developer image
-│       ├── Dockerfile                # Same base recipe as docker/Dockerfile (node + gh + Claude Code)
+│       ├── Dockerfile                # Same base recipe as docker/Dockerfile (node + gh + Claude Code + Codex CLI)
 │       ├── entrypoint.sh             # Review-only entrypoint (no AGENT_ACTION dispatch; no push/commit code)
 │       └── prompts/                  # Reviewer system prompt(s)
 ├── terraform/                        # Repo settings, branch-protection ruleset, Actions vars
