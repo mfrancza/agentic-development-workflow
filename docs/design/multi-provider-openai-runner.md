@@ -195,6 +195,14 @@ Rationale for the specific choices:
   Codex reads `OPENAI_API_KEY` from its environment; the container
   inherits it from the workflow (already plumbed by #167).
 
+  **Amended (issue #227):** the claim above is wrong — Codex CLI does
+  *not* read `OPENAI_API_KEY` from the environment. It authenticates
+  from `~/.codex/auth.json`, so the `openai)` arm additionally runs
+  `printenv OPENAI_API_KEY | codex login --with-api-key` (the
+  documented non-interactive login) after the presence check. Without
+  it, every Codex request goes out with no Authorization header and
+  fails 401 — observed in the #169 validation run.
+
 **Alternatives considered:**
 
 - **Write the combined prompt to a temp file and pass it as an argument
