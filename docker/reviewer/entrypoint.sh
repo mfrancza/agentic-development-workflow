@@ -133,6 +133,10 @@ esac
 
 export GH_TOKEN
 
+# 4. Log the resolved configuration (model names are not secrets; this makes
+#    every run self-documenting and enables cost attribution and validation)
+log "Model: ${AGENT_MODEL} (provider: ${AGENT_PROVIDER}, max turns: ${AGENT_MAX_TURNS})"
+
 # File where the agent records the GraphQL IDs (one per line) of review threads
 # whose findings are addressed. The reviewer token deliberately lacks the
 # Contents: write permission that the resolveReviewThread mutation requires
