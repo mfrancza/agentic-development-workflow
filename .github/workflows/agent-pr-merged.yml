@@ -1,0 +1,104 @@
+name: agent-pr-merged
+
+# Fires when any PR is closed (merged or abandoned) and removes the
+# agent:developer label from the linked issue when the PR was authored by
+# the developer-agent bot.  Label removal fires for both merged and abandoned
+# PRs — in both cases the developer agent's iterative loop is definitively over.
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-pr-merged-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  remove-developer-label:
+    # Only act on PRs authored by the developer-agent bot.  Both merged and
+    # abandoned PRs are handled — in either case the developer agent's
+    # iterative loop is definitively over.
+    if: github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Extract linked issue number from PR body
+        id: lookup
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          # Extract the issue number from a "Closes #N" reference in the PR body.
+          # Pass the body through an env var (not a ${{ }} interpolation) to avoid
+          # shell-injection from attacker-controlled PR body content.
+          # grep returns 1 when there is no match; the `|| true` lets set -e ignore that.
+          ISSUE_NUM="$(printf '%s' "$PR_BODY" | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
+          if [ -z "${ISSUE_NUM:-}" ]; then
+            echo "PR body does not contain a 'Closes #N' reference; skipping."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Found linked issue #${ISSUE_NUM}."
+            # ISSUE_NUM is purely numeric (grep -oE '[0-9]+') so no CR/LF will be
+            # present, but strip defensively to comply with output-injection hygiene.
+            ISSUE_NUM="$(printf '%s' "$ISSUE_NUM" | tr -d '\r\n')"
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "issue_number=${ISSUE_NUM}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # No checkout step: we call actions/create-github-app-token directly
+      # instead of going through the local ./.github/actions/agent-token
+      # composite action.  Using a local action requires a workspace checkout,
+      # and on pull_request.closed events github.event.pull_request.base.sha
+      # may point at the post-merge HEAD (which already includes the merged PR).
+      # This means a PR that modifies .github/actions/agent-token could still
+      # get its modified local action executed here with DEVELOPER_APP_PRIVATE_KEY
+      # available — defeating the intended secret-exfiltration mitigation.
+      # Calling actions/create-github-app-token directly (with a pinned SHA)
+      # avoids the workspace entirely, so there is no local code-execution path
+      # that a merged PR can influence.
+      - name: Mint installation token for developer-agent
+        if: steps.lookup.outputs.proceed == 'true'
+        id: setup
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Remove agent:developer label from linked issue
+        if: steps.lookup.outputs.proceed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          GITHUB_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.lookup.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+          echo "Removing agent:developer label from issue #${ISSUE_NUMBER}."
+          if ! gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPO}" --remove-label "agent:developer"; then
+            # Distinguish between a benign no-op (label was already absent) and a
+            # real failure (permissions, rate-limit, transient API error).  A real
+            # failure must surface loudly — leaving the label in place could give the
+            # impression that the developer agent is still active on a closed PR.
+            # If the label is already absent the `gh issue edit` command may exit
+            # non-zero, which is a warning-level no-op we treat as success.
+            #
+            # Capture the re-check exit code and output separately — do NOT pipe
+            # because set -e is suppressed in `if` conditions and a pipe exit status
+            # reflects only the last command, masking a failed `gh api` call.
+            _recheck_status=0
+            _recheck_output="$(gh api "repos/${GITHUB_REPO}/issues/${ISSUE_NUMBER}" \
+                --jq 'any(.labels[]; .name == "agent:developer")')" || _recheck_status=$?
+            if [ "${_recheck_status}" -ne 0 ]; then
+              echo "::error::Failed to remove agent:developer label from issue #${ISSUE_NUMBER}, and the re-check API call also failed (check token permissions and API rate limits)."
+              exit 1
+            elif [ "${_recheck_output}" = "true" ]; then
+              echo "::error::Failed to remove agent:developer label from issue #${ISSUE_NUMBER} and the label is still present. Check token permissions and API rate limits."
+              exit 1
+            else
+              echo "::warning::Could not remove agent:developer label from issue #${ISSUE_NUMBER} — the label was already absent (non-fatal)."
+            fi
+          fi
+          echo "Done removing agent:developer label from issue #${ISSUE_NUMBER}."
