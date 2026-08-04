@@ -120,6 +120,11 @@ case "$AGENT_PROVIDER" in
         ;;
     openai)
         : "${OPENAI_API_KEY:?OPENAI_API_KEY is required}"
+        # Codex CLI does not read OPENAI_API_KEY from the environment; it
+        # authenticates from ~/.codex/auth.json, which this login writes
+        # (issue #227 — without it every request goes out with no
+        # Authorization header and fails 401).
+        printenv OPENAI_API_KEY | codex login --with-api-key
         ;;
 esac
 
