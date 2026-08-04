@@ -130,6 +130,10 @@ esac
 
 export GH_TOKEN
 
+# 4. Log the resolved configuration (model names are not secrets; this makes
+#    every run self-documenting and enables cost attribution and validation)
+log "Model: ${AGENT_MODEL} (provider: ${AGENT_PROVIDER}, max turns: ${AGENT_MAX_TURNS})"
+
 # -----------------------------------------------------------------------------
 # Actions
 # -----------------------------------------------------------------------------

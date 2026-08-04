@@ -64,6 +64,7 @@ jobs:
           # Strip CR/LF to prevent output injection before writing to GITHUB_OUTPUT.
           MODEL="$(printf '%s' "$MODEL" | tr -d '\r\n')"
           printf 'agent_model=%s\n' "$MODEL" >> "$GITHUB_OUTPUT"
+          echo "Resolved model: $MODEL"
 
       - name: Build agent image
         run: docker build -t agent-developer:ci ./docker
