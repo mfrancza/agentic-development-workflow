@@ -66,9 +66,10 @@ The developer container is a single image dispatched by `AGENT_ACTION`. Required
 | `implement`       | `GITHUB_ISSUE_NUMBER`                                                          |
 | `groom`           | `GITHUB_ISSUE_NUMBER`                                                          |
 | `design`          | `GITHUB_ISSUE_NUMBER`                                                          |
-| `fix-checks`      | `GITHUB_PR_NUMBER`                                                             |
-| `respond-review`  | `GITHUB_PR_NUMBER`                                                             |
-| `fix-deployment`  | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                         |
+| `fix-checks`        | `GITHUB_PR_NUMBER`                                                           |
+| `resolve-conflicts` | `GITHUB_PR_NUMBER`                                                           |
+| `respond-review`    | `GITHUB_PR_NUMBER`                                                           |
+| `fix-deployment`    | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                       |
 
 Provider/key mapping: `ANTHROPIC_API_KEY` for Anthropic models (e.g. `model:sonnet`, `model:opus`, `model:haiku`); `OPENAI_API_KEY` for OpenAI models (e.g. `model:o3`). The entrypoint infers the provider from the resolved model name and validates that the corresponding key is set.
 

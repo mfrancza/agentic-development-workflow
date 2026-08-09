@@ -131,7 +131,7 @@ esac
 # 3. Validate remaining required vars
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${GITHUB_REPO:?GITHUB_REPO is required}"
-: "${AGENT_ACTION:?AGENT_ACTION is required (implement|fix-checks|respond-review|fix-deployment|groom|design)}"
+: "${AGENT_ACTION:?AGENT_ACTION is required (implement|fix-checks|respond-review|fix-deployment|groom|design|resolve-conflicts)}"
 
 export GH_TOKEN
 
@@ -475,6 +475,164 @@ Existing labels: ${EXISTING_LABELS:-none}
 Label criteria are defined in: agents/grooming/label-criteria.json (already checked out in your working directory at ${WORK_DIR})"
 }
 
+action_resolve_conflicts() {
+    : "${GITHUB_PR_NUMBER:?GITHUB_PR_NUMBER is required for resolve-conflicts}"
+
+    # Skip if PR already carries human-required — a human is already intervening.
+    # Preflight check avoids an unnecessary clone.
+    log "Checking PR #${GITHUB_PR_NUMBER} for human-required label"
+    PR_LABELS_JSON="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json labels)"
+    if echo "$PR_LABELS_JSON" | jq -e '[.labels[].name] | any(. == "human-required")' > /dev/null; then
+        log "PR #${GITHUB_PR_NUMBER} carries 'human-required' label — skipping (human is already intervening)"
+        return 0
+    fi
+
+    setup_repo
+
+    log "Checking out PR #${GITHUB_PR_NUMBER}"
+    gh pr checkout "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO"
+    BRANCH_NAME="$(git rev-parse --abbrev-ref HEAD)"
+
+    log "Fetching PR metadata (title, body, base ref)"
+    PR_JSON="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json title,body,baseRefName)"
+    PR_TITLE="$(echo "$PR_JSON" | jq -r '.title')"
+    PR_BODY="$(echo "$PR_JSON" | jq -r '.body')"
+    BASE_REF="$(echo "$PR_JSON" | jq -r '.baseRefName')"
+
+    log "Fetching base ref origin/${BASE_REF}"
+    git fetch origin "$BASE_REF"
+
+    log "Attempting merge with origin/${BASE_REF}"
+    set +e
+    git merge "origin/${BASE_REF}"
+    MERGE_EXIT="$?"
+    set -e
+
+    if [ "$MERGE_EXIT" -eq 0 ]; then
+        log "Clean merge — pushing ${BRANCH_NAME}"
+        git push origin "$BRANCH_NAME"
+        return 0
+    elif [ "$MERGE_EXIT" -ne 1 ]; then
+        # Hard error (not a standard conflict); do not apply human-required —
+        # a re-run after the underlying issue is fixed is the expected recovery.
+        log "ERROR: git merge exited with unexpected code ${MERGE_EXIT} (not a standard conflict); aborting"
+        git merge --abort 2>/dev/null || true
+        exit 1
+    fi
+
+    # Conflict path (MERGE_EXIT == 1)
+    log "Conflicts detected — gathering context for Claude"
+
+    CONFLICTED_FILES="$(git diff --name-only --diff-filter=U)"
+    log "Conflicted files: $(echo "$CONFLICTED_FILES" | tr '\n' ' ')"
+
+    MERGE_BASE="$(git merge-base HEAD "origin/${BASE_REF}")"
+    BRANCH_COMMITS="$(git log --oneline "${MERGE_BASE}..HEAD" 2>/dev/null || echo "(none)")"
+    BASE_COMMITS="$(git log --oneline "${MERGE_BASE}..origin/${BASE_REF}" 2>/dev/null || echo "(none)")"
+
+    # Try to extract and fetch linked issue (non-fatal if absent or unparseable)
+    LINKED_ISSUE_CONTEXT=""
+    ISSUE_NUM="$(echo "$PR_BODY" | grep -oE 'Closes #[0-9]+' | grep -oE '[0-9]+' | head -1 || true)"
+    if [ -n "$ISSUE_NUM" ]; then
+        log "Fetching linked issue #${ISSUE_NUM}"
+        ISSUE_DATA="$(gh issue view "$ISSUE_NUM" --repo "$GITHUB_REPO" --json title,body 2>/dev/null || true)"
+        if [ -n "$ISSUE_DATA" ]; then
+            LINKED_ISSUE_TITLE="$(echo "$ISSUE_DATA" | jq -r '.title')"
+            LINKED_ISSUE_BODY="$(echo "$ISSUE_DATA" | jq -r '.body')"
+            LINKED_ISSUE_CONTEXT="Linked issue #${ISSUE_NUM}:
+Title: ${LINKED_ISSUE_TITLE}
+Body:
+${LINKED_ISSUE_BODY}"
+        fi
+    fi
+
+    log "Invoking Claude to resolve conflicts"
+    CLAUDE_OUTPUT="$(run_agent "resolve-conflicts.md" \
+        "Resolve merge conflicts on PR #${GITHUB_PR_NUMBER} in ${GITHUB_REPO}.
+
+Branch: ${BRANCH_NAME}
+Merging: origin/${BASE_REF} into ${BRANCH_NAME}
+
+PR title: ${PR_TITLE}
+
+PR body:
+${PR_BODY}
+
+${LINKED_ISSUE_CONTEXT}
+
+Conflicted files (edit each to remove all conflict markers, then git add):
+${CONFLICTED_FILES}
+
+Commits on this branch since merge-base (intent of the PR):
+${BRANCH_COMMITS}
+
+Commits on ${BASE_REF} since merge-base (changes that introduced the conflict):
+${BASE_COMMITS}")"
+
+    # Verification: both checks must produce no output for the resolution to be valid.
+    # git diff --cached --check: staged content (index vs HEAD) — catches markers Claude staged via git add.
+    # git diff --check: unstaged content (working tree vs index) — catches files Claude edited but never staged.
+    # git ls-files --unmerged: index-state check — catches files never git-added by Claude.
+    log "Verifying no conflict markers or unmerged paths remain"
+    set +e
+    STAGED_CHECK="$(git diff --cached --check 2>&1)"
+    STAGED_EXIT="$?"
+    UNSTAGED_CHECK="$(git diff --check 2>&1)"
+    UNSTAGED_EXIT="$?"
+    UNMERGED_PATHS="$(git ls-files --unmerged)"
+    set -e
+
+    if [ "$STAGED_EXIT" -ne 0 ] || [ "$UNSTAGED_EXIT" -ne 0 ] || [ -n "$UNMERGED_PATHS" ]; then
+        log "Verification failed — aborting merge and escalating to human"
+        [ -n "$STAGED_CHECK" ]   && log "Staged markers:   ${STAGED_CHECK}"
+        [ -n "$UNSTAGED_CHECK" ] && log "Unstaged markers: ${UNSTAGED_CHECK}"
+        [ -n "$UNMERGED_PATHS" ] && log "Unmerged paths:   ${UNMERGED_PATHS}"
+
+        git merge --abort 2>/dev/null || true
+
+        # Collect unresolvable file names (from unmerged index or original conflict list)
+        UNRESOLVABLE_FILES="$(echo "$UNMERGED_PATHS" | awk '{print $NF}' | sort -u)"
+        if [ -z "$UNRESOLVABLE_FILES" ]; then
+            UNRESOLVABLE_FILES="$CONFLICTED_FILES"
+        fi
+
+        log "Applying human-required label to PR #${GITHUB_PR_NUMBER}"
+        gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
+
+        FALLBACK_BODY="## Automated conflict resolution failed
+
+The conflict-resolution agent was unable to automatically resolve all merge conflicts in this PR. The following files require manual attention:
+
+$(echo "$UNRESOLVABLE_FILES" | sed 's/^/- /')
+
+Please resolve the conflicts manually, commit the merge, push, and remove the \`human-required\` label when done."
+
+        gh pr comment "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --body "$FALLBACK_BODY"
+
+        exit 1
+    fi
+
+    log "Verification passed — committing merge"
+    RESOLVED_LIST="$(echo "$CONFLICTED_FILES" | xargs)"
+    git commit -m "Merge origin/${BASE_REF} into ${BRANCH_NAME}: resolve conflicts in ${RESOLVED_LIST}
+
+Automated resolution by resolve-conflicts agent."
+
+    log "Pushing ${BRANCH_NAME}"
+    git push origin "$BRANCH_NAME"
+
+    log "Posting resolution summary as PR comment"
+    SUMMARY_BODY="## Conflict resolution summary
+
+The conflict-resolution agent successfully merged \`origin/${BASE_REF}\` into \`${BRANCH_NAME}\`.
+
+${CLAUDE_OUTPUT}"
+
+    gh pr comment "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --body "$SUMMARY_BODY"
+
+    log "Conflict resolution complete for PR #${GITHUB_PR_NUMBER}"
+}
+
 # -----------------------------------------------------------------------------
 # Dispatch
 # -----------------------------------------------------------------------------
@@ -500,9 +658,12 @@ case "$AGENT_ACTION" in
     design)
         action_design
         ;;
+    resolve-conflicts)
+        action_resolve_conflicts
+        ;;
     *)
         log "ERROR: Unknown action '${AGENT_ACTION}'"
-        echo "Usage: AGENT_ACTION=(implement|fix-checks|respond-review|fix-deployment|groom|design)" >&2
+        echo "Usage: AGENT_ACTION=(implement|fix-checks|respond-review|fix-deployment|groom|design|resolve-conflicts)" >&2
         exit 1
         ;;
 esac
