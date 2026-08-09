@@ -648,7 +648,7 @@ Please resolve the conflicts manually, commit the merge, push, and remove the \`
     fi
 
     log "Verification passed — committing merge"
-    RESOLVED_LIST="$(echo "$CONFLICTED_FILES" | xargs)"
+    RESOLVED_LIST="$(echo "$CONFLICTED_FILES" | tr '\n' ' ' | sed 's/ $//')"
     git commit -m "Merge origin/${BASE_REF} into ${BRANCH_NAME}: resolve conflicts in ${RESOLVED_LIST}
 
 Automated resolution by resolve-conflicts agent."

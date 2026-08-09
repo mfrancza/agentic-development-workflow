@@ -56,10 +56,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          MANUAL_PR="${MANUAL_PR_INPUT:-}"
+          MANUAL_PR="$(echo "${MANUAL_PR_INPUT:-}" | tr -d '\r\n')"
           if [ -n "${MANUAL_PR}" ]; then
+            [[ "${MANUAL_PR}" =~ ^[0-9]+$ ]] || { echo "::error::pr_number must be a positive integer; got '${MANUAL_PR}'" >&2; exit 1; }
             echo "Manual dispatch: using PR #${MANUAL_PR}"
-            echo "prs=$(echo "${MANUAL_PR}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+            echo "prs=${MANUAL_PR}" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
