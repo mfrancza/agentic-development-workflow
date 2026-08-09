@@ -1,0 +1,137 @@
+name: agent-resolve-conflicts
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: 'PR number to resolve (skips conflict-filter enumeration and runs directly)'
+        required: false
+
+permissions:
+  contents: read
+  pull-requests: read  # for gh pr view in the enumeration step
+
+# Prevent overlapping runs from the same push event; allow concurrent runs
+# for different push events so an in-flight resolution is not cancelled.
+concurrency:
+  group: agent-resolve-conflicts-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-conflicts:
+    # Always run on push to main (conflicts can appear for any agent PR after a push).
+    # On workflow_dispatch, run unconditionally — the caller provides the PR number.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      # Checkout must precede the local agent-token action: the runner resolves
+      # ./.github/actions/* references from the workspace.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Build agent image
+        run: docker build -t agent-developer:ci ./docker
+
+      # When a PR number is provided via workflow_dispatch, use it directly.
+      # Otherwise enumerate open developer-agent PRs and filter to those that
+      # are CONFLICTING (mergeability is computed asynchronously by GitHub after
+      # a push; retry with backoff until it settles).
+      - name: Find conflicted agent-authored PRs
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          MANUAL_PR="${{ inputs.pr_number }}"
+          if [ -n "${MANUAL_PR}" ]; then
+            echo "Manual dispatch: using PR #${MANUAL_PR}"
+            echo "prs=${MANUAL_PR}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Enumerate all open PRs authored by the developer agent.
+          PR_NUMBERS="$(gh pr list \
+            --repo '${{ github.repository }}' \
+            --author 'mfrancza-developer-agent[bot]' \
+            --state open \
+            --json number \
+            --jq '.[].number')"
+
+          if [ -z "$PR_NUMBERS" ]; then
+            echo "No open developer-agent PRs found."
+            echo "prs=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Open developer-agent PRs: $(echo "$PR_NUMBERS" | tr '\n' ' ')"
+
+          CONFLICTED_PRS=""
+          for PR_NUM in $PR_NUMBERS; do
+            # GitHub computes mergeability asynchronously after a push; poll
+            # with exponential backoff until the value is no longer UNKNOWN.
+            MERGEABLE="UNKNOWN"
+            for attempt in 1 2 3 4 5; do
+              MERGEABLE="$(gh pr view "$PR_NUM" \
+                --repo '${{ github.repository }}' \
+                --json mergeable \
+                --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
+              if [ "$MERGEABLE" != "UNKNOWN" ]; then
+                break
+              fi
+              WAIT=$(( attempt * 15 ))
+              echo "PR #${PR_NUM} mergeability UNKNOWN (attempt ${attempt}/5); waiting ${WAIT}s..."
+              sleep "$WAIT"
+            done
+
+            if [ "$MERGEABLE" = "CONFLICTING" ]; then
+              echo "PR #${PR_NUM} is CONFLICTING — queued for resolution"
+              CONFLICTED_PRS="${CONFLICTED_PRS} ${PR_NUM}"
+            else
+              echo "PR #${PR_NUM} mergeability: ${MERGEABLE} — skipping"
+            fi
+          done
+
+          CONFLICTED_PRS="$(echo "$CONFLICTED_PRS" | sed 's/^ *//')"
+          echo "prs=${CONFLICTED_PRS}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve conflicts
+        if: steps.find.outputs.prs != ''
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GITHUB_REPO: ${{ github.repository }}
+          AGENT_ACTION: resolve-conflicts
+          AGENT_MODEL: ${{ vars.DEFAULT_MODEL }}
+          ESCALATION_ASSIGNEE: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+          # Run one container per conflicted PR sequentially; a non-zero exit
+          # (escalated to human) is logged but does not abort the loop so that
+          # remaining PRs are still processed.
+          for PR_NUM in ${{ steps.find.outputs.prs }}; do
+            echo "Running resolve-conflicts for PR #${PR_NUM}"
+            docker run --rm \
+              -e GH_TOKEN \
+              -e ANTHROPIC_API_KEY \
+              -e OPENAI_API_KEY \
+              -e GITHUB_REPO \
+              -e AGENT_ACTION \
+              -e AGENT_MODEL \
+              -e ESCALATION_ASSIGNEE \
+              -e GITHUB_PR_NUMBER="${PR_NUM}" \
+              agent-developer:ci \
+              || echo "resolve-conflicts container exited non-zero for PR #${PR_NUM} (escalated to human); continuing"
+          done

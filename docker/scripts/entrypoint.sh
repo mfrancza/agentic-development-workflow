@@ -11,6 +11,7 @@ set -euo pipefail
 AGENT_MODEL="${AGENT_MODEL:-${CLAUDE_MODEL:-sonnet}}"
 AGENT_MAX_TURNS="${AGENT_MAX_TURNS:-${CLAUDE_MAX_TURNS:-100}}"
 REVIEWERS="${REVIEWERS:-}"
+ESCALATION_ASSIGNEE="${ESCALATION_ASSIGNEE:-}"
 
 SCRIPTS_DIR="/opt/agent"
 WORK_DIR="/home/agent/work"
@@ -547,6 +548,7 @@ ${LINKED_ISSUE_BODY}"
     fi
 
     log "Invoking Claude to resolve conflicts"
+    set +e
     CLAUDE_OUTPUT="$(run_agent "resolve-conflicts.md" \
         "Resolve merge conflicts on PR #${GITHUB_PR_NUMBER} in ${GITHUB_REPO}.
 
@@ -568,6 +570,29 @@ ${BRANCH_COMMITS}
 
 Commits on ${BASE_REF} since merge-base (changes that introduced the conflict):
 ${BASE_COMMITS}")"
+    AGENT_EXIT="$?"
+    set -e
+
+    if [ "$AGENT_EXIT" -ne 0 ]; then
+        log "ERROR: run_agent exited with code ${AGENT_EXIT} (API failure, max-turn exhaustion, or CLI error) — aborting merge and escalating"
+        git merge --abort 2>/dev/null || true
+        log "Applying human-required label to PR #${GITHUB_PR_NUMBER}"
+        if [ -n "${ESCALATION_ASSIGNEE:-}" ]; then
+            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "$ESCALATION_ASSIGNEE"
+        else
+            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
+        fi
+        AGENT_FAIL_BODY="## Automated conflict resolution failed
+
+The conflict-resolution agent exited unexpectedly (exit code ${AGENT_EXIT}) before completing resolution. The merge has been aborted.
+
+Conflicted files:
+$(echo "$CONFLICTED_FILES" | sed 's/^/- /')
+
+Please resolve the conflicts manually, commit the merge, push, and remove the \`human-required\` label when done."
+        gh pr comment "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --body "$AGENT_FAIL_BODY"
+        exit 1
+    fi
 
     # Verification: both checks must produce no output for the resolution to be valid.
     # git diff --cached --check: staged content (index vs HEAD) — catches markers Claude staged via git add.
@@ -590,14 +615,20 @@ ${BASE_COMMITS}")"
 
         git merge --abort 2>/dev/null || true
 
-        # Collect unresolvable file names (from unmerged index or original conflict list)
-        UNRESOLVABLE_FILES="$(echo "$UNMERGED_PATHS" | awk '{print $NF}' | sort -u)"
+        # Collect unresolvable file names (from unmerged index or original conflict list).
+        # git ls-files --unmerged separates metadata from the path with a tab; split on tab
+        # so paths containing spaces are preserved correctly.
+        UNRESOLVABLE_FILES="$(echo "$UNMERGED_PATHS" | awk -F'\t' '{print $NF}' | sort -u)"
         if [ -z "$UNRESOLVABLE_FILES" ]; then
             UNRESOLVABLE_FILES="$CONFLICTED_FILES"
         fi
 
         log "Applying human-required label to PR #${GITHUB_PR_NUMBER}"
-        gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
+        if [ -n "${ESCALATION_ASSIGNEE:-}" ]; then
+            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "$ESCALATION_ASSIGNEE"
+        else
+            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
+        fi
 
         FALLBACK_BODY="## Automated conflict resolution failed
 
