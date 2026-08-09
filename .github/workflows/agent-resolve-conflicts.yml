@@ -51,10 +51,11 @@ jobs:
         id: find
         env:
           GH_TOKEN: ${{ github.token }}
+          MANUAL_PR_INPUT: ${{ inputs.pr_number }}
         run: |
           set -euo pipefail
 
-          MANUAL_PR="${{ inputs.pr_number }}"
+          MANUAL_PR="${MANUAL_PR_INPUT:-}"
           if [ -n "${MANUAL_PR}" ]; then
             echo "Manual dispatch: using PR #${MANUAL_PR}"
             echo "prs=${MANUAL_PR}" >> "$GITHUB_OUTPUT"
@@ -116,12 +117,13 @@ jobs:
           AGENT_ACTION: resolve-conflicts
           AGENT_MODEL: ${{ vars.DEFAULT_MODEL }}
           ESCALATION_ASSIGNEE: ${{ github.repository_owner }}
+          CONFLICTED_PRS: ${{ steps.find.outputs.prs }}
         run: |
           set -euo pipefail
           # Run one container per conflicted PR sequentially; a non-zero exit
           # (escalated to human) is logged but does not abort the loop so that
           # remaining PRs are still processed.
-          for PR_NUM in ${{ steps.find.outputs.prs }}; do
+          for PR_NUM in ${CONFLICTED_PRS}; do
             echo "Running resolve-conflicts for PR #${PR_NUM}"
             docker run --rm \
               -e GH_TOKEN \
