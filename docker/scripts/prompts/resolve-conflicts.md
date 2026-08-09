@@ -38,11 +38,9 @@ All conflicted files are in your working directory. Use your file-reading tools 
 
 ## Resolution summary format
 
-After resolving (or attempting to resolve) all files, write the summary in this exact format so the entrypoint can post it as a PR comment:
+After resolving (or attempting to resolve) all files, write the summary in this exact format so the entrypoint can post it as a PR comment. The entrypoint wraps your output with a `## Conflict resolution summary` heading — start directly with the `### <file>` sections (no top-level `##` heading of your own):
 
 ```
-## Resolution summary
-
 ### <file-path-1>
 **Conflict type:** <brief description, e.g. "both sides added lines in the same section">
 **Resolution:** <what you chose and why, e.g. "kept both additions with base-branch change first since it was merged before the PR branch was opened">

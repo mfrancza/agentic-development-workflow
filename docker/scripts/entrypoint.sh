@@ -600,9 +600,13 @@ Please resolve the conflicts manually, commit the merge, push, and remove the \`
     # git ls-files --unmerged: index-state check — catches files never git-added by Claude.
     log "Verifying no conflict markers or unmerged paths remain"
     set +e
-    STAGED_CHECK="$(git diff --cached --check 2>&1)"
+    # Use -c core.whitespace=-trailing-space so only conflict markers (not
+    # trailing whitespace) trigger a non-zero exit; prose/generated output
+    # commonly contains trailing whitespace and should not cause false-positive
+    # escalations.
+    STAGED_CHECK="$(git -c core.whitespace=-trailing-space diff --cached --check 2>&1)"
     STAGED_EXIT="$?"
-    UNSTAGED_CHECK="$(git diff --check 2>&1)"
+    UNSTAGED_CHECK="$(git -c core.whitespace=-trailing-space diff --check 2>&1)"
     UNSTAGED_EXIT="$?"
     UNMERGED_PATHS="$(git ls-files --unmerged)"
     set -e

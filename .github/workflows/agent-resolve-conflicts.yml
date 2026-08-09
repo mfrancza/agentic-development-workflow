@@ -52,6 +52,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           MANUAL_PR_INPUT: ${{ inputs.pr_number }}
+          GITHUB_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
 
@@ -64,7 +65,7 @@ jobs:
 
           # Enumerate all open PRs authored by the developer agent.
           PR_NUMBERS="$(gh pr list \
-            --repo '${{ github.repository }}' \
+            --repo "$GITHUB_REPO" \
             --author 'mfrancza-developer-agent[bot]' \
             --state open \
             --json number \
@@ -85,7 +86,7 @@ jobs:
             MERGEABLE="UNKNOWN"
             for attempt in 1 2 3 4 5; do
               MERGEABLE="$(gh pr view "$PR_NUM" \
-                --repo '${{ github.repository }}' \
+                --repo "$GITHUB_REPO" \
                 --json mergeable \
                 --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
               if [ "$MERGEABLE" != "UNKNOWN" ]; then
