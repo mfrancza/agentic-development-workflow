@@ -58,7 +58,7 @@ jobs:
           MANUAL_PR="${MANUAL_PR_INPUT:-}"
           if [ -n "${MANUAL_PR}" ]; then
             echo "Manual dispatch: using PR #${MANUAL_PR}"
-            echo "prs=${MANUAL_PR}" >> "$GITHUB_OUTPUT"
+            echo "prs=$(echo "${MANUAL_PR}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
