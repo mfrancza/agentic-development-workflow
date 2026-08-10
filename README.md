@@ -41,6 +41,7 @@ Day-to-day operation is driven entirely by GitHub labels and events:
 - Apply **`agent:review`** to a PR → the code review agent reviews the changes. (`agent-review.yml` builds `docker/reviewer/` and runs the reviewer container with the `reviewer-agent` App identity.) GitHub suppresses `pull_request` and `pull_request_review` events while a PR has merge conflicts; remove and re-apply `agent:review` after resolving conflicts to restart the re-review loop.
 - Apply **`agent:design`** to an issue → the designer agent writes a design document on a `design/issue-{N}` branch, opens a PR, and creates sub-issues labeled `draft` to block premature implementation. When the `design/issue-{N}` PR merges, the `agent-design` workflow automatically removes the `draft` label from every sub-issue of the parent issue, unblocking the developer agent for each one.
 - CI failure on an agent-authored PR → the agent is re-invoked to fix the checks. (**Note:** `agent-fix-checks` is wired to a workflow named `CI`; this step won't fire until a workflow with that name exists in the repo.)
+- Push to `main` → the agent checks all open developer-agent PRs for merge conflicts and resolves them automatically. If the agent cannot resolve a conflict confidently, it aborts, applies `human-required`, and posts a PR comment naming the files that need manual attention.
 - PR review submitted on an agent-authored PR → the agent addresses feedback and pushes.
 - Deployment failure → the agent opens a follow-up fix-up PR. (Triggers on any `deployment_status` failure; skips cleanly unless it can map the failing deployment SHA to a PR containing `Closes #N`.)
 - Add a **`model:<name>`** label (e.g. `model:opus`, `model:haiku`) to override the default Claude model for that issue's or PR's run. Works on both issues (developer/grooming/fix-deployment runs) and PRs (`agent:review` runs). The grooming agent automatically selects and applies one of these labels based on issue complexity — if a `model:*` label is already present when the grooming agent runs, it will leave it unchanged. At most one `model:*` label is allowed; workflows fail loudly if more than one is present.
@@ -342,7 +343,7 @@ The entrypoint clones the repo read-only, gathers the diff against the merge-bas
 
 ## What's included
 
-- Developer agent container with six actions: `implement`, `groom`, `design`, `fix-checks`, `respond-review`, `fix-deployment`.
+- Developer agent container with seven actions: `implement`, `groom`, `design`, `fix-checks`, `resolve-conflicts`, `respond-review`, `fix-deployment`.
 - Grooming agent with label criteria in [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json).
 - GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/).
 - Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_MODEL` Actions variables.

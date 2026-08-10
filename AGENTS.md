@@ -53,7 +53,8 @@ See [`requirements.md`](requirements.md) for the full project specification and 
    The two checks have distinct error behaviors: a GraphQL error on the primary check falls through to the
    bare-approval fallback (which may still skip) rather than proceeding immediately; an inline-comment API
    error on the fallback check fails open so the workflow proceeds rather than silently suppress a response.
-6. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
+6. A push to `main` that makes one or more open developer-agent PRs conflicted triggers the `agent-resolve-conflicts` workflow (`AGENT_ACTION=resolve-conflicts`). The workflow enumerates open PRs authored by the developer agent, polls each PR's `mergeable` field until GitHub finishes computing it, and runs the developer container once per conflicted PR. The container attempts a semantic merge (Claude resolves the conflict markers), verifies no markers remain, and pushes the merge commit. If the agent exits unexpectedly or verification fails, the merge is aborted, the `human-required` label is applied (and the configured `ESCALATION_ASSIGNEE` assigned), and a PR comment describes which files need manual attention. PRs already carrying `human-required` are skipped. `workflow_dispatch` with a `pr_number` input is available as a manual backstop.
+7. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
 
 The developer workflows build the container from [`docker/`](docker/) and mint a short-lived installation token from the `developer-agent` GitHub App. The **reviewer image** is built from [`docker/reviewer/`](docker/reviewer/) and uses the `reviewer-agent` App identity (see the reviewer image section below). The `agent-review` workflow triggers it when the `agent:review` label is applied to a PR.
 
@@ -66,13 +67,14 @@ The developer container is a single image dispatched by `AGENT_ACTION`. Required
 | `implement`       | `GITHUB_ISSUE_NUMBER`                                                          |
 | `groom`           | `GITHUB_ISSUE_NUMBER`                                                          |
 | `design`          | `GITHUB_ISSUE_NUMBER`                                                          |
-| `fix-checks`      | `GITHUB_PR_NUMBER`                                                             |
-| `respond-review`  | `GITHUB_PR_NUMBER`                                                             |
-| `fix-deployment`  | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                         |
+| `fix-checks`        | `GITHUB_PR_NUMBER`                                                           |
+| `resolve-conflicts` | `GITHUB_PR_NUMBER`                                                           |
+| `respond-review`    | `GITHUB_PR_NUMBER`                                                           |
+| `fix-deployment`    | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                       |
 
 Provider/key mapping: `ANTHROPIC_API_KEY` for Anthropic models (e.g. `model:sonnet`, `model:opus`, `model:haiku`); `OPENAI_API_KEY` for OpenAI models (e.g. `model:o3`). The entrypoint infers the provider from the resolved model name and validates that the corresponding key is set.
 
-Optional: `AGENT_MODEL` (default `sonnet`), `AGENT_MAX_TURNS` (default `100`).
+Optional: `AGENT_MODEL` (default `sonnet`), `AGENT_MAX_TURNS` (default `100`), `ESCALATION_ASSIGNEE` (GitHub username to assign when `resolve-conflicts` applies the `human-required` label; omit to label without assigning).
 
 The **reviewer image** at [`docker/reviewer/`](docker/reviewer/) does not use `AGENT_ACTION` — it performs exactly one action (review a PR) and dispatches nothing else. Required env: the provider API key for the resolved model (`ANTHROPIC_API_KEY` for Anthropic models, `OPENAI_API_KEY` for OpenAI models — same conditional key validation as the developer image), `GH_TOKEN`, `GITHUB_REPO`, `GITHUB_PR_NUMBER`; optional `AGENT_MODEL` / `AGENT_MAX_TURNS` (same defaults as the developer image so `model:*` labels behave identically) and `RESOLVE_THREADS_FILE` (path where the container records GraphQL IDs of review threads whose findings are addressed — the `resolveReviewThread` mutation requires Contents: write, which the reviewer App deliberately lacks, so `agent-review.yml` mounts this file and resolves the recorded threads with the workflow `GITHUB_TOKEN` after the container exits). The reviewer image deliberately ships no `git-askpass.sh` and has no `git commit` / `git push` code paths — the no-write guarantee is structural (image) as well as token-scoped (Contents: read on the reviewer App); see [`docs/design/reviewer-container.md`](docs/design/reviewer-container.md) decision 3. The agent posts the review via `gh api` and the entrypoint verifies afterwards that a review by the reviewer app exists on the PR head SHA — exiting non-zero otherwise (decision 1).
 
