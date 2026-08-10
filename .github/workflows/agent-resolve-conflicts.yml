@@ -11,20 +11,111 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read  # for gh pr view in the enumeration step
-
-# Prevent overlapping runs from the same push event; allow concurrent runs
-# for different push events so an in-flight resolution is not cancelled.
-concurrency:
-  group: agent-resolve-conflicts-${{ github.sha }}
-  cancel-in-progress: false
+  pull-requests: read  # for gh pr list / gh pr view in find-conflicted-prs
 
 jobs:
-  resolve-conflicts:
-    # Always run on push to main (conflicts can appear for any agent PR after a push).
-    # On workflow_dispatch, run unconditionally — the caller provides the PR number.
+  find-conflicted-prs:
+    runs-on: ubuntu-24.04
+    outputs:
+      conflicted_prs: ${{ steps.find.outputs.conflicted_prs }}
+
+    steps:
+      # When a PR number is provided via workflow_dispatch, use it directly
+      # (poll for mergeability state to let GitHub's async computation settle,
+      # then include regardless of result — this is a manual backstop).
+      # Otherwise enumerate open developer-agent PRs and filter to those that
+      # are CONFLICTING (mergeability is computed asynchronously by GitHub after
+      # a push; retry with exponential backoff until it settles).
+      - name: Find conflicted agent-authored PRs
+        id: find
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MANUAL_PR_INPUT: ${{ inputs.pr_number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          MANUAL_PR="$(echo "${MANUAL_PR_INPUT:-}" | tr -d '\r\n')"
+          if [ -n "${MANUAL_PR}" ]; then
+            [[ "${MANUAL_PR}" =~ ^[0-9]+$ ]] || { echo "::error::pr_number must be a positive integer; got '${MANUAL_PR}'" >&2; exit 1; }
+            echo "Manual dispatch: polling PR #${MANUAL_PR} for mergeability"
+            DELAYS=(5 10 20 40 80)
+            MERGEABLE="UNKNOWN"
+            for i in "${!DELAYS[@]}"; do
+              attempt=$(( i + 1 ))
+              MERGEABLE="$(gh pr view "${MANUAL_PR}" \
+                --repo "$GITHUB_REPO" \
+                --json mergeable \
+                --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
+              if [ "$MERGEABLE" != "UNKNOWN" ]; then
+                break
+              fi
+              echo "PR #${MANUAL_PR} mergeability UNKNOWN (attempt ${attempt}/5); waiting ${DELAYS[$i]}s..."
+              sleep "${DELAYS[$i]}"
+            done
+            echo "PR #${MANUAL_PR} mergeability: ${MERGEABLE} (manual dispatch — including regardless)"
+            echo "conflicted_prs=[${MANUAL_PR}]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Enumerate all open PRs authored by the developer agent.
+          PR_NUMBERS="$(gh pr list \
+            --repo "$GITHUB_REPO" \
+            --author 'app/mfrancza-developer-agent' \
+            --state open \
+            --json number \
+            --jq '.[].number')"
+
+          if [ -z "$PR_NUMBERS" ]; then
+            echo "No open developer-agent PRs found."
+            echo "conflicted_prs=[]" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Open developer-agent PRs: $(echo "$PR_NUMBERS" | tr '\n' ' ')"
+
+          CONFLICTED_PRS="[]"
+          DELAYS=(5 10 20 40 80)
+          for PR_NUM in $PR_NUMBERS; do
+            # GitHub computes mergeability asynchronously after a push; poll
+            # with exponential backoff until the value is no longer UNKNOWN.
+            MERGEABLE="UNKNOWN"
+            for i in "${!DELAYS[@]}"; do
+              attempt=$(( i + 1 ))
+              MERGEABLE="$(gh pr view "$PR_NUM" \
+                --repo "$GITHUB_REPO" \
+                --json mergeable \
+                --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
+              if [ "$MERGEABLE" != "UNKNOWN" ]; then
+                break
+              fi
+              echo "PR #${PR_NUM} mergeability UNKNOWN (attempt ${attempt}/5); waiting ${DELAYS[$i]}s..."
+              sleep "${DELAYS[$i]}"
+            done
+
+            if [ "$MERGEABLE" = "CONFLICTING" ]; then
+              echo "PR #${PR_NUM} is CONFLICTING — queued for resolution"
+              CONFLICTED_PRS="$(echo "$CONFLICTED_PRS" | jq ". + [$PR_NUM]")"
+            else
+              echo "PR #${PR_NUM} mergeability: ${MERGEABLE} — skipping"
+            fi
+          done
+
+          echo "Conflicted PRs: ${CONFLICTED_PRS}"
+          echo "conflicted_prs=${CONFLICTED_PRS}" >> "$GITHUB_OUTPUT"
+
+  resolve:
+    needs: find-conflicted-prs
+    if: needs.find-conflicted-prs.outputs.conflicted_prs != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    strategy:
+      matrix:
+        pr_number: ${{ fromJSON(needs.find-conflicted-prs.outputs.conflicted_prs) }}
+      fail-fast: false
+    concurrency:
+      group: agent-resolve-conflicts-pr-${{ matrix.pr_number }}
+      cancel-in-progress: false
 
     steps:
       # Checkout must precede the local agent-token action: the runner resolves
@@ -43,112 +134,24 @@ jobs:
       - name: Build agent image
         run: docker build -t agent-developer:ci ./docker
 
-      # When a PR number is provided via workflow_dispatch, use it directly.
-      # Otherwise enumerate open developer-agent PRs and filter to those that
-      # are CONFLICTING (mergeability is computed asynchronously by GitHub after
-      # a push; retry with backoff until it settles).
-      - name: Find conflicted agent-authored PRs
-        id: find
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MANUAL_PR_INPUT: ${{ inputs.pr_number }}
-          GITHUB_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          MANUAL_PR="$(echo "${MANUAL_PR_INPUT:-}" | tr -d '\r\n')"
-          if [ -n "${MANUAL_PR}" ]; then
-            [[ "${MANUAL_PR}" =~ ^[0-9]+$ ]] || { echo "::error::pr_number must be a positive integer; got '${MANUAL_PR}'" >&2; exit 1; }
-            echo "Manual dispatch: using PR #${MANUAL_PR}"
-            echo "prs=${MANUAL_PR}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Enumerate all open PRs authored by the developer agent.
-          PR_NUMBERS="$(gh pr list \
-            --repo "$GITHUB_REPO" \
-            --author 'mfrancza-developer-agent[bot]' \
-            --state open \
-            --json number \
-            --jq '.[].number')"
-
-          if [ -z "$PR_NUMBERS" ]; then
-            echo "No open developer-agent PRs found."
-            echo "prs=" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Open developer-agent PRs: $(echo "$PR_NUMBERS" | tr '\n' ' ')"
-
-          CONFLICTED_PRS=""
-          for PR_NUM in $PR_NUMBERS; do
-            # GitHub computes mergeability asynchronously after a push; poll
-            # with exponential backoff until the value is no longer UNKNOWN.
-            MERGEABLE="UNKNOWN"
-            for attempt in 1 2 3 4 5; do
-              MERGEABLE="$(gh pr view "$PR_NUM" \
-                --repo "$GITHUB_REPO" \
-                --json mergeable \
-                --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
-              if [ "$MERGEABLE" != "UNKNOWN" ]; then
-                break
-              fi
-              WAIT=$(( attempt * 15 ))
-              echo "PR #${PR_NUM} mergeability UNKNOWN (attempt ${attempt}/5); waiting ${WAIT}s..."
-              sleep "$WAIT"
-            done
-
-            if [ "$MERGEABLE" = "CONFLICTING" ]; then
-              echo "PR #${PR_NUM} is CONFLICTING — queued for resolution"
-              CONFLICTED_PRS="${CONFLICTED_PRS} ${PR_NUM}"
-            else
-              echo "PR #${PR_NUM} mergeability: ${MERGEABLE} — skipping"
-            fi
-          done
-
-          CONFLICTED_PRS="$(echo "$CONFLICTED_PRS" | sed 's/^ *//')"
-          echo "prs=${CONFLICTED_PRS}" >> "$GITHUB_OUTPUT"
-
-      - name: Resolve conflicts
-        if: steps.find.outputs.prs != ''
+      - name: Run agent
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_REPO: ${{ github.repository }}
           AGENT_ACTION: resolve-conflicts
+          GITHUB_PR_NUMBER: ${{ matrix.pr_number }}
           AGENT_MODEL: ${{ vars.DEFAULT_MODEL }}
           ESCALATION_ASSIGNEE: ${{ github.repository_owner }}
-          CONFLICTED_PRS: ${{ steps.find.outputs.prs }}
         run: |
-          set -euo pipefail
-          # Run one container per conflicted PR sequentially. A non-zero exit
-          # (escalated to human, hard error, or any other failure) is logged and
-          # accumulated; the loop continues so remaining PRs are still processed.
-          # Failures before the container's own escalation path (checkout, API,
-          # merge, commit, push errors) must not be silently swallowed — the step
-          # exits non-zero at the end if any container failed.
-          FAILED_PRS=""
-          for PR_NUM in ${CONFLICTED_PRS}; do
-            echo "Running resolve-conflicts for PR #${PR_NUM}"
-            if docker run --rm \
-              -e GH_TOKEN \
-              -e ANTHROPIC_API_KEY \
-              -e OPENAI_API_KEY \
-              -e GITHUB_REPO \
-              -e AGENT_ACTION \
-              -e AGENT_MODEL \
-              -e ESCALATION_ASSIGNEE \
-              -e GITHUB_PR_NUMBER="${PR_NUM}" \
-              agent-developer:ci; then
-              echo "PR #${PR_NUM}: resolve-conflicts completed successfully"
-            else
-              echo "::warning::resolve-conflicts container exited non-zero for PR #${PR_NUM} (escalated to human or unexpected error)"
-              FAILED_PRS="${FAILED_PRS} ${PR_NUM}"
-            fi
-          done
-          FAILED_PRS="$(echo "${FAILED_PRS}" | sed 's/^ *//')"
-          if [ -n "${FAILED_PRS}" ]; then
-            echo "::error::resolve-conflicts container failed for PR(s): ${FAILED_PRS}; see per-PR logs above"
-            exit 1
-          fi
+          docker run --rm \
+            -e GH_TOKEN \
+            -e ANTHROPIC_API_KEY \
+            -e OPENAI_API_KEY \
+            -e GITHUB_REPO \
+            -e AGENT_ACTION \
+            -e GITHUB_PR_NUMBER \
+            -e AGENT_MODEL \
+            -e ESCALATION_ASSIGNEE \
+            agent-developer:ci
