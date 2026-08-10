@@ -647,6 +647,40 @@ Please resolve the conflicts manually, commit the merge, push, and remove the \`
         exit 1
     fi
 
+    # Additional verification: every originally conflicted file must have a staged
+    # change relative to HEAD. An "ours"-only resolution re-stages the file as-is
+    # (clearing the unmerged index entry) without producing any diff, so the marker
+    # checks above all pass while the conflicting changes are silently discarded.
+    # Per the design spec (docs/design/resolve-conflicts.md), such a result requires
+    # escalation rather than a silent merge commit.
+    ZERO_DIFF_FILES=""
+    for CFILE in $CONFLICTED_FILES; do
+        if git diff --cached --quiet HEAD -- "$CFILE" 2>/dev/null; then
+            ZERO_DIFF_FILES="${ZERO_DIFF_FILES}${CFILE}"$'\n'
+        fi
+    done
+    ZERO_DIFF_FILES="$(printf '%s' "$ZERO_DIFF_FILES" | sed '/^$/d')"
+    if [ -n "$ZERO_DIFF_FILES" ]; then
+        log "Verification failed — the following conflicted files have no staged diff relative to HEAD (possible ours-only resolution); escalating"
+        log "Zero-diff files: $(echo "$ZERO_DIFF_FILES" | tr '\n' ' ')"
+        git merge --abort 2>/dev/null || true
+        log "Applying human-required label to PR #${GITHUB_PR_NUMBER}"
+        if [ -n "${ESCALATION_ASSIGNEE:-}" ]; then
+            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "$ESCALATION_ASSIGNEE"
+        else
+            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
+        fi
+        ZERODIFF_BODY="## Automated conflict resolution failed
+
+The conflict-resolution agent resolved the following files with no staged change relative to HEAD (possible wholesale 'ours' selection — conflicting changes may have been silently discarded):
+
+$(echo "$ZERO_DIFF_FILES" | sed 's/^/- /')
+
+Please review each file, resolve the conflicts intentionally, commit the merge, push, and remove the \`human-required\` label when done."
+        gh pr comment "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --body "$ZERODIFF_BODY"
+        exit 1
+    fi
+
     log "Verification passed — committing merge"
     RESOLVED_LIST="$(echo "$CONFLICTED_FILES" | tr '\n' ' ' | sed 's/ $//')"
     git commit -m "Merge origin/${BASE_REF} into ${BRANCH_NAME}: resolve conflicts in ${RESOLVED_LIST}

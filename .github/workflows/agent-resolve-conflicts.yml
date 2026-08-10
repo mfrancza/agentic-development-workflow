@@ -122,12 +122,16 @@ jobs:
           CONFLICTED_PRS: ${{ steps.find.outputs.prs }}
         run: |
           set -euo pipefail
-          # Run one container per conflicted PR sequentially; a non-zero exit
-          # (escalated to human) is logged but does not abort the loop so that
-          # remaining PRs are still processed.
+          # Run one container per conflicted PR sequentially. A non-zero exit
+          # (escalated to human, hard error, or any other failure) is logged and
+          # accumulated; the loop continues so remaining PRs are still processed.
+          # Failures before the container's own escalation path (checkout, API,
+          # merge, commit, push errors) must not be silently swallowed — the step
+          # exits non-zero at the end if any container failed.
+          FAILED_PRS=""
           for PR_NUM in ${CONFLICTED_PRS}; do
             echo "Running resolve-conflicts for PR #${PR_NUM}"
-            docker run --rm \
+            if docker run --rm \
               -e GH_TOKEN \
               -e ANTHROPIC_API_KEY \
               -e OPENAI_API_KEY \
@@ -136,6 +140,15 @@ jobs:
               -e AGENT_MODEL \
               -e ESCALATION_ASSIGNEE \
               -e GITHUB_PR_NUMBER="${PR_NUM}" \
-              agent-developer:ci \
-              || echo "resolve-conflicts container exited non-zero for PR #${PR_NUM} (escalated to human); continuing"
+              agent-developer:ci; then
+              echo "PR #${PR_NUM}: resolve-conflicts completed successfully"
+            else
+              echo "::warning::resolve-conflicts container exited non-zero for PR #${PR_NUM} (escalated to human or unexpected error)"
+              FAILED_PRS="${FAILED_PRS} ${PR_NUM}"
+            fi
           done
+          FAILED_PRS="$(echo "${FAILED_PRS}" | sed 's/^ *//')"
+          if [ -n "${FAILED_PRS}" ]; then
+            echo "::error::resolve-conflicts container failed for PR(s): ${FAILED_PRS}; see per-PR logs above"
+            exit 1
+          fi
