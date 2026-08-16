@@ -16,6 +16,7 @@ permissions:
 jobs:
   find-conflicted-prs:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     outputs:
       conflicted_prs: ${{ steps.find.outputs.conflicted_prs }}
 
