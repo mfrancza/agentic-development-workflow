@@ -33,7 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           # Extract the issue number from a "Closes #N" reference in the PR body.
-          # Pass the body through an env var (not a ${{ }} interpolation) to avoid
+          # Pass the body through an env var (not a template expression) to avoid
           # shell-injection from attacker-controlled PR body content.
           # grep returns 1 when there is no match; the `|| true` lets set -e ignore that.
           ISSUE_NUM="$(printf '%s' "$PR_BODY" | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
