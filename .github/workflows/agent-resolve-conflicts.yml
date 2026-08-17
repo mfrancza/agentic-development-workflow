@@ -16,7 +16,7 @@ permissions:
 jobs:
   find-conflicted-prs:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     outputs:
       conflicted_prs: ${{ steps.find.outputs.conflicted_prs }}
 
@@ -38,7 +38,7 @@ jobs:
 
           MANUAL_PR="$(echo "${MANUAL_PR_INPUT:-}" | tr -d '\r\n')"
           if [ -n "${MANUAL_PR}" ]; then
-            [[ "${MANUAL_PR}" =~ ^[0-9]+$ ]] || { echo "::error::pr_number must be a positive integer; got '${MANUAL_PR}'" >&2; exit 1; }
+            [[ "${MANUAL_PR}" =~ ^[1-9][0-9]*$ ]] || { echo "::error::pr_number must be a positive integer with no leading zeros; got '${MANUAL_PR}'" >&2; exit 1; }
             echo "Manual dispatch: polling PR #${MANUAL_PR} for mergeability"
             DELAYS=(5 10 20 40 80)
             MERGEABLE="UNKNOWN"
@@ -60,10 +60,13 @@ jobs:
           fi
 
           # Enumerate all open PRs authored by the developer agent.
+          # --limit 100 ensures we poll at most 100 PRs: worst-case 100×155 s
+          # ≈ 4.3 h is bounded by the 30-minute job timeout well before that.
           PR_NUMBERS="$(gh pr list \
             --repo "$GITHUB_REPO" \
             --author 'app/mfrancza-developer-agent' \
             --state open \
+            --limit 100 \
             --json number \
             --jq '.[].number')"
 
@@ -96,7 +99,7 @@ jobs:
 
             if [ "$MERGEABLE" = "CONFLICTING" ]; then
               echo "PR #${PR_NUM} is CONFLICTING — queued for resolution"
-              CONFLICTED_PRS="$(echo "$CONFLICTED_PRS" | jq ". + [$PR_NUM]")"
+              CONFLICTED_PRS="$(echo "$CONFLICTED_PRS" | jq -c ". + [$PR_NUM]")"
             else
               echo "PR #${PR_NUM} mergeability: ${MERGEABLE} — skipping"
             fi
@@ -146,6 +149,7 @@ jobs:
           AGENT_MODEL: ${{ vars.DEFAULT_MODEL }}
           ESCALATION_ASSIGNEE: ${{ github.repository_owner }}
         run: |
+          set -euo pipefail
           docker run --rm \
             -e GH_TOKEN \
             -e ANTHROPIC_API_KEY \
