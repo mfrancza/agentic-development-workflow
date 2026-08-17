@@ -198,7 +198,7 @@ change needed.
 that does not produce a new `labeled` event. So auto-applying `agent:groom`
 to an issue that already carries it is a no-op with no cascade.
 
-Two loops considered and ruled out:
+Two loops considered and ruled out, plus one new non-loop confirmed safe after codebase changes:
 
 - **Auto-groom → grooming applies `plan` → auto-design → design creates
   sub-issues → un-draft → auto-developer → developer opens PR → auto-review**
@@ -208,11 +208,9 @@ Two loops considered and ruled out:
   `pull_request.synchronize`**: only `opened` is subscribed. `synchronize`
   re-runs the *reviewer* workflow (which the reviewer image already handles
   in-place), not the auto-trigger workflow.
+- **Automatic label removals causing spurious `issues.unlabeled` events**: since this design was first written, several automatic label-cleanup behaviors have been added to the codebase — `agent:groom` is removed from an issue after a successful grooming run (by `agent-groom.yml`), `agent:design` is removed from the parent issue when the design PR merges (by `agent-design.yml`'s undraft job), and `agent:developer` is removed from the linked issue when the developer-agent's PR is closed — merged or abandoned — (by `agent-pr-merged.yml`). Each removal fires an `issues.unlabeled` event, which causes `agent-auto-trigger.yml` to evaluate its five jobs. No unintended auto-trigger fires: each job gates on a specific label name, and transition #4 (the only `issues.unlabeled` job) gates on `draft` being removed — none of the cleanup events remove `draft`. The no-re-entry guarantee holds.
 
-The one edge case is a user manually removing the `agent:developer` label
-after auto-triggering: re-adding `do` (which they would have to remove
-first) would re-fire transition #3. That is a human overriding auto-trigger,
-which is the expected way to opt out per-issue.
+The edge case to note: `agent:developer` is now automatically removed by `agent-pr-merged.yml` when the developer agent's PR closes (merged or abandoned). This generates an `issues.unlabeled` event for `agent:developer`, which — as analyzed above — does not trigger transition #3 or #4. A human who wants to re-run implementation on that issue must re-apply `do`, which causes transition #3 to fire — that is the expected retry path.
 
 **Alternative considered.** A ledger of "we auto-applied X on Y" to prevent
 re-application after a human removes a label. Rejected — solves a
@@ -242,11 +240,8 @@ pushes a rescue commit and opens the PR" case.
 
 ## Out of scope
 
-- **Auto-triggering for `fix-checks`, `respond-review`, `fix-deployment`.**
-  These have no `agent:*` label; they run on `workflow_run`,
-  `pull_request_review`, and `deployment_status`. They are already
-  effectively "auto-triggered" by their event and are outside the
-  per-`agent:*`-label configuration this issue defines.
+- **Auto-triggering for `fix-checks`, `respond-review`, `fix-deployment`, and `resolve-conflicts`.**
+  These have no `agent:*` label; `fix-checks` runs on `workflow_run`, `respond-review` on `pull_request_review`, `fix-deployment` on `deployment_status`, and `resolve-conflicts` on `push` to `main`. They are already effectively "auto-triggered" by their event and are outside the per-`agent:*`-label configuration this issue defines.
 - **Per-issue overrides beyond the operator's Terraform toggle.** The
   operator either turns on `auto_trigger_agents.groom` for the whole repo
   or leaves it off. A future issue can add a "no-auto" label if that
