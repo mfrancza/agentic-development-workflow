@@ -51,8 +51,10 @@ jobs:
               if [ "$MERGEABLE" != "UNKNOWN" ]; then
                 break
               fi
-              echo "PR #${MANUAL_PR} mergeability UNKNOWN (attempt ${attempt}/5); waiting ${DELAYS[$i]}s..."
-              sleep "${DELAYS[$i]}"
+              if (( attempt < 5 )); then
+                echo "PR #${MANUAL_PR} mergeability UNKNOWN (attempt ${attempt}/5); waiting ${DELAYS[$i]}s..."
+                sleep "${DELAYS[$i]}"
+              fi
             done
             echo "PR #${MANUAL_PR} mergeability: ${MERGEABLE} (manual dispatch — including regardless)"
             echo "conflicted_prs=[${MANUAL_PR}]" >> "$GITHUB_OUTPUT"
@@ -93,8 +95,10 @@ jobs:
               if [ "$MERGEABLE" != "UNKNOWN" ]; then
                 break
               fi
-              echo "PR #${PR_NUM} mergeability UNKNOWN (attempt ${attempt}/5); waiting ${DELAYS[$i]}s..."
-              sleep "${DELAYS[$i]}"
+              if (( attempt < 5 )); then
+                echo "PR #${PR_NUM} mergeability UNKNOWN (attempt ${attempt}/5); waiting ${DELAYS[$i]}s..."
+                sleep "${DELAYS[$i]}"
+              fi
             done
 
             if [ "$MERGEABLE" = "CONFLICTING" ]; then
