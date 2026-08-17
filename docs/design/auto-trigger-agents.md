@@ -263,7 +263,7 @@ pushes a rescue commit and opens the PR" case.
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#154](https://github.com/mfrancza/agentic-development-workflow/issues/154) | Terraform: add `auto_trigger_agents` object variable, `AUTO_TRIGGER_AGENTS` Actions variable (`jsonencode`), tfvars example entry, and AGENTS.md/README.md updates | — |
+| [#154](https://github.com/mfrancza/agentic-development-workflow/issues/154) | Terraform: add `auto_trigger_agents` object variable, `AUTO_TRIGGER_AGENTS` Actions variable (`jsonencode`), tfvars example entry, and AGENTS.md/README.md updates; extend the `AGENTS.md` repo-specific security-defaults allowlist-gating bullet to also cover `issues.unlabeled` (same rationale as `issues.labeled`: no per-label permission model, sender check is the only defence against triage collaborators bypassing the allowlist via label removal) | — |
 | [#155](https://github.com/mfrancza/agentic-development-workflow/issues/155) | `.github/workflows/agent-auto-trigger.yml`: five jobs (auto-groom, auto-design, auto-developer-do, auto-developer-undraft, auto-review), each gated on the corresponding `fromJSON(vars.AUTO_TRIGGER_AGENTS).<key>` and minting a developer-agent token | Issue #154 |
 | [#156](https://github.com/mfrancza/agentic-development-workflow/issues/156) | End-to-end validation: with each of the four gates flipped on in turn, open a fresh test issue and confirm the full chain (groom → design → developer → review) advances without human labeling; verify each gate turned off leaves current manual behavior intact | Issues #154 and #155 |
 
