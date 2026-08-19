@@ -4,7 +4,7 @@
 
 ## Summary
 
-The seven agent workflows carry roughly a thousand lines of YAML, much of it
+The nine agent workflows carry roughly 1,400 lines of YAML, much of it
 inline shell:
 jq pipelines, GraphQL pagination, and multi-branch error-handling policy
 embedded in `run:` blocks, with several scripts duplicated near-verbatim
@@ -40,14 +40,18 @@ From issue #33 and its
 
 | Script | Where | Size / notes |
 |--------|-------|--------------|
-| Resolve `model:*` label → Claude model | 5 copies: agent-design, agent-groom, agent-implement, agent-review (PR variant), agent-fix-deployment | ~30 lines each, near-identical; biggest duplication |
+| Resolve `model:*` label → model (default `vars.DEFAULT_MODEL`; provider inference happens in the container entrypoints) | 5 copies: agent-design, agent-groom, agent-implement, agent-review (PR variant), agent-fix-deployment | ~30 lines each, near-identical; biggest duplication |
 | Preflight: skip if PR already exists | 2 copies: agent-design, agent-implement | Contains the subtle `gh pr list --head` fork-owner workaround |
 | Preflight: skip if issue labeled `draft` | agent-implement | Small |
 | Check for reviewer feedback (skip logic) | agent-respond-review | ~85 lines; GraphQL pagination, fail-open policy; most complex |
 | Un-draft sub-issues on design-PR merge | agent-design (`undraft-sub-issues` job) | ~70 lines; careful error-handling; **security exception, stays shell** (Decision 8) |
 | Resolve deployment → workflow run + issue | agent-fix-deployment | ~30 lines |
 | Filter to agent-authored PRs | agent-fix-checks | Small |
-| `docker build` / `docker run` env plumbing | all 7 workflows | Repeated but individually trivial; addressed with a composite action, no TS needed |
+| Resolve addressed review threads | agent-review (`Resolve addressed review threads` step, added by PR #204) | ~85 lines; GraphQL thread pagination, untrusted-ID validation (format check + intersection against open threads), mutation loop |
+| Find conflicted developer-agent PRs | agent-resolve-conflicts (`find-conflicted-prs` job, issue #64) | ~80 lines; dispatch-input validation, PR enumeration, mergeability polling with exponential backoff, JSON matrix output |
+| Extract `Closes #N` + remove `agent:developer` label | agent-pr-merged | ~70 lines; careful error-handling; **security exception, stays shell** (Decision 8) |
+| Remove `agent:groom` label on success | agent-groom | Single command; stays shell (below threshold) |
+| `docker build` / `docker run` env plumbing | 8 of the 9 agent workflows (all but agent-pr-merged, which runs no container) | Repeated but individually trivial; addressed with a composite action, no TS needed. The agent-review variant also mounts an output directory (`RESOLVE_THREADS_FILE` hand-off), which the composite must parameterize |
 
 ## Decisions
 
@@ -220,13 +224,22 @@ in them.
    would recreate exactly that path. It remains inline shell with its
    existing comment block, and this design documents it as a permanent
    exception to the migration threshold.
-2. **`agent-review` keeps its base-SHA pinned checkout.** It runs on
+2. **`agent-pr-merged.yml` stays inline shell for the same reason.** It also
+   runs on `pull_request: closed` and deliberately performs **no checkout at
+   all** (it calls `actions/create-github-app-token` at a pinned SHA instead
+   of the local `agent-token` composite action), so there is no workspace
+   code-execution path a merged PR can influence while
+   `DEVELOPER_APP_PRIVATE_KEY` is in scope. Migrating its issue-lookup and
+   label-removal logic into `.github/scripts/` would require introducing a
+   checkout and reopen that path. Same permanent exception as
+   `undraft-sub-issues`.
+3. **`agent-review` keeps its base-SHA pinned checkout.** It runs on
    `pull_request_target`; activities execute from the
    `github.event.pull_request.base.sha` checkout, so PR-authored script
    changes never run with reviewer credentials. No change needed — the
    existing checkout step already guarantees this — but the constraint is
    recorded here so future edits don't loosen it.
-3. **Local actions still require checkout first.** The existing convention
+4. **Local actions still require checkout first.** The existing convention
    (checkout with `persist-credentials: false` before any
    `./.github/actions/*` reference) is unchanged and now also applies to the
    activity actions.
@@ -258,7 +271,13 @@ actual trigger and compares behavior against the pre-migration baseline
    highest unit-test value.
 5. **Event-resolution activities** (`resolve-deployment`, fix-checks author
    filter) — small singles, migrated for consistency and testability.
-6. **`run-agent` composite action** — YAML-only consolidation of the
+6. **Post-design additions** (`resolve-review-threads`,
+   `find-conflicted-prs`) — single-copy scripts added to the workflows after
+   this design's original inventory (PR #204 and issue #64 respectively);
+   both exceed the threshold (pagination/polling, branching, error policy).
+   Migrated after the original inventory since they have no duplication
+   pressure, only testability value.
+7. **`run-agent` composite action** — YAML-only consolidation of the
    build/run steps; independent of the TypeScript work.
 
 ## Out of scope
@@ -283,12 +302,14 @@ actual trigger and compares behavior against the pre-migration baseline
 | [#135](https://github.com/mfrancza/agentic-development-workflow/issues/135) | Preflight activities: `find-existing-pr` (fork-owner filtering) and `check-draft-label` + composite actions; migrate agent-design and agent-implement call sites | Issue #133 |
 | [#136](https://github.com/mfrancza/agentic-development-workflow/issues/136) | `check-reviewer-feedback` activity + composite action with full unit-test coverage of the skip matrix and fail-open paths; migrate agent-respond-review | Issue #133 |
 | [#137](https://github.com/mfrancza/agentic-development-workflow/issues/137) | Event-resolution activities: `resolve-deployment` (run + issue lookup) and `filter-agent-pr` (author trust gate) + composite actions; migrate agent-fix-deployment and agent-fix-checks | Issue #133 |
-| [#138](https://github.com/mfrancza/agentic-development-workflow/issues/138) | `run-agent` composite action (YAML/shell only): parameterize the docker build + docker run steps; migrate all seven workflows | — |
-| [#139](https://github.com/mfrancza/agentic-development-workflow/issues/139) | End-to-end validation through the real workflow path: exercise each migrated workflow via its actual trigger (label application, review submission, synthetic check failure/deployment failure where feasible) and verify behavior matches the pre-migration baseline | Issues #134, #135, #136, #137, #138 |
+| [#138](https://github.com/mfrancza/agentic-development-workflow/issues/138) | `run-agent` composite action (YAML/shell only): parameterize the docker build + docker run steps (including the agent-review output-directory mount); migrate the eight container-running workflows | — |
+| [#245](https://github.com/mfrancza/agentic-development-workflow/issues/245) | Post-design activities: `resolve-review-threads` (agent-review) and `find-conflicted-prs` (agent-resolve-conflicts) + composite actions with unit tests; migrate both call sites | Issue #133 |
+| [#139](https://github.com/mfrancza/agentic-development-workflow/issues/139) | End-to-end validation through the real workflow path: exercise each migrated workflow via its actual trigger (label application, review submission, synthetic check failure/deployment failure where feasible) and verify behavior matches the pre-migration baseline | Issues #134, #135, #136, #137, #138, #245 |
 
-Tasks #134–#137 are independent of each other once the scaffold (Issue #133)
-lands and can proceed in parallel. Task #138 is pure YAML and independent of
-the TypeScript scaffold. The validation task depends on all migration tasks.
+Tasks #134–#137 and #245 are independent of each other once the scaffold
+(Issue #133) lands and can proceed in parallel. Task #138 is pure YAML and
+independent of the TypeScript scaffold. The validation task depends on all
+migration tasks.
 
 Dependencies are recorded natively as GitHub blocked-by relationships on the
 issues.
