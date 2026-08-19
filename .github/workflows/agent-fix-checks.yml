@@ -12,7 +12,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read  # for `gh pr view` in the trust-gate step
+  pull-requests: read  # for pulls.get in the filter-agent-pr activity
 
 concurrency:
   # Fall back to workflow_run.id when the run isn't tied to a PR — otherwise
@@ -41,18 +41,12 @@ jobs:
       # agent's own PRs, never on PRs from other authors.
       - name: Filter to agent-authored PRs
         id: filter
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          PR_NUM='${{ github.event.workflow_run.pull_requests[0].number }}'
-          AUTHOR="$(gh pr view "$PR_NUM" --repo '${{ github.repository }}' --json author --jq '.author.login')"
-          if [ "$AUTHOR" = "app/mfrancza-developer-agent" ]; then
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            echo "pr_number=$PR_NUM" >> "$GITHUB_OUTPUT"
-          else
-            echo "PR #$PR_NUM author '$AUTHOR' is not the developer agent; skipping"
-          fi
+        uses: ./.github/actions/filter-agent-pr
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
+          agent-login: mfrancza-developer-agent[bot]
 
       # Mint only after the trust gate — no installation token for runs we skip.
       - name: Mint installation token for developer-agent
@@ -75,7 +69,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_REPO: ${{ github.repository }}
           AGENT_ACTION: fix-checks
-          GITHUB_PR_NUMBER: ${{ steps.filter.outputs.pr_number }}
+          GITHUB_PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
           AGENT_MODEL: ${{ vars.DEFAULT_MODEL }}
         run: |
           docker run --rm \
