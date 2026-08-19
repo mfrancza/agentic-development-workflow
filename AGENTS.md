@@ -32,7 +32,14 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 ├── terraform/                        # Repo settings, branch-protection ruleset, Actions vars
 └── .github/
     ├── copilot-instructions.md       # Detailed onboarding for AI coding tools
-    └── workflows/                    # One workflow per AGENT_ACTION
+    ├── actions/                      # Local composite actions (referenced by path, no SHA needed)
+    │   └── agent-token/              # Mints a short-lived App installation token
+    ├── scripts/                      # Shared TypeScript package for workflow activities
+    │   ├── package.json              # deps: @actions/core, @actions/github; dev: typescript, tsx, vitest
+    │   ├── tsconfig.json             # strict: true
+    │   ├── src/                      # One entry file per activity; lib/ for shared helpers
+    │   └── test/                     # Vitest unit tests (one file per activity)
+    └── workflows/                    # One workflow per AGENT_ACTION, plus ci.yml
 ```
 
 ## MVP Workflow
@@ -40,7 +47,7 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 1. User opens a GitHub issue. Applying the `agent:groom` label runs the grooming agent (`AGENT_ACTION=groom`), which adds classification labels and clarifying notes based on [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json). The `agent:groom` label is automatically removed on success so the run is not repeated; re-apply it to re-groom. On failure the label is left in place so the issue can be re-triggered without manual re-labeling.
 2. For issues labeled `plan` by the grooming agent, applying the `agent:design` label runs the designer agent (`AGENT_ACTION=design`), which creates the `design/issue-{N}` branch, writes a design document in `docs/design/`, creates draft sub-issues with dependencies, and opens a PR. Sub-issues are labeled `draft` until the design PR merges. When the `design/issue-{N}` PR merges, `agent-design.yml` automatically removes the `draft` label from all sub-issues of the parent issue and removes the `agent:design` label from the parent issue.
 3. Applying the `agent:developer` label triggers the developer agent (`AGENT_ACTION=implement`), which creates the `agent/issue-{N}` branch, writes a solution, and opens a PR. The workflow skips with a log line if the issue is labeled `draft` (see the `draft` label description in **Labels**). When the developer-agent's PR is closed (merged or abandoned), `agent-pr-merged.yml` automatically removes the `agent:developer` label from the issue.
-4. On CI failures against an agent-authored PR, the `agent-fix-checks` workflow re-invokes the container with `AGENT_ACTION=fix-checks`. **Note:** `agent-fix-checks.yml` is currently wired to `on.workflow_run.workflows: ["CI"]`; it will not fire until a workflow named `CI` exists in the repo (the entry is a placeholder — update the workflow list or add a `CI` workflow when CI lands).
+4. On CI failures against an agent-authored PR, the `agent-fix-checks` workflow re-invokes the container with `AGENT_ACTION=fix-checks`. The `agent-fix-checks.yml` workflow triggers on `workflow_run` for the `CI` workflow (`.github/workflows/ci.yml`), which runs `tsc --noEmit` and `vitest run` on every pull request.
 5. On a submitted PR review, the `agent-respond-review` workflow runs `AGENT_ACTION=respond-review`, which
    addresses feedback and pushes updates. The workflow skips cleanly when there is nothing to respond to.
    For approved reviews, two conditions are checked in order:
@@ -122,6 +129,45 @@ When running the container locally, pass your own `GH_TOKEN` (see [README.md](RE
 - Logging uses the `log()` helper in `entrypoint.sh` (`echo "[agent] $(date -Iseconds) $*"`).
 - Git identity inside the container is `claude-dev-agent[bot]`.
 - Required env vars are validated with `${VAR:?message}` at the top of each function.
+
+## Workflow Activity Conventions
+
+Complex workflow logic is extracted from inline `run:` blocks into **TypeScript activities** — source files under `.github/scripts/src/`. Each activity is exposed as a thin composite action under `.github/actions/<activity>/action.yml` and run from source via `npx --no-install tsx`. All activity sources, dependencies, and unit tests live in a single shared npm package at `.github/scripts/`.
+
+### Package layout
+
+```
+.github/scripts/
+  package.json            # deps: @actions/core, @actions/github; dev: typescript, tsx, vitest
+  package-lock.json       # lockfile — all installs must be deterministic
+  tsconfig.json           # strict: true
+  vitest.config.ts        # test include pattern and passWithNoTests
+  src/<activity>.ts       # one entry file per activity (thin: read inputs → call logic → set outputs)
+  src/lib/*.ts            # shared helpers (Octokit setup, label parsing, pagination, …)
+  test/<activity>.test.ts # vitest unit tests; Octokit mocked at module boundary
+.github/actions/<activity>/
+  action.yml              # composite wrapper: setup-node → npm ci → npx --no-install tsx src/<activity>.ts
+```
+
+### Writing an activity
+
+- Entry files (`src/<activity>.ts`) stay thin: read inputs with `core.getInput()`, call a pure function defined in the same file or in `src/lib/`, then publish results with `core.setOutput()`. Keep all branching logic in the pure function so it is unit-testable without IO.
+- Use `@actions/github`'s Octokit client for all GitHub API calls — **not** `gh`. This is a scoped exception to the repo-wide `gh` convention (see [`.github/copilot-instructions.md`](.github/copilot-instructions.md) Key Technologies). It applies only to workflow-executed activities in `.github/scripts/`; container scripts and shell steps that remain in workflow YAML continue using `gh`.
+- Read action inputs as environment variables via `core.getInput()`; publish results with `core.setOutput()`. Skip/proceed decisions use string outputs (`skip=true|false`, `proceed=true|false`) to keep `if:` conditions in consuming workflows unchanged in form.
+- The output-injection security rule still applies inside activities: values flow action-input → `process.env` → `core.setOutput()` with no shell interpolation. `@actions/core` writes `GITHUB_OUTPUT` with delimiter-safe encoding, so manual CR/LF stripping is unnecessary within activities. Shell steps that still write user-controlled values to `GITHUB_OUTPUT` keep the `tr -d '\r\n'` stripping (see **Repo-specific security defaults**).
+
+### Shell-vs-TypeScript threshold
+
+A `run:` block moves to a TypeScript activity when it contains **any** of: API-response parsing (`--jq`), conditional branching, pagination, or an error-handling policy (fail-open/fail-closed distinctions). A `run:` block stays shell when it is a single command or a linear sequence of commands with no parsing or branching (e.g. `docker build`, `docker run`). Repetition alone does not force TypeScript — repeated but individually trivial steps become a composite action in plain YAML + shell.
+
+**Permanent security exceptions** — the following `run:` blocks deliberately perform no workspace code execution and must **never** be migrated to `.github/scripts/`:
+
+- `undraft-sub-issues` job in `agent-design.yml` — runs on `pull_request.closed`; executing workspace code here would allow a merged PR to route script changes past `DEVELOPER_APP_PRIVATE_KEY`.
+- All steps in `agent-pr-merged.yml` — also runs on `pull_request: closed` and performs no checkout at all; migrating its logic would require introducing a checkout and reopening the same path.
+
+### CI
+
+The [`.github/workflows/ci.yml`](.github/workflows/ci.yml) workflow (name: `CI`) runs on every pull request and executes `npm ci`, `tsc --noEmit`, and `vitest run` inside `.github/scripts`. This workflow being named `CI` is what activates the `agent-fix-checks` feedback loop — `agent-fix-checks.yml` triggers on `workflow_run` for a workflow named `CI`.
 
 ## Code Review Standards
 
