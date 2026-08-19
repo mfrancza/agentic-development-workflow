@@ -141,82 +141,9 @@ jobs:
         # agent-generated output derived from PR content, so they are treated
         # as untrusted: each ID is format-checked and intersected against the
         # PR's actual open threads before the mutation is issued.
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          RESOLVE_FILE="$RUNNER_TEMP/reviewer-output/resolve-threads.txt"
-          if [ ! -s "$RESOLVE_FILE" ]; then
-            echo "No review threads recorded for resolution."
-            exit 0
-          fi
-          OWNER="${REPO%%/*}"
-          NAME="${REPO#*/}"
-          # Paginate through all review threads (100 per page) so PRs with
-          # >100 threads are fully covered — recorded IDs past the first page
-          # would otherwise be skipped by the intersection check below and
-          # never resolved. Same cursor pattern as the thread fetch in
-          # docker/reviewer/entrypoint.sh: CURSOR starts as the JSON literal
-          # `null` so `after: null` on the first page is equivalent to
-          # omitting the argument.
-          OPEN_IDS=""
-          CURSOR=null
-          while true; do
-            PAGE_JSON="$(gh api graphql \
-              -F owner="$OWNER" -F name="$NAME" -F number="$PR_NUMBER" \
-              -F cursor="$CURSOR" \
-              -f query='
-                query($owner: String!, $name: String!, $number: Int!, $cursor: String) {
-                  repository(owner: $owner, name: $name) {
-                    pullRequest(number: $number) {
-                      reviewThreads(first: 100, after: $cursor) {
-                        pageInfo { endCursor hasNextPage }
-                        nodes { id isResolved }
-                      }
-                    }
-                  }
-                }')"
-            PAGE_IDS="$(printf '%s' "$PAGE_JSON" | \
-              jq -r '.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false) | .id')"
-            OPEN_IDS="${OPEN_IDS}${OPEN_IDS:+$'\n'}${PAGE_IDS}"
-            HAS_NEXT="$(printf '%s' "$PAGE_JSON" | \
-              jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.hasNextPage')"
-            [ "$HAS_NEXT" = "true" ] || break
-            CURSOR="$(printf '%s' "$PAGE_JSON" | \
-              jq -r '.data.repository.pullRequest.reviewThreads.pageInfo.endCursor')"
-          done
-          FAILED=0
-          # sort -u dedupes recorded IDs: OPEN_IDS is snapshotted before the
-          # loop, so a duplicate line would otherwise pass the is-open check
-          # and issue a second mutation for an already-resolved thread.
-          # Process substitution (not a pipe) keeps FAILED in this shell.
-          while IFS= read -r THREAD_ID; do
-            [ -n "$THREAD_ID" ] || continue
-            if ! [[ "$THREAD_ID" =~ ^[A-Za-z0-9_=-]+$ ]]; then
-              echo "::warning::Skipping a recorded line that is not a well-formed thread ID."
-              continue
-            fi
-            if ! grep -qxF "$THREAD_ID" <<< "$OPEN_IDS"; then
-              echo "::warning::Recorded thread ID ${THREAD_ID} is not an open review thread on PR #${PR_NUMBER}; skipping."
-              continue
-            fi
-            if gh api graphql \
-              -F threadId="$THREAD_ID" \
-              -f query='
-                mutation($threadId: ID!) {
-                  resolveReviewThread(input: { threadId: $threadId }) {
-                    thread { id isResolved }
-                  }
-                }' > /dev/null; then
-              echo "Resolved review thread ${THREAD_ID}"
-            else
-              echo "::error::Failed to resolve review thread ${THREAD_ID}"
-              FAILED=1
-            fi
-          done < <(sort -u "$RESOLVE_FILE")
-          # Fail loudly if any resolve failed. The review is already posted at
-          # this point, but the affected threads simply stay open and the next
-          # re-review run records them again — self-healing.
-          exit "$FAILED"
+        uses: ./.github/actions/resolve-review-threads
+        with:
+          token: ${{ github.token }}
+          pr-number: ${{ github.event.pull_request.number }}
+          repo: ${{ github.repository }}
+          resolve-file: ${{ runner.temp }}/reviewer-output/resolve-threads.txt

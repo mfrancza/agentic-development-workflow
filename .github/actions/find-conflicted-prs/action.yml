@@ -1,0 +1,58 @@
+name: 'Find conflicted PRs'
+description: >
+  Enumerates open developer-agent PRs and identifies those with merge
+  conflicts. When a pr-number input is provided (workflow_dispatch manual
+  override), polls that single PR's mergeability and includes it regardless of
+  result. Otherwise, lists all open PRs authored by the developer-agent bot,
+  polls each one with exponential backoff until GitHub's async computation
+  settles, and filters to CONFLICTING PRs. Emits a JSON array suitable for
+  use as a matrix input.
+
+inputs:
+  token:
+    description: 'GitHub token with pull-requests: read'
+    required: true
+  repo:
+    description: 'Repository in owner/name format'
+    required: true
+  pr-number:
+    description: >
+      Optional PR number from workflow_dispatch. When set, bypasses
+      enumeration and polls this PR directly (manual backstop).
+    required: false
+    default: ''
+  author:
+    description: 'Author filter used to enumerate developer-agent PRs'
+    required: false
+    default: 'app/mfrancza-developer-agent'
+
+outputs:
+  conflicted_prs:
+    description: 'JSON array of conflicted PR numbers, e.g. [12, 34]'
+    value: ${{ steps.run.outputs.conflicted_prs }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ github.workspace }}/.github/scripts/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ github.workspace }}/.github/scripts
+      run: npm ci
+
+    - name: Find conflicted PRs
+      id: run
+      shell: bash
+      working-directory: ${{ github.workspace }}/.github/scripts
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_PR-NUMBER: ${{ inputs.pr-number }}
+        INPUT_AUTHOR: ${{ inputs.author }}
+      run: npx --no-install tsx src/find-conflicted-prs.ts
