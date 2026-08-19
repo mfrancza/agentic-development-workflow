@@ -97,38 +97,13 @@ jobs:
 
       - name: Resolve Claude model from PR labels
         id: model
-        env:
-          GH_TOKEN: ${{ steps.setup.outputs.token }}
-          # Pass event-derived and repo-variable values via env so they are
-          # parsed by the shell rather than interpolated into the run: script
-          # by the Actions expression engine. This satisfies the
-          # output-injection hardening rule in AGENTS.md: untrusted content
-          # must never be interpolated directly into run: via ${{ ... }}.
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO: ${{ github.repository }}
-          DEFAULT_MODEL: ${{ vars.DEFAULT_MODEL }}
-        run: |
-          set -euo pipefail
-          # Look for labels matching model:<name> (e.g. model:opus, model:haiku).
-          # Fail with a clear error if more than one model:* label is present to
-          # avoid ambiguous model selection.
-          MODEL_LABELS="$(gh pr view "$PR_NUMBER" \
-            --repo "$REPO" \
-            --json labels \
-            --jq '[.labels[].name | select(startswith("model:"))]')"
-          MODEL_COUNT="$(printf '%s' "$MODEL_LABELS" | jq 'length')"
-          if [ "$MODEL_COUNT" -gt 1 ]; then
-            echo "::error::Multiple model:* labels found on PR: $(printf '%s' "$MODEL_LABELS" | jq -r '.[]' | tr '\n' ' '). Remove all but one before re-applying the agent:review label."
-            exit 1
-          fi
-          MODEL="$(printf '%s' "$MODEL_LABELS" | jq -r 'first // empty' | sed 's/^model://')"
-          if [ -z "$MODEL" ]; then
-            MODEL="$DEFAULT_MODEL"
-          fi
-          # Strip CR/LF to prevent output injection before writing to GITHUB_OUTPUT.
-          MODEL="$(printf '%s' "$MODEL" | tr -d '\r\n')"
-          printf 'agent_model=%s\n' "$MODEL" >> "$GITHUB_OUTPUT"
-          echo "Resolved model: $MODEL"
+        uses: ./.github/actions/resolve-model
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          subject-type: pr
+          subject-number: ${{ github.event.pull_request.number }}
+          repo: ${{ github.repository }}
+          default-model: ${{ vars.DEFAULT_MODEL }}
 
       - name: Build reviewer image
         run: docker build -t agent-reviewer:ci ./docker/reviewer
@@ -140,7 +115,7 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           GITHUB_REPO: ${{ github.repository }}
           GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
-          AGENT_MODEL: ${{ steps.model.outputs.agent_model }}
+          AGENT_MODEL: ${{ steps.model.outputs.claude_model }}
         run: |
           # The container records the GraphQL IDs of addressed review threads
           # into this mounted directory; the resolve step below reads them.
