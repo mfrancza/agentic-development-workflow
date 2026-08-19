@@ -1,0 +1,55 @@
+name: 'Find existing PR'
+description: >
+  Look up an open PR by head branch with fork-owner filtering.
+  Sets skip=true when an existing open PR from the expected owner is found,
+  preventing the agent from opening a duplicate PR.
+
+inputs:
+  token:
+    description: 'GitHub token with pull-request read access'
+    required: true
+  repo:
+    description: 'Repository in "owner/name" format (e.g. github.repository)'
+    required: true
+  branch:
+    description: 'Head branch name to search for (e.g. "agent/issue-42")'
+    required: true
+  owner:
+    description: >
+      Expected repository owner login. PRs whose head repo owner does not
+      match this value are treated as fork PRs and ignored.
+    required: true
+
+outputs:
+  skip:
+    description: '"true" if an existing open PR was found, "false" otherwise'
+    value: ${{ steps.run.outputs.skip }}
+  pr-number:
+    description: 'Number of the existing PR if found, empty string otherwise'
+    value: ${{ steps.run.outputs.pr-number }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: .github/scripts/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: .github/scripts
+      run: npm ci
+
+    - name: Find existing PR
+      id: run
+      shell: bash
+      working-directory: .github/scripts
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_BRANCH: ${{ inputs.branch }}
+        INPUT_OWNER: ${{ inputs.owner }}
+      run: npx --no-install tsx src/find-existing-pr.ts
