@@ -1,3 +1,7 @@
+# Node.js
+.github/scripts/node_modules/
+.github/scripts/dist/
+
 # Terraform
 **/.terraform/
 *.tfstate

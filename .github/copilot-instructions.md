@@ -34,9 +34,17 @@ See `requirements.md` for the full project specification and `AGENTS.md` for exi
 │   └── terraform.tfvars.example      # Example variable values
 └── .github/
     ├── copilot-instructions.md       # This file
+    ├── actions/                      # Local composite actions (referenced by path, no SHA pin needed)
+    │   └── agent-token/              # Mints a short-lived App installation token
+    ├── scripts/                      # Shared TypeScript package for workflow activities
+    │   ├── package.json              # deps: @actions/core, @actions/github; dev: typescript, tsx, vitest
+    │   ├── tsconfig.json             # strict: true
+    │   ├── src/                      # One entry file per activity; src/lib/ for shared helpers
+    │   └── test/                     # Vitest unit tests (one file per activity)
     └── workflows/
+        ├── ci.yml                    # CI: tsc --noEmit + vitest run on every pull_request
         ├── agent-implement.yml       # Triggers the developer agent on issue labeling
-        ├── agent-fix-checks.yml      # Re-invokes the agent on workflow_run failures (fix-checks)
+        ├── agent-fix-checks.yml      # Re-invokes the agent on workflow_run failures for CI (fix-checks)
         ├── agent-respond-review.yml  # Re-invokes the agent on pull_request_review (respond-review)
         ├── agent-fix-deployment.yml  # Re-invokes the agent on deployment_status failures
         └── agent-groom.yml           # Runs the grooming agent when agent:groom label is applied
@@ -64,7 +72,8 @@ The project is still being built. Planned deliverables include:
 
 - **Shell scripting (Bash):** The entrypoint and helper scripts are POSIX-compatible Bash (`set -euo pipefail`). Follow this convention for any new scripts.
 - **Docker:** The agent container is based on `node:22-bookworm` and installs `git`, `curl`, `jq`, `gh` (GitHub CLI), and `@anthropic-ai/claude-code`.
-- **GitHub CLI (`gh`):** Used throughout for cloning, creating PRs, checking PR status, and posting comments. Always use `gh` for GitHub API operations.
+- **GitHub CLI (`gh`):** Used throughout for cloning, creating PRs, checking PR status, and posting comments. Always use `gh` for GitHub API operations — **with one scoped exception:** workflow-executed TypeScript activities in `.github/scripts/` call the GitHub API through `@actions/github`'s Octokit client instead of `gh`. This exception applies only to those activity sources; container scripts (`docker/scripts/`, `docker/reviewer/`) and shell steps that remain in workflow YAML continue using `gh`.
+- **TypeScript (workflow activities):** Complex workflow logic extracted from inline `run:` blocks lives in `.github/scripts/src/` as TypeScript source, run from source via `npx --no-install tsx`. The shared npm package at `.github/scripts/` holds all activity sources (`@actions/core`, `@actions/github` as runtime dependencies; `typescript`, `tsx`, `vitest` as dev dependencies). See `AGENTS.md` → **Workflow Activity Conventions** for the shell-vs-TypeScript threshold, activity layout, and security exceptions that must stay as shell.
 - **Terraform:** Infrastructure-as-code for GitHub resources — exists at `terraform/`.
 
 ## Key Design Constraints
@@ -134,10 +143,24 @@ Authentication uses a GitHub PAT exported as `GITHUB_TOKEN` (needs `repo` scope 
 
 ## Build and Test
 
-There are currently **no automated tests or linters** in this repository. The CI pipeline (`agent-implement.yml`) triggers the developer agent on issue labeling. If you add tests or linters:
-- Prefer standard tooling for the language/framework in use.
-- Document how to run them in this file.
-- Ensure the Docker image builds successfully: `docker build -t dev-agent docker/`
+The CI workflow (`.github/workflows/ci.yml`, named `CI`) runs on every pull request and performs:
+- **Type-checking:** `npm run typecheck` (`tsc --noEmit`) inside `.github/scripts/`
+- **Unit tests:** `npm test` (`vitest run`) inside `.github/scripts/`
+
+To run these locally:
+
+```sh
+cd .github/scripts
+npm ci
+npm run typecheck
+npm test
+```
+
+Ensure the Docker image builds successfully for any changes to `docker/`:
+
+```sh
+docker build -t dev-agent docker/
+```
 
 ## Errors and Workarounds
 
