@@ -1,0 +1,53 @@
+name: 'Filter to agent-authored PRs'
+description: >
+  PR-author trust gate: proceeds only when the PR was authored by the expected
+  agent bot. Used by agent-fix-checks to restrict reactions to CI failures on
+  the developer agent's own PRs.
+
+inputs:
+  token:
+    description: >
+      GitHub token with pull-requests:read on the repository.
+    required: true
+  repository:
+    description: 'Repository in owner/repo format (e.g. ${{ github.repository }}).'
+    required: true
+  pr-number:
+    description: 'Pull request number to inspect.'
+    required: true
+  agent-login:
+    description: >
+      Expected bot login in the GitHub REST API format
+      (e.g. "mfrancza-developer-agent[bot]").
+    required: true
+
+outputs:
+  proceed:
+    description: '"true" if the PR author matches agent-login; "false" to skip.'
+    value: ${{ steps.run.outputs.proceed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: .github/scripts/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: .github/scripts
+      run: npm ci
+
+    - name: Filter to agent-authored PR
+      id: run
+      shell: bash
+      working-directory: .github/scripts
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_PR-NUMBER: ${{ inputs.pr-number }}
+        INPUT_AGENT-LOGIN: ${{ inputs.agent-login }}
+      run: npx --no-install tsx src/filter-agent-pr.ts

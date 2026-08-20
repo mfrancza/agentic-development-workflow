@@ -1,0 +1,54 @@
+name: 'Resolve deployment to workflow run + issue'
+description: >
+  Resolves a failed deployment SHA to (a) the workflow run that produced the
+  deployment and (b) the originating issue number parsed from the merged PR's
+  "Closes #N" reference. Sets proceed=false and skips cleanly if any lookup
+  yields no result.
+
+inputs:
+  token:
+    description: >
+      GitHub token with actions:read and pull-requests:read on the repository.
+    required: true
+  repository:
+    description: 'Repository in owner/repo format (e.g. ${{ github.repository }}).'
+    required: true
+  sha:
+    description: 'The deployment commit SHA.'
+    required: true
+
+outputs:
+  proceed:
+    description: '"true" if all lookups succeeded; "false" to skip.'
+    value: ${{ steps.run.outputs.proceed }}
+  run_id:
+    description: 'ID of the failed workflow run.'
+    value: ${{ steps.run.outputs.run_id }}
+  issue_number:
+    description: 'Issue number parsed from the merged PR body.'
+    value: ${{ steps.run.outputs.issue_number }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: .github/scripts/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: .github/scripts
+      run: npm ci
+
+    - name: Resolve deployment
+      id: run
+      shell: bash
+      working-directory: .github/scripts
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_SHA: ${{ inputs.sha }}
+      run: npx --no-install tsx src/resolve-deployment.ts
