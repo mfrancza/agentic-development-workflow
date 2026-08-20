@@ -154,7 +154,7 @@ export async function findConflictedPrs(
 async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
   const repo = core.getInput("repo", { required: true });
-  const prNumberInput = core.getInput("pr-number");
+  const prNumberInput = core.getInput("pr_number");
   const author =
     core.getInput("author") || "app/mfrancza-developer-agent";
 
