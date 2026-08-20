@@ -48,8 +48,8 @@ export async function filterAgentPr(
 async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
   const repository = core.getInput("repository", { required: true });
-  const prNumberStr = core.getInput("pr-number", { required: true });
-  const agentLogin = core.getInput("agent-login", { required: true });
+  const prNumberStr = core.getInput("pr_number", { required: true });
+  const agentLogin = core.getInput("agent_login", { required: true });
 
   const separatorIndex = repository.indexOf("/");
   if (separatorIndex === -1) {

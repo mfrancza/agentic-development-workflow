@@ -44,8 +44,8 @@ runs:
       working-directory: .github/scripts
       env:
         INPUT_TOKEN: ${{ inputs.token }}
-        INPUT_SUBJECT-TYPE: ${{ inputs.subject-type }}
-        INPUT_SUBJECT-NUMBER: ${{ inputs.subject-number }}
+        INPUT_SUBJECT_TYPE: ${{ inputs.subject-type }}
+        INPUT_SUBJECT_NUMBER: ${{ inputs.subject-number }}
         INPUT_REPO: ${{ inputs.repo }}
-        INPUT_DEFAULT-MODEL: ${{ inputs.default-model }}
+        INPUT_DEFAULT_MODEL: ${{ inputs.default-model }}
       run: npx --no-install tsx src/resolve-model.ts

@@ -82,7 +82,7 @@ describe("check-draft-label", () => {
     mockInputs({
       token: "gh-token",
       repo: "myorg/myrepo",
-      "issue-number": "7",
+      "issue_number": "7",
     });
     vi.mocked(github.getOctokit).mockReturnValue(
       asOctokit(
@@ -100,7 +100,7 @@ describe("check-draft-label", () => {
     mockInputs({
       token: "gh-token",
       repo: "myorg/myrepo",
-      "issue-number": "8",
+      "issue_number": "8",
     });
     vi.mocked(github.getOctokit).mockReturnValue(
       asOctokit(makeMockOctokit([]))
@@ -115,7 +115,7 @@ describe("check-draft-label", () => {
     mockInputs({
       token: "gh-token",
       repo: "myorg/myrepo",
-      "issue-number": "9",
+      "issue_number": "9",
     });
     vi.mocked(github.getOctokit).mockReturnValue(
       asOctokit(
@@ -132,7 +132,7 @@ describe("check-draft-label", () => {
     mockInputs({
       token: "gh-token",
       repo: "myorg/myrepo",
-      "issue-number": "10",
+      "issue_number": "10",
     });
     // The GitHub REST API returns label objects, but the type union allows plain
     // strings.  Verify the guard handles both forms.
@@ -151,7 +151,7 @@ describe("check-draft-label", () => {
     mockInputs({
       token: "gh-token",
       repo: "myorg/myrepo",
-      "issue-number": "42",
+      "issue_number": "42",
     });
     const mock = makeMockOctokit([]);
     vi.mocked(github.getOctokit).mockReturnValue(asOctokit(mock));
@@ -169,7 +169,7 @@ describe("check-draft-label", () => {
     mockInputs({
       token: "gh-token",
       repo: "myorg/myrepo",
-      "issue-number": "not-a-number",
+      "issue_number": "not-a-number",
     });
     vi.mocked(github.getOctokit).mockReturnValue(
       asOctokit(makeMockOctokit([]))
@@ -182,7 +182,7 @@ describe("check-draft-label", () => {
     mockInputs({
       token: "gh-token",
       repo: "noslash",
-      "issue-number": "1",
+      "issue_number": "1",
     });
     vi.mocked(github.getOctokit).mockReturnValue(
       asOctokit(makeMockOctokit([]))

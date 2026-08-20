@@ -72,10 +72,10 @@ export async function resolveModel(
  */
 async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
-  const subjectTypeInput = core.getInput("subject-type", { required: true });
-  const subjectNumberStr = core.getInput("subject-number", { required: true });
+  const subjectTypeInput = core.getInput("subject_type", { required: true });
+  const subjectNumberStr = core.getInput("subject_number", { required: true });
   const repo = core.getInput("repo", { required: true });
-  const defaultModel = core.getInput("default-model", { required: true });
+  const defaultModel = core.getInput("default_model", { required: true });
 
   if (subjectTypeInput !== "issue" && subjectTypeInput !== "pr") {
     throw new Error(
