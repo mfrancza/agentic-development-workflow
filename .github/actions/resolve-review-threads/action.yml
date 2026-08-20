@@ -1,0 +1,50 @@
+name: 'Resolve addressed review threads'
+description: >
+  Resolves PR review threads whose IDs were recorded by the reviewer agent.
+  Paginates through all open review threads (100 per page), validates each
+  recorded ID (format check + intersection against actually-open threads), and
+  issues resolveReviewThread mutations. Accumulates failures rather than
+  failing fast so that as many threads as possible are resolved per run.
+  Requires a token with contents: write and pull-requests: write.
+
+inputs:
+  token:
+    description: 'GitHub token with contents: write and pull-requests: write'
+    required: true
+  pr-number:
+    description: 'Pull request number'
+    required: true
+  repo:
+    description: 'Repository in owner/name format'
+    required: true
+  resolve-file:
+    description: >
+      Path to the file containing one recorded thread ID per line, written by
+      the reviewer agent container. The step is a no-op if the file does not
+      exist or is empty.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ github.workspace }}/.github/scripts/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ github.workspace }}/.github/scripts
+      run: npm ci
+
+    - name: Resolve review threads
+      shell: bash
+      working-directory: ${{ github.workspace }}/.github/scripts
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_RESOLVE_FILE: ${{ inputs.resolve-file }}
+      run: npx --no-install tsx src/resolve-review-threads.ts
