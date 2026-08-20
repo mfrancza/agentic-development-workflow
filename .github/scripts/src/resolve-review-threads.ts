@@ -163,9 +163,9 @@ export async function resolveThreads(
 
 async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
-  const prNumberStr = core.getInput("pr-number", { required: true });
+  const prNumberStr = core.getInput("pr_number", { required: true });
   const repo = core.getInput("repo", { required: true });
-  const resolveFile = core.getInput("resolve-file", { required: true });
+  const resolveFile = core.getInput("resolve_file", { required: true });
 
   // Skip if no file or empty file — matches `[ ! -s "$RESOLVE_FILE" ]`.
   if (!fs.existsSync(resolveFile) || fs.statSync(resolveFile).size === 0) {

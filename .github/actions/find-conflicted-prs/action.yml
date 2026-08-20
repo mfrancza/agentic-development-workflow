@@ -53,6 +53,6 @@ runs:
       env:
         INPUT_TOKEN: ${{ inputs.token }}
         INPUT_REPO: ${{ inputs.repo }}
-        INPUT_PR-NUMBER: ${{ inputs.pr-number }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         INPUT_AUTHOR: ${{ inputs.author }}
       run: npx --no-install tsx src/find-conflicted-prs.ts
