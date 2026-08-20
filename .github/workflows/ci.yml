@@ -32,3 +32,27 @@ jobs:
 
       - name: Run tests
         run: npm test
+
+      # Execute every activity entrypoint the same way the composite actions
+      # do (tsx, no inputs supplied) and fail on module-resolution errors.
+      # tsc --noEmit and vitest both passed while the entrypoints crashed at
+      # runtime with ERR_PACKAGE_PATH_NOT_EXPORTED (missing "type": "module"
+      # against the ESM-only @actions/core v3) — neither tool loads the code
+      # through Node's module resolution the way tsx does. Without inputs the
+      # expected outcome is an input-validation error; anything that fails
+      # module loading fails this step.
+      - name: Smoke-run entrypoints via tsx
+        run: |
+          set -euo pipefail
+          STATUS=0
+          for f in src/*.ts; do
+            OUT="$(npx --no-install tsx "$f" 2>&1 || true)"
+            if printf '%s' "$OUT" | grep -qE 'ERR_PACKAGE_PATH_NOT_EXPORTED|ERR_MODULE_NOT_FOUND|ERR_REQUIRE_ESM|Cannot find module'; then
+              echo "::error::${f} failed module loading:"
+              printf '%s\n' "$OUT"
+              STATUS=1
+            else
+              echo "${f}: module loading OK"
+            fi
+          done
+          exit "$STATUS"
