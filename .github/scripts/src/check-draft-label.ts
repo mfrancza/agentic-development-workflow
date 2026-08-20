@@ -32,7 +32,7 @@ export function hasLabel(
 export async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
   const repo = core.getInput("repo", { required: true });
-  const issueNumberStr = core.getInput("issue-number", { required: true });
+  const issueNumberStr = core.getInput("issue_number", { required: true });
 
   const issueNumber = parseInt(issueNumberStr, 10);
   if (isNaN(issueNumber)) {

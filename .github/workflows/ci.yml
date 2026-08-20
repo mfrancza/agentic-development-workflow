@@ -33,6 +33,29 @@ jobs:
       - name: Run tests
         run: npm test
 
+      # The Actions runner silently drops env keys containing dashes on run:
+      # steps, and @actions/core getInput() only transforms spaces — so an
+      # env key like INPUT_SUBJECT-TYPE never reaches the script and the
+      # matching getInput("subject-type") fails as "not supplied" at runtime
+      # while typecheck and unit tests stay green (first hit live by
+      # resolve-model in agent-review). Enforce the underscore convention on
+      # both sides of the boundary: INPUT_* env keys in composite actions and
+      # getInput() names must never contain dashes.
+      - name: Lint activity input plumbing
+        working-directory: .
+        run: |
+          set -euo pipefail
+          STATUS=0
+          if grep -rnE 'INPUT_[A-Za-z0-9_]*-[A-Za-z0-9_-]*:' .github/actions/*/action.yml; then
+            echo "::error::Dashed INPUT_* env key(s) found above — the runner drops them; use underscores."
+            STATUS=1
+          fi
+          if grep -rnE 'getInput\("[^"]*-[^"]*"' .github/scripts/src; then
+            echo "::error::Dashed getInput() name(s) found above — use underscores to match INPUT_* env keys."
+            STATUS=1
+          fi
+          exit "$STATUS"
+
       # Execute every activity entrypoint the same way the composite actions
       # do (tsx, no inputs supplied) and fail on module-resolution errors.
       # tsc --noEmit and vitest both passed while the entrypoints crashed at
