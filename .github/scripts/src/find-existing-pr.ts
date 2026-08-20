@@ -16,6 +16,22 @@ import { getOctokit } from "./lib/octokit.js";
  *                  found, "false" otherwise
  *   pr-number    – Number of the matching PR, or empty string when not found
  */
+
+/**
+ * Finds the first PR in `prs` whose head repository is owned by `owner`.
+ * Returns the skip/prNumber decision as plain data so callers can act on it
+ * without needing to perform any IO.
+ */
+export function selectMatchingPR(
+  prs: Array<{ number: number; head: { repo?: { owner: { login: string } } | null } }>,
+  owner: string
+): { skip: boolean; prNumber: string } {
+  const match = prs.find((pr) => pr.head.repo?.owner.login === owner);
+  return match
+    ? { skip: true, prNumber: String(match.number) }
+    : { skip: false, prNumber: "" };
+}
+
 export async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
   const repo = core.getInput("repo", { required: true });
@@ -44,16 +60,14 @@ export async function run(): Promise<void> {
     state: "open",
   });
 
-  const matchingPR = prs.find(
-    (pr) => pr.head.repo?.owner.login === owner
-  );
+  const { skip, prNumber } = selectMatchingPR(prs, owner);
 
-  if (matchingPR) {
+  if (skip) {
     core.info(
-      `Found existing open PR #${matchingPR.number} for ${branch} (owner: ${owner}); skipping.`
+      `Found existing open PR #${prNumber} for ${branch} (owner: ${owner}); skipping.`
     );
     core.setOutput("skip", "true");
-    core.setOutput("pr-number", String(matchingPR.number));
+    core.setOutput("pr-number", prNumber);
   } else {
     core.setOutput("skip", "false");
     core.setOutput("pr-number", "");

@@ -18,7 +18,7 @@ vi.mock("@actions/github", () => ({
 
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import { run } from "../src/find-existing-pr.js";
+import { run, selectMatchingPR } from "../src/find-existing-pr.js";
 
 /** Build a minimal mock Octokit for the pull-list paginate path. */
 function makeMockOctokit(
@@ -51,6 +51,36 @@ function mockInputs(inputs: Record<string, string>) {
     (name: string) => inputs[name] ?? ""
   );
 }
+
+describe("selectMatchingPR", () => {
+  it("returns skip=true and the matching PR number when found", () => {
+    const prs = [{ number: 42, head: { repo: { owner: { login: "myorg" } } } }];
+    expect(selectMatchingPR(prs, "myorg")).toEqual({ skip: true, prNumber: "42" });
+  });
+
+  it("returns skip=false and empty string when the list is empty", () => {
+    expect(selectMatchingPR([], "myorg")).toEqual({ skip: false, prNumber: "" });
+  });
+
+  it("returns skip=false when no PR from the expected owner exists", () => {
+    const prs = [{ number: 7, head: { repo: { owner: { login: "fork-user" } } } }];
+    expect(selectMatchingPR(prs, "myorg")).toEqual({ skip: false, prNumber: "" });
+  });
+
+  it("returns the first matching PR when multiple candidates exist", () => {
+    const prs = [
+      { number: 1, head: { repo: { owner: { login: "fork-user" } } } },
+      { number: 2, head: { repo: { owner: { login: "myorg" } } } },
+      { number: 3, head: { repo: { owner: { login: "myorg" } } } },
+    ];
+    expect(selectMatchingPR(prs, "myorg")).toEqual({ skip: true, prNumber: "2" });
+  });
+
+  it("returns skip=false when head.repo is null (deleted fork)", () => {
+    const prs = [{ number: 5, head: { repo: null } }];
+    expect(selectMatchingPR(prs, "myorg")).toEqual({ skip: false, prNumber: "" });
+  });
+});
 
 describe("find-existing-pr", () => {
   beforeEach(() => {

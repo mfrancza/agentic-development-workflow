@@ -14,6 +14,21 @@ import { getOctokit } from "./lib/octokit.js";
  * Outputs:
  *   skip         – "true" if the issue has the "draft" label, "false" otherwise
  */
+
+/**
+ * Returns true if any entry in `labels` matches `target`.
+ * Handles both plain-string labels and object labels (as returned by the
+ * GitHub REST API, where `name` may be a string or null).
+ */
+export function hasLabel(
+  labels: Array<string | { name?: string | null }>,
+  target: string
+): boolean {
+  return labels.some(
+    (l) => (typeof l === "string" ? l : l.name) === target
+  );
+}
+
 export async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
   const repo = core.getInput("repo", { required: true });
@@ -43,10 +58,7 @@ export async function run(): Promise<void> {
     issue_number: issueNumber,
   });
 
-  const isDraft = issue.labels.some(
-    (label) =>
-      (typeof label === "string" ? label : label.name) === "draft"
-  );
+  const isDraft = hasLabel(issue.labels, "draft");
 
   if (isDraft) {
     core.info(

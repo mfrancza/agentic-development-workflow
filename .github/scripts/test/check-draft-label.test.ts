@@ -21,7 +21,7 @@ vi.mock("@actions/github", () => ({
 
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import { run } from "../src/check-draft-label.js";
+import { run, hasLabel } from "../src/check-draft-label.js";
 
 /** Label payload accepted by the mock issues.get endpoint. */
 type LabelPayload = string | { name: string };
@@ -50,6 +50,28 @@ function mockInputs(inputs: Record<string, string>) {
     (name: string) => inputs[name] ?? ""
   );
 }
+
+describe("hasLabel", () => {
+  it("returns true when a string label matches the target", () => {
+    expect(hasLabel(["draft", "agent:developer"], "draft")).toBe(true);
+  });
+
+  it("returns true when an object label's name matches the target", () => {
+    expect(hasLabel([{ name: "draft" }, { name: "agent:developer" }], "draft")).toBe(true);
+  });
+
+  it("returns false when no label matches the target", () => {
+    expect(hasLabel([{ name: "agent:developer" }, { name: "model:opus" }], "draft")).toBe(false);
+  });
+
+  it("returns false on an empty label list", () => {
+    expect(hasLabel([], "draft")).toBe(false);
+  });
+
+  it("returns false when an object label has a null name", () => {
+    expect(hasLabel([{ name: null }], "draft")).toBe(false);
+  });
+});
 
 describe("check-draft-label", () => {
   beforeEach(() => {
