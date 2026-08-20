@@ -47,24 +47,12 @@ jobs:
 
       - name: "Preflight: skip if design PR already exists"
         id: preflight
-        env:
-          GH_TOKEN: ${{ steps.setup.outputs.token }}
-        run: |
-          set -euo pipefail
-          BRANCH="design/issue-${{ github.event.issue.number }}"
-          OWNER="${{ github.repository_owner }}"
-          # gh pr list --head treats "owner:branch" as a literal branch name and
-          # never matches.  Query by branch name only and filter by owner via jq
-          # to exclude PRs from forks with the same branch name.
-          PR_NUMBER="$(gh pr list --repo "${{ github.repository }}" --head "$BRANCH" --state open \
-            --json number,headRepositoryOwner \
-            --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].number // empty")"
-          if [ -n "$PR_NUMBER" ]; then
-            echo "Found existing open design PR #$PR_NUMBER for $BRANCH (owner: $OWNER); skipping."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
-          fi
+        uses: ./.github/actions/find-existing-pr
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          branch: design/issue-${{ github.event.issue.number }}
+          owner: ${{ github.repository_owner }}
 
       - name: Resolve Claude model from issue labels
         if: steps.preflight.outputs.skip != 'true'
