@@ -73,7 +73,13 @@ describe("non-approval review states", () => {
     expect(result.proceed).toBe(true);
     expect(deps.countUnresolvedThreads).not.toHaveBeenCalled();
   });
+});
 
+// ---------------------------------------------------------------------------
+// 2. Approved review — primary thread count check (GraphQL succeeds)
+// ---------------------------------------------------------------------------
+
+describe("approved review — primary unresolved-thread check", () => {
   it("is case-insensitive when matching 'APPROVED'", async () => {
     // 'APPROVED' (upper) should be treated as approved and go to the thread check.
     const deps = makeDeps({
@@ -86,13 +92,7 @@ describe("non-approval review states", () => {
     expect(result.proceed).toBe(false);
     expect(deps.countUnresolvedThreads).toHaveBeenCalledOnce();
   });
-});
 
-// ---------------------------------------------------------------------------
-// 2. Approved review — primary thread count check (GraphQL succeeds)
-// ---------------------------------------------------------------------------
-
-describe("approved review — primary unresolved-thread check", () => {
   it("skips when unresolved thread count is zero (bare-approval fallback not reached)", async () => {
     const deps = makeDeps({
       countUnresolvedThreads: vi.fn().mockResolvedValue(0),
