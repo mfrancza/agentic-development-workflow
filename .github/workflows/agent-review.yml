@@ -24,7 +24,8 @@ jobs:
     # Gate differently per event type:
     #
     # Trust model — fork-headed PRs are excluded entirely on both event paths.
-    #   Even though checkout is pinned to the base SHA (trusted code runs), the
+    #   Even though only trusted base-branch code runs (default checkout on
+    #   pull_request_target = GITHUB_SHA, the current base tip), the
     #   attacker-controlled diff still reaches Claude on every push, so the
     #   secrets exposure window is real. Both event types require
     #   github.event.pull_request.head.repo.full_name == github.repository to
@@ -69,7 +70,8 @@ jobs:
     # addressed thread IDs to a mounted file and this job's GITHUB_TOKEN
     # resolves them afterwards. GITHUB_TOKEN never enters the container; only
     # trusted base-branch workflow code runs in job steps (pull_request_target
-    # + checkout pinned to the base SHA with persist-credentials: false), so
+    # + default checkout of GITHUB_SHA (current base tip) with
+    # persist-credentials: false), so
     # the write scope is not exposed to PR-authored code.
     permissions:
       contents: write
