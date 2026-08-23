@@ -11,7 +11,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read  # for gh pr list / gh pr view in find-conflicted-prs
+  pull-requests: read  # for PR enumeration and mergeability polling in find-conflicted-prs
 
 jobs:
   find-conflicted-prs:
@@ -21,6 +21,13 @@ jobs:
       conflicted_prs: ${{ steps.find.outputs.conflicted_prs }}
 
     steps:
+      # Checkout must precede the local find-conflicted-prs action: the runner
+      # resolves ./.github/actions/* references from the workspace, and the
+      # action itself runs npx tsx from .github/scripts/.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
       # When a PR number is provided via workflow_dispatch, use it directly
       # (poll for mergeability state to let GitHub's async computation settle,
       # then include regardless of result — this is a manual backstop).
@@ -29,88 +36,11 @@ jobs:
       # a push; retry with exponential backoff until it settles).
       - name: Find conflicted agent-authored PRs
         id: find
-        env:
-          GH_TOKEN: ${{ github.token }}
-          MANUAL_PR_INPUT: ${{ inputs.pr_number }}
-          GITHUB_REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-
-          MANUAL_PR="$(echo "${MANUAL_PR_INPUT:-}" | tr -d '\r\n')"
-          if [ -n "${MANUAL_PR}" ]; then
-            [[ "${MANUAL_PR}" =~ ^[1-9][0-9]*$ ]] || { echo "::error::pr_number must be a positive integer with no leading zeros; got '${MANUAL_PR}'" >&2; exit 1; }
-            echo "Manual dispatch: polling PR #${MANUAL_PR} for mergeability"
-            DELAYS=(5 10 20 40 80)
-            MERGEABLE="UNKNOWN"
-            for i in "${!DELAYS[@]}"; do
-              attempt=$(( i + 1 ))
-              MERGEABLE="$(gh pr view "${MANUAL_PR}" \
-                --repo "$GITHUB_REPO" \
-                --json mergeable \
-                --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
-              if [ "$MERGEABLE" != "UNKNOWN" ]; then
-                break
-              fi
-              if (( attempt < 5 )); then
-                echo "PR #${MANUAL_PR} mergeability UNKNOWN (attempt ${attempt}/5); waiting ${DELAYS[$i]}s..."
-                sleep "${DELAYS[$i]}"
-              fi
-            done
-            echo "PR #${MANUAL_PR} mergeability: ${MERGEABLE} (manual dispatch — including regardless)"
-            echo "conflicted_prs=[${MANUAL_PR}]" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Enumerate all open PRs authored by the developer agent.
-          # --limit 100 ensures we poll at most 100 PRs: worst-case 100×155 s
-          # ≈ 4.3 h is bounded by the 30-minute job timeout well before that.
-          PR_NUMBERS="$(gh pr list \
-            --repo "$GITHUB_REPO" \
-            --author 'app/mfrancza-developer-agent' \
-            --state open \
-            --limit 100 \
-            --json number \
-            --jq '.[].number')"
-
-          if [ -z "$PR_NUMBERS" ]; then
-            echo "No open developer-agent PRs found."
-            echo "conflicted_prs=[]" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Open developer-agent PRs: $(echo "$PR_NUMBERS" | tr '\n' ' ')"
-
-          CONFLICTED_PRS="[]"
-          DELAYS=(5 10 20 40 80)
-          for PR_NUM in $PR_NUMBERS; do
-            # GitHub computes mergeability asynchronously after a push; poll
-            # with exponential backoff until the value is no longer UNKNOWN.
-            MERGEABLE="UNKNOWN"
-            for i in "${!DELAYS[@]}"; do
-              attempt=$(( i + 1 ))
-              MERGEABLE="$(gh pr view "$PR_NUM" \
-                --repo "$GITHUB_REPO" \
-                --json mergeable \
-                --jq '.mergeable' 2>/dev/null || echo "UNKNOWN")"
-              if [ "$MERGEABLE" != "UNKNOWN" ]; then
-                break
-              fi
-              if (( attempt < 5 )); then
-                echo "PR #${PR_NUM} mergeability UNKNOWN (attempt ${attempt}/5); waiting ${DELAYS[$i]}s..."
-                sleep "${DELAYS[$i]}"
-              fi
-            done
-
-            if [ "$MERGEABLE" = "CONFLICTING" ]; then
-              echo "PR #${PR_NUM} is CONFLICTING — queued for resolution"
-              CONFLICTED_PRS="$(echo "$CONFLICTED_PRS" | jq -c ". + [$PR_NUM]")"
-            else
-              echo "PR #${PR_NUM} mergeability: ${MERGEABLE} — skipping"
-            fi
-          done
-
-          echo "Conflicted PRs: ${CONFLICTED_PRS}"
-          echo "conflicted_prs=${CONFLICTED_PRS}" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/find-conflicted-prs
+        with:
+          token: ${{ github.token }}
+          repo: ${{ github.repository }}
+          pr-number: ${{ inputs.pr_number }}
 
   resolve:
     needs: find-conflicted-prs
