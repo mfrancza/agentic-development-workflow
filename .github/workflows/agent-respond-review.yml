@@ -6,7 +6,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read   # for `gh api .../pulls/.../reviews/.../comments`
+  pull-requests: read   # for check-reviewer-feedback activity (review threads + inline comments)
 
 concurrency:
   group: agent-respond-review-pr-${{ github.event.pull_request.number }}
@@ -75,103 +75,15 @@ jobs:
       #      Skip when there is provably nothing to respond to.
       - name: Check for reviewer feedback
         id: feedback
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REVIEW_STATE: ${{ github.event.review.state }}
-          REVIEW_BODY: ${{ github.event.review.body }}
-          REVIEW_ID: ${{ github.event.review.id }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          REPO_OWNER: ${{ github.repository_owner }}
-          REPO_NAME: ${{ github.event.repository.name }}
-        run: |
-          set -euo pipefail
-
-          # Anything other than an approved review is worth responding to.
-          if [ "$REVIEW_STATE" != "approved" ]; then
-            echo "Review state is '$REVIEW_STATE'; proceeding."
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Primary check: fetch unresolved thread count via GraphQL.
-          # An approval on a PR with zero unresolved threads carries no
-          # actionable feedback — body text and inline comments are advisory
-          # when nothing remains open.
-          # On GraphQL errors, falls through to the bare-approval check below (which may still skip).
-          # Paginates through all review threads in batches of 100 using
-          # --paginate, which automatically supplies $endCursor each round.
-          UNRESOLVED_COUNT="$(gh api graphql --paginate \
-            -F owner="$REPO_OWNER" \
-            -F name="$REPO_NAME" \
-            -F number="$PR_NUMBER" \
-            -f query='
-              query($owner: String!, $name: String!, $number: Int!, $endCursor: String) {
-                repository(owner: $owner, name: $name) {
-                  pullRequest(number: $number) {
-                    reviewThreads(first: 100, after: $endCursor) {
-                      nodes { isResolved }
-                      pageInfo { hasNextPage endCursor }
-                    }
-                  }
-                }
-              }' \
-            --jq '[.data.repository.pullRequest.reviewThreads.nodes[] | select(.isResolved == false)] | length' \
-            2>/dev/null | jq -s 'add // 0')" || UNRESOLVED_COUNT=""
-
-          if [[ "$UNRESOLVED_COUNT" =~ ^[0-9]+$ ]]; then
-            if [ "$UNRESOLVED_COUNT" -eq 0 ]; then
-              echo "Approval with zero unresolved threads; skipping respond-review."
-              echo "proceed=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
-            echo "Approval with $UNRESOLVED_COUNT unresolved thread(s); proceeding."
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          echo "Unresolved thread count is non-numeric or unavailable; falling through to bare-approval check."
-
-          # Fallback check: bare approval (reached only when GraphQL errored or
-          # returned a non-numeric value above).
-          # Determine whether body text is present.
-          HAS_BODY=false
-          if [ -n "$(printf '%s' "${REVIEW_BODY:-}" | tr -d '[:space:]')" ]; then
-            HAS_BODY=true
-          fi
-
-          # Determine inline review comment count.
-          # Fail open: if the API call errors or returns a non-numeric value
-          # (transient GitHub error, rate limit, permission regression), treat
-          # the count as unknown and proceed.
-          COMMENT_COUNT=""
-          if ! COMMENT_COUNT="$(gh api "repos/$REPO_OWNER/$REPO_NAME/pulls/$PR_NUMBER/reviews/$REVIEW_ID/comments" --jq 'length' 2>/dev/null)"; then
-            echo "Failed to fetch inline comments; treating inline count as unknown."
-          elif ! [[ "$COMMENT_COUNT" =~ ^[0-9]+$ ]]; then
-            echo "Inline comment count '$COMMENT_COUNT' is non-numeric; treating as unknown."
-            COMMENT_COUNT=""
-          fi
-
-          HAS_INLINE=false
-          if [[ "$COMMENT_COUNT" =~ ^[0-9]+$ ]] && [ "$COMMENT_COUNT" -gt 0 ]; then
-            HAS_INLINE=true
-          fi
-
-          # Bare approval: no body text and confirmed zero inline comments.
-          if [ "$HAS_BODY" = false ] && [ "$HAS_INLINE" = false ] && [ -n "$COMMENT_COUNT" ]; then
-            echo "Approval with no body and no inline comments; skipping respond-review."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Non-bare approval with unavailable thread count — proceed.
-          if [ "$HAS_BODY" = true ]; then
-            echo "Approval carries a non-empty review body; thread count unavailable; proceeding."
-          elif [ "$HAS_INLINE" = true ]; then
-            echo "Approval carries $COMMENT_COUNT inline comment(s); thread count unavailable; proceeding."
-          else
-            echo "Approval with unknown inline count and unavailable thread count; proceeding."
-          fi
-          echo "proceed=true" >> "$GITHUB_OUTPUT"
+        uses: ./.github/actions/check-reviewer-feedback
+        with:
+          token: ${{ github.token }}
+          review-state: ${{ github.event.review.state }}
+          review-body: ${{ github.event.review.body }}
+          review-id: ${{ github.event.review.id }}
+          pr-number: ${{ github.event.pull_request.number }}
+          repo-owner: ${{ github.repository_owner }}
+          repo-name: ${{ github.event.repository.name }}
 
       # Mint only after we've decided to proceed — no installation token for runs we skip.
       - name: Mint installation token for developer-agent

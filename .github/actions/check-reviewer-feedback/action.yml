@@ -1,0 +1,64 @@
+name: 'Check reviewer feedback'
+description: >
+  Decides whether agent-respond-review should proceed or skip based on the
+  submitted review's state, body, inline comments, and unresolved PR threads.
+  Replaces the ~85-line inline shell script in agent-respond-review.yml.
+  Output: proceed=true|false.
+
+inputs:
+  token:
+    description: 'GitHub token with pull-requests:read scope'
+    required: true
+  review-state:
+    description: 'Value of github.event.review.state (e.g. approved, changes_requested)'
+    required: true
+  review-body:
+    description: 'Value of github.event.review.body'
+    required: false
+    default: ''
+  review-id:
+    description: 'Numeric review ID from the event payload'
+    required: true
+  pr-number:
+    description: 'Pull request number the review was submitted on'
+    required: true
+  repo-owner:
+    description: 'Repository owner login'
+    required: true
+  repo-name:
+    description: 'Repository name'
+    required: true
+
+outputs:
+  proceed:
+    description: "'true' if the workflow should respond to the review, 'false' to skip"
+    value: ${{ steps.run.outputs.proceed }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: .github/scripts/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+      working-directory: .github/scripts
+
+    - name: Run check-reviewer-feedback
+      id: run
+      shell: bash
+      run: npx --no-install tsx src/check-reviewer-feedback.ts
+      working-directory: .github/scripts
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REVIEW_STATE: ${{ inputs.review-state }}
+        INPUT_REVIEW_BODY: ${{ inputs.review-body }}
+        INPUT_REVIEW_ID: ${{ inputs.review-id }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        INPUT_REPO_OWNER: ${{ inputs.repo-owner }}
+        INPUT_REPO_NAME: ${{ inputs.repo-name }}
