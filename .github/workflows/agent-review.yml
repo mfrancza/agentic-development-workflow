@@ -24,7 +24,8 @@ jobs:
     # Gate differently per event type:
     #
     # Trust model — fork-headed PRs are excluded entirely on both event paths.
-    #   Even though checkout is pinned to the base SHA (trusted code runs), the
+    #   Even though only trusted base-branch code runs (default checkout on
+    #   pull_request_target = GITHUB_SHA, the current base tip), the
     #   attacker-controlled diff still reaches Claude on every push, so the
     #   secrets exposure window is real. Both event types require
     #   github.event.pull_request.head.repo.full_name == github.repository to
@@ -69,7 +70,8 @@ jobs:
     # addressed thread IDs to a mounted file and this job's GITHUB_TOKEN
     # resolves them afterwards. GITHUB_TOKEN never enters the container; only
     # trusted base-branch workflow code runs in job steps (pull_request_target
-    # + checkout pinned to the base SHA with persist-credentials: false), so
+    # + default checkout of GITHUB_SHA (current base tip) with
+    # persist-credentials: false), so
     # the write scope is not exposed to PR-authored code.
     permissions:
       contents: write
@@ -78,14 +80,18 @@ jobs:
     steps:
       # Checkout must precede the local agent-token action: the runner resolves
       # ./.github/actions/* references from the workspace.
-      # Pin to the base branch SHA explicitly so the agent-token action and the
-      # docker/reviewer build context are always loaded from trusted base-branch
-      # code, not from the PR head. This matters even with pull_request_target
-      # (which already runs the workflow YAML from the base) because it makes
-      # the intent unambiguous and guards against accidental ref drift.
+      # No explicit ref: on pull_request_target the default checkout is
+      # GITHUB_SHA = the latest commit on the base branch, so the local
+      # actions, .github/scripts activities, and the docker/reviewer build
+      # context are always loaded from trusted, *current* base-branch code —
+      # never from the PR head. Do NOT pin to
+      # github.event.pull_request.base.sha instead: GitHub freezes that value
+      # at the base tip as of the PR's last head push, so after any merge to
+      # main every review of an un-rebased PR would execute stale workspace
+      # code (hit live when the #253 composite-action fix merged and
+      # re-reviews of open PRs kept running the broken pre-fix resolve-model).
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
           persist-credentials: false
 
       - name: Mint installation token for reviewer-agent
