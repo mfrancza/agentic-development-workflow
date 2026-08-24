@@ -205,7 +205,7 @@ The following patterns are already used across this repo. A review must flag any
 
 1. Add a prompt file in `docker/scripts/prompts/`.
 2. Add an `action_<name>()` function in `docker/scripts/entrypoint.sh` and a matching case in the dispatcher.
-3. Add a workflow in `.github/workflows/` that builds the image and runs the container with the new `AGENT_ACTION`.
+3. Add a workflow in `.github/workflows/` that calls the [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composite action with the new `AGENT_ACTION` and the appropriate issue/PR/run identifiers.
 4. Document the new action (env vars, trigger, labels) here in AGENTS.md and — if it affects setup — in README.md.
 
 ## Manual repository settings

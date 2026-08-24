@@ -111,34 +111,22 @@ jobs:
           repo: ${{ github.repository }}
           default-model: ${{ vars.DEFAULT_MODEL }}
 
-      - name: Build reviewer image
-        run: docker build -t agent-reviewer:ci ./docker/reviewer
-
       - name: Run reviewer agent
-        env:
-          GH_TOKEN: ${{ steps.setup.outputs.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GITHUB_REPO: ${{ github.repository }}
-          GITHUB_PR_NUMBER: ${{ github.event.pull_request.number }}
-          AGENT_MODEL: ${{ steps.model.outputs.claude_model }}
-        run: |
-          # The container records the GraphQL IDs of addressed review threads
-          # into this mounted directory; the resolve step below reads them.
-          # chmod 777 because the container's non-root `agent` user does not
-          # necessarily share the runner's uid.
-          mkdir -p "$RUNNER_TEMP/reviewer-output"
-          chmod 777 "$RUNNER_TEMP/reviewer-output"
-          docker run --rm \
-            -e GH_TOKEN \
-            -e ANTHROPIC_API_KEY \
-            -e OPENAI_API_KEY \
-            -e GITHUB_REPO \
-            -e GITHUB_PR_NUMBER \
-            -e AGENT_MODEL \
-            -e RESOLVE_THREADS_FILE=/agent-output/resolve-threads.txt \
-            -v "$RUNNER_TEMP/reviewer-output:/agent-output" \
-            agent-reviewer:ci
+        # The container records the GraphQL IDs of addressed review threads
+        # into the mounted output directory; the resolve step below reads them.
+        uses: ./.github/actions/run-agent
+        with:
+          build-context: ./docker/reviewer
+          image-tag: agent-reviewer:ci
+          gh-token: ${{ steps.setup.outputs.token }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          repo: ${{ github.repository }}
+          pr-number: ${{ github.event.pull_request.number }}
+          model: ${{ steps.model.outputs.claude_model }}
+          output-dir: ${{ runner.temp }}/reviewer-output
+          output-mount: /agent-output
+          resolve-threads-file: /agent-output/resolve-threads.txt
 
       - name: Resolve addressed review threads
         # Runs with the workflow GITHUB_TOKEN (see the permissions comment at

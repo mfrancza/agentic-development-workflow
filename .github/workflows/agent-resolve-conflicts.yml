@@ -69,28 +69,14 @@ jobs:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
-      - name: Build agent image
-        run: docker build -t agent-developer:ci ./docker
-
       - name: Run agent
-        env:
-          GH_TOKEN: ${{ steps.setup.outputs.token }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          GITHUB_REPO: ${{ github.repository }}
-          AGENT_ACTION: resolve-conflicts
-          GITHUB_PR_NUMBER: ${{ matrix.pr_number }}
-          AGENT_MODEL: ${{ vars.DEFAULT_MODEL }}
-          ESCALATION_ASSIGNEE: ${{ github.repository_owner }}
-        run: |
-          set -euo pipefail
-          docker run --rm \
-            -e GH_TOKEN \
-            -e ANTHROPIC_API_KEY \
-            -e OPENAI_API_KEY \
-            -e GITHUB_REPO \
-            -e AGENT_ACTION \
-            -e GITHUB_PR_NUMBER \
-            -e AGENT_MODEL \
-            -e ESCALATION_ASSIGNEE \
-            agent-developer:ci
+        uses: ./.github/actions/run-agent
+        with:
+          gh-token: ${{ steps.setup.outputs.token }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          repo: ${{ github.repository }}
+          agent-action: resolve-conflicts
+          pr-number: ${{ matrix.pr_number }}
+          model: ${{ vars.DEFAULT_MODEL }}
+          escalation-assignee: ${{ github.repository_owner }}
