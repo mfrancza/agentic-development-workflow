@@ -57,11 +57,15 @@ creation.
   the developer app was) and its setup steps should be documented alongside
   the existing bootstrap instructions.
 
-Because reviews from the reviewer app satisfy the ruleset's
-`required_approving_review_count = 1`, an approval from the reviewer makes the
-PR mergeable by the human operator. `dismiss_stale_reviews_on_push = true`
-already ensures a stale approval is dismissed if the developer agent pushes
-again after approval.
+The reviewer app's `APPROVE` is **advisory**, not a ruleset-satisfying approval.
+GitHub only counts approvals toward `required_approving_review_count = 1` from
+identities with write access; the reviewer app deliberately has Contents:
+read-only (the no-push guarantee — `reviewer-container.md` decision 3). The
+approval signals the human operator that the agent loop is done and trips the
+`agent-respond-review` loop guard (preventing a pointless developer-agent run),
+but the ruleset's required approval must come from the human operator.
+`dismiss_stale_reviews_on_push = true` ensures the human's approval is dismissed
+if the developer agent pushes again after they approve.
 
 ### Trigger: `agent:review` label + PR update
 
