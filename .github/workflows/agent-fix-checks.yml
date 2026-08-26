@@ -57,6 +57,11 @@ jobs:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
+      - name: Prepare agent log directory
+        run: |
+          mkdir -p "${RUNNER_TEMP}/agent-logs"
+          chmod 0777 "${RUNNER_TEMP}/agent-logs"
+
       - name: Run agent
         if: steps.filter.outputs.proceed == 'true'
         uses: ./.github/actions/run-agent
@@ -68,3 +73,13 @@ jobs:
           agent-action: fix-checks
           pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
           model: ${{ vars.DEFAULT_MODEL }}
+          logs-dir: ${{ runner.temp }}/agent-logs
+
+      - name: Upload agent logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: agent-logs-fix-checks-pr-${{ github.event.workflow_run.pull_requests[0].number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-logs
+          retention-days: 30
+          if-no-files-found: warn

@@ -82,6 +82,14 @@ inputs:
       applicable (agent-review only).
     required: false
     default: ''
+  logs-dir:
+    description: >
+      Host path of the log directory to bind-mount at /home/agent/logs inside
+      the container. The caller is responsible for creating this directory and
+      setting chmod 0777 before invoking this action — only the bind-mount is
+      wired here.
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -109,6 +117,7 @@ runs:
         _OUTPUT_DIR: ${{ inputs.output-dir }}
         _OUTPUT_MOUNT: ${{ inputs.output-mount }}
         _RESOLVE_THREADS_FILE: ${{ inputs.resolve-threads-file }}
+        _LOGS_DIR: ${{ inputs.logs-dir }}
         _IMAGE_TAG: ${{ inputs.image-tag }}
       run: |
         set -euo pipefail
@@ -133,6 +142,9 @@ runs:
           chmod 777 "${_OUTPUT_DIR}"
           _vol_args+=(-v "${_OUTPUT_DIR}:${_OUTPUT_MOUNT}")
         fi
+
+        # Bind-mount the log directory when the caller has pre-created it.
+        [[ -n "${_LOGS_DIR}" ]] && _vol_args+=(-v "${_LOGS_DIR}:/home/agent/logs")
 
         docker run --rm \
           -e GH_TOKEN \

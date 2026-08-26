@@ -65,6 +65,11 @@ jobs:
           repo: ${{ github.repository }}
           default-model: ${{ vars.DEFAULT_MODEL }}
 
+      - name: Prepare agent log directory
+        run: |
+          mkdir -p "${RUNNER_TEMP}/agent-logs"
+          chmod 0777 "${RUNNER_TEMP}/agent-logs"
+
       - name: Run designer agent
         if: steps.preflight.outputs.skip != 'true'
         uses: ./.github/actions/run-agent
@@ -76,6 +81,16 @@ jobs:
           agent-action: design
           issue-number: ${{ github.event.issue.number }}
           model: ${{ steps.model.outputs.claude_model }}
+          logs-dir: ${{ runner.temp }}/agent-logs
+
+      - name: Upload agent logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: agent-logs-design-issue-${{ github.event.issue.number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-logs
+          retention-days: 30
+          if-no-files-found: warn
 
   undraft-sub-issues:
     # Fires only when a design-branch PR is merged — not just closed without
