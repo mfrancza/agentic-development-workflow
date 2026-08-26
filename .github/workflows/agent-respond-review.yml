@@ -96,6 +96,7 @@ jobs:
 
       - name: Prepare agent log directory
         run: |
+          set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/agent-logs"
           chmod 0777 "${RUNNER_TEMP}/agent-logs"
 
