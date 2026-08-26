@@ -57,9 +57,15 @@ inputs:
     required: false
     default: ''
   output-dir:
+    # NOTE: never write a template expression (dollar-brace syntax) in this
+    # metadata section — the runner template-evaluates action.yml at manifest
+    # load, and an unrecognized named-value there (e.g. runner.temp, which is
+    # step-scope only) makes every workflow using this action fail before any
+    # step runs. CI lints for this.
     description: >
-      Host directory to create and volume-mount into the container (e.g.
-      "${{ runner.temp }}/reviewer-output"). Must be supplied together with
+      Host directory to create and volume-mount into the container; call
+      sites pass the workflow's runner.temp path suffixed with a
+      subdirectory (e.g. "reviewer-output"). Must be supplied together with
       output-mount; omit both for workflows that do not need an output
       volume (all developer-agent workflows).
     required: false

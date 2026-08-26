@@ -54,6 +54,23 @@ jobs:
             echo "::error::Dashed getInput() name(s) found above — use underscores to match INPUT_* env keys."
             STATUS=1
           fi
+          # The runner template-evaluates action.yml at manifest load, including
+          # input descriptions. An unrecognized named-value there (e.g.
+          # runner.temp, which is step-scope only) throws at load time and
+          # breaks every workflow that uses the action — first hit live by
+          # run-agent, which took down all eight agent workflows while CI
+          # stayed green (nothing in CI loads composite-action manifests).
+          # Forbid template expressions in action metadata entirely; put
+          # examples in prose without expression syntax. (The grep pattern is
+          # spelled with bracket classes so this workflow file itself never
+          # contains a literal expression opener — that byte sequence anywhere
+          # in a workflow file, even in a comment, fails validation.)
+          for f in .github/actions/*/action.yml; do
+            if yq -r '[.description // "", ((.inputs // {})[] | .description // "")] | join("\n")' "$f" | grep -n '\$[{][{]'; then
+              echo "::error::${f}: template expression in action metadata (description) shown above — write the example without expression syntax."
+              STATUS=1
+            fi
+          done
           exit "$STATUS"
 
       # Execute every activity entrypoint the same way the composite actions
