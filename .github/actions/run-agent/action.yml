@@ -1,0 +1,139 @@
+name: 'Run agent container'
+description: >
+  Builds the agent Docker image and runs the container with the standard set
+  of environment variables (GH_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY,
+  GITHUB_REPO, AGENT_MODEL) and any optional per-workflow identifiers
+  (AGENT_ACTION, GITHUB_ISSUE_NUMBER, GITHUB_PR_NUMBER, GITHUB_RUN_ID,
+  ESCALATION_ASSIGNEE, RESOLVE_THREADS_FILE). Also creates and mounts an
+  output directory when output-dir and output-mount are supplied (used by
+  agent-review for the RESOLVE_THREADS_FILE hand-off).
+
+inputs:
+  build-context:
+    description: 'Docker build context directory (e.g. ./docker or ./docker/reviewer)'
+    required: false
+    default: './docker'
+  image-tag:
+    description: 'Docker image tag to build and run (e.g. agent-developer:ci)'
+    required: false
+    default: 'agent-developer:ci'
+  gh-token:
+    description: 'GitHub token injected as GH_TOKEN'
+    required: true
+  anthropic-api-key:
+    description: 'Anthropic API key injected as ANTHROPIC_API_KEY'
+    required: true
+  openai-api-key:
+    description: 'OpenAI API key injected as OPENAI_API_KEY'
+    required: true
+  repo:
+    description: 'GitHub repository (owner/name) injected as GITHUB_REPO'
+    required: true
+  agent-action:
+    description: >
+      AGENT_ACTION value; omit for workflows that have no action dispatch
+      table (e.g. agent-review, which has a dedicated entrypoint).
+    required: false
+    default: ''
+  model:
+    description: 'Claude model name injected as AGENT_MODEL'
+    required: true
+  issue-number:
+    description: 'Issue number injected as GITHUB_ISSUE_NUMBER; omit when not applicable'
+    required: false
+    default: ''
+  pr-number:
+    description: 'PR number injected as GITHUB_PR_NUMBER; omit when not applicable'
+    required: false
+    default: ''
+  run-id:
+    description: 'Workflow run ID injected as GITHUB_RUN_ID; omit when not applicable'
+    required: false
+    default: ''
+  escalation-assignee:
+    description: >
+      Escalation assignee login injected as ESCALATION_ASSIGNEE; omit when
+      not applicable (agent-resolve-conflicts only).
+    required: false
+    default: ''
+  output-dir:
+    description: >
+      Host directory to create and volume-mount into the container (e.g.
+      "${{ runner.temp }}/reviewer-output"). Must be supplied together with
+      output-mount; omit both for workflows that do not need an output
+      volume (all developer-agent workflows).
+    required: false
+    default: ''
+  output-mount:
+    description: >
+      Container path for the output volume (e.g. /agent-output); used
+      together with output-dir.
+    required: false
+    default: ''
+  resolve-threads-file:
+    description: >
+      Container path injected as RESOLVE_THREADS_FILE; omit when not
+      applicable (agent-review only).
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Build agent image
+      shell: bash
+      env:
+        _BUILD_CONTEXT: ${{ inputs.build-context }}
+        _IMAGE_TAG: ${{ inputs.image-tag }}
+      run: docker build -t "${_IMAGE_TAG}" "${_BUILD_CONTEXT}"
+
+    - name: Run agent
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.gh-token }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        GITHUB_REPO: ${{ inputs.repo }}
+        AGENT_MODEL: ${{ inputs.model }}
+        _AGENT_ACTION: ${{ inputs.agent-action }}
+        _GITHUB_ISSUE_NUMBER: ${{ inputs.issue-number }}
+        _GITHUB_PR_NUMBER: ${{ inputs.pr-number }}
+        _GITHUB_RUN_ID: ${{ inputs.run-id }}
+        _ESCALATION_ASSIGNEE: ${{ inputs.escalation-assignee }}
+        _OUTPUT_DIR: ${{ inputs.output-dir }}
+        _OUTPUT_MOUNT: ${{ inputs.output-mount }}
+        _RESOLVE_THREADS_FILE: ${{ inputs.resolve-threads-file }}
+        _IMAGE_TAG: ${{ inputs.image-tag }}
+      run: |
+        set -euo pipefail
+
+        # Build optional -e flags for per-workflow identifiers that are only
+        # present on some workflows. Each is included only when non-empty so
+        # that the container's env does not receive spurious empty variables.
+        _opt_env=()
+        [[ -n "${_AGENT_ACTION}" ]] && _opt_env+=(-e AGENT_ACTION="${_AGENT_ACTION}")
+        [[ -n "${_GITHUB_ISSUE_NUMBER}" ]] && _opt_env+=(-e GITHUB_ISSUE_NUMBER="${_GITHUB_ISSUE_NUMBER}")
+        [[ -n "${_GITHUB_PR_NUMBER}" ]] && _opt_env+=(-e GITHUB_PR_NUMBER="${_GITHUB_PR_NUMBER}")
+        [[ -n "${_GITHUB_RUN_ID}" ]] && _opt_env+=(-e GITHUB_RUN_ID="${_GITHUB_RUN_ID}")
+        [[ -n "${_ESCALATION_ASSIGNEE}" ]] && _opt_env+=(-e ESCALATION_ASSIGNEE="${_ESCALATION_ASSIGNEE}")
+        [[ -n "${_RESOLVE_THREADS_FILE}" ]] && _opt_env+=(-e RESOLVE_THREADS_FILE="${_RESOLVE_THREADS_FILE}")
+
+        # Create and prepare the host output directory if requested; build the
+        # volume mount flag. chmod 777 is required because the container's
+        # non-root `agent` user does not necessarily share the runner's uid.
+        _vol_args=()
+        if [[ -n "${_OUTPUT_DIR}" && -n "${_OUTPUT_MOUNT}" ]]; then
+          mkdir -p "${_OUTPUT_DIR}"
+          chmod 777 "${_OUTPUT_DIR}"
+          _vol_args+=(-v "${_OUTPUT_DIR}:${_OUTPUT_MOUNT}")
+        fi
+
+        docker run --rm \
+          -e GH_TOKEN \
+          -e ANTHROPIC_API_KEY \
+          -e OPENAI_API_KEY \
+          -e GITHUB_REPO \
+          -e AGENT_MODEL \
+          "${_opt_env[@]}" \
+          "${_vol_args[@]}" \
+          "${_IMAGE_TAG}"
