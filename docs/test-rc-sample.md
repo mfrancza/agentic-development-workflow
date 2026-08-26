@@ -21,3 +21,6 @@ log() {
 ## Section C — Notes
 
 This file is safe to delete once validation is complete.
+
+Validation runs are dispatched manually: trigger `agent-resolve-conflicts.yml`
+via `workflow_dispatch` with `pr_number` set to the test PR's number.
