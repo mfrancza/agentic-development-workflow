@@ -74,6 +74,20 @@ moved {
   to   = github_actions_variable.default_model
 }
 
+# Expose the auto-trigger gates as a JSON-encoded repository Actions variable
+# so agent-auto-trigger.yml can gate each job on
+# fromJSON(vars.AUTO_TRIGGER_AGENTS).<key> == true. All keys default to false
+# (opt-in); flipping a key enables auto-advancement for that SDLC stage.
+# The non-empty guard (vars.AUTO_TRIGGER_AGENTS != '') must precede any
+# fromJSON() call in workflow if: expressions — if the variable does not yet
+# exist the expression evaluates to '' and fromJSON('') would throw a runtime
+# error; the guard causes the condition to fail closed instead.
+resource "github_actions_variable" "auto_trigger_agents" {
+  repository    = github_repository.this.name
+  variable_name = "AUTO_TRIGGER_AGENTS"
+  value         = jsonencode(var.auto_trigger_agents)
+}
+
 # Protection for the default branch via a repository ruleset (the modern
 # primitive — supports granular bypass actors, unlike the legacy
 # github_branch_protection resource).

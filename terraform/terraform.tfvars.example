@@ -9,3 +9,14 @@ agent_allowlist = [
   "<reviewer-agent-app-slug>[bot]",
 ]
 default_model = "sonnet"
+
+# Auto-trigger configuration. Set a key to true to automatically apply the
+# corresponding agent:* label at the natural upstream signal, advancing the
+# SDLC pipeline without manual labeling. All keys default to false (opt-in).
+# See docs/design/auto-trigger-agents.md for full behavior and security notes.
+auto_trigger_agents = {
+  groom     = false
+  design    = false
+  developer = false
+  review    = false
+}

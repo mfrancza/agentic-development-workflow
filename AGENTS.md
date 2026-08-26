@@ -103,6 +103,19 @@ The **reviewer image** at [`docker/reviewer/`](docker/reviewer/) does not use `A
 
 Only usernames (and agent bot identities like `<developer-agent-app-slug>[bot]`) in the Terraform-managed `AGENT_ALLOWLIST` Actions variable can trigger `agent:groom`, `agent:developer`, `agent:review`, or `agent:design`. The agent bots are included in the allowlist so that agents can apply `agent:*` labels to route work to one another (e.g. the developer agent applying `agent:review` on its own PR).
 
+### Auto-trigger gates (`AUTO_TRIGGER_AGENTS`)
+
+The Terraform-managed `AUTO_TRIGGER_AGENTS` Actions variable (a JSON object) controls whether each `agent:*` label is applied automatically at the natural upstream signal, advancing the SDLC pipeline without manual labeling. All four gates default to `false` (opt-in); the operator flips a key to `true` in `terraform.tfvars` and runs `terraform apply` to enable that stage. See [`docs/design/auto-trigger-agents.md`](docs/design/auto-trigger-agents.md) for the full design rationale.
+
+| Key | Upstream signal | Label applied |
+|-----|-----------------|---------------|
+| `groom` | `issues.opened` (any actor may open an issue) | `agent:groom` |
+| `design` | `issues.labeled` where label is `plan` (sender must be in `AGENT_ALLOWLIST`) | `agent:design` |
+| `developer` | `issues.labeled` where label is `do`, or `issues.unlabeled` where label is `draft` (sender must be in `AGENT_ALLOWLIST`) | `agent:developer` |
+| `review` | `pull_request.opened` on a branch whose name starts with `agent/` or `design/` (same-repo PRs only) | `agent:review` |
+
+**Behavioral note for `groom = true`:** when this gate is enabled, `agent:groom` is applied to every newly opened issue regardless of who opened it — including non-allowlisted collaborators and, on public repos, any GitHub user. This is the intended behavior (automatically grooming all incoming issues). Operators who want only allowlisted users to trigger grooming should leave `groom = false` and continue applying the label by hand.
+
 ## Expected Deliverables
 
 - **Developer agent container** — implemented at [`docker/`](docker/).
@@ -186,7 +199,7 @@ This section defines what a pull-request review — by either the reviewer agent
 
 The following patterns are already used across this repo. A review must flag any new code that omits them:
 
-- **Allowlist gating on label senders.** Workflows triggered by `issues.labeled` or `pull_request.labeled` must gate on `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` — not on `github.repository_owner` (which is the org login in org repos, not a user) and not on the issue/PR author. GitHub has no per-label permission model, so the sender check is the only defence against an outside collaborator triggering an agent. See [`.github/workflows/agent-implement.yml`](.github/workflows/agent-implement.yml) for the canonical form.
+- **Allowlist gating on label senders.** Workflows triggered by `issues.labeled`, `issues.unlabeled`, or `pull_request.labeled` must gate on `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` — not on `github.repository_owner` (which is the org login in org repos, not a user) and not on the issue/PR author. GitHub has no per-label permission model, so the sender check is the only defence against an outside collaborator triggering an agent by adding or removing a label. See [`.github/workflows/agent-implement.yml`](.github/workflows/agent-implement.yml) for the canonical form.
 - **Allowlist gating on review authors.** Workflows triggered by `pull_request_review: submitted` must also gate on the review author, not just the PR author. On a public repo any GitHub user can submit a review on any PR, and the review body plus inline comments are attacker-controlled text that flows into the agent prompt with a contents-write installation token and an Anthropic API key. Require `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.review.user.login)` OR an explicit match against a known reviewer bot identity — in this repo that is `mfrancza-reviewer-agent[bot]` (the reviewer agent) and `Copilot` (the login Copilot reviews carry in the `pull_request_review` event payload; the REST API renders the same reviews as `copilot-pull-request-reviewer[bot]`, and that form plus `github-copilot[bot]` are kept in the gate defensively in case GitHub changes the payload representation). See [`.github/workflows/agent-respond-review.yml`](.github/workflows/agent-respond-review.yml) for the canonical form.
 - **Output-injection hygiene.** Any value derived from user-controlled input (issue labels, PR titles, comment bodies, issue titles) that is written to `GITHUB_OUTPUT` must be stripped of CR/LF first — `tr -d '\r\n'` is the pattern already in use (see the `model:` label resolver in `agent-implement.yml`). Untrusted content must never be interpolated directly into `run:` scripts via `${{ ... }}`; pass it through `env:` and reference `"$VAR"` inside the script so the shell — not the workflow expression engine — parses it.
 - **Pinned action SHAs.** Third-party actions (including `actions/*` and `anthropics/*`) are pinned to a full 40-character commit SHA with an inline version comment (e.g. `actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0`), never to a tag or branch. Local actions under `./.github/actions/` are referenced by path and do not need a SHA.
@@ -243,7 +256,7 @@ At minimum, before opening a PR, check whether your change alters any of the fol
 - The set of `AGENT_ACTION` values, their env vars, or their trigger events.
 - Workflow files under `.github/workflows/` (triggers, gating conditions, secrets, env vars passed to the container). Also update the doc when adding or removing an entry in [`.gitleaksignore`](.gitleaksignore) — an allowlisted fingerprint is a review-relevant deviation, not silent config.
 - Labels that gate or configure agent behaviour (`agent:*`, `model:*`, grooming labels).
-- Terraform variables, resources, or Actions variables (`AGENT_ALLOWLIST`, `DEFAULT_MODEL`, branch-protection rules).
+- Terraform variables, resources, or Actions variables (`AGENT_ALLOWLIST`, `DEFAULT_MODEL`, `AUTO_TRIGGER_AGENTS`, branch-protection rules).
 - Required GitHub App permissions or repo Actions secrets.
 - The repository layout section above (new top-level directories or removed files).
 - The `docker/` image (base image, installed tools, or entrypoint contract).
