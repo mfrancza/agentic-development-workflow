@@ -156,6 +156,11 @@ _log_capture_exit() {
         find /home/agent/logs -type f \
             -exec sed -i "s/${_escaped_key}/***REDACTED-ANTHROPIC_API_KEY***/g" {} +
     fi
+    if [ -n "${OPENAI_API_KEY:-}" ]; then
+        _escaped_openai=$(printf '%s\n' "${OPENAI_API_KEY}" | sed 's/[.^$*\\/]/\\&/g; s/\[/\\[/g')
+        find /home/agent/logs -type f \
+            -exec sed -i "s/${_escaped_openai}/***REDACTED-OPENAI_API_KEY***/g" {} +
+    fi
 }
 # Save the exit code before the trap runs so the container exits with the
 # original code even after the trap body executes additional commands.
