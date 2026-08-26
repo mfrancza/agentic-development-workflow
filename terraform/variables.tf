@@ -19,3 +19,19 @@ variable "default_model" {
   type        = string
   default     = "sonnet"
 }
+
+variable "auto_trigger_agents" {
+  description = "Per-agent:*-label switches that auto-advance the SDLC pipeline. Set a key to true to have agent-auto-trigger.yml automatically apply that stage's agent:* label at the natural upstream signal (issue opened → agent:groom, plan labeled → agent:design, do labeled / draft removed → agent:developer, agent-branch PR opened → agent:review). Every switch defaults to false so existing manual behavior is preserved; flipping a switch opts the whole repo into auto-triggering for that stage. Stored as a JSON-encoded repository Actions variable AUTO_TRIGGER_AGENTS."
+  type = object({
+    groom     = bool
+    design    = bool
+    developer = bool
+    review    = bool
+  })
+  default = {
+    groom     = false
+    design    = false
+    developer = false
+    review    = false
+  }
+}
