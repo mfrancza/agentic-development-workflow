@@ -108,6 +108,66 @@ run_agent() {
 }
 
 # -----------------------------------------------------------------------------
+# Log capture (docs/design/agent-container-logs.md, decisions 3 & 4)
+# Installed before the preamble so env-validation errors are captured too.
+# -----------------------------------------------------------------------------
+
+mkdir -p /home/agent/logs
+
+# Save original stderr to fd 3, then wire both stdout and stderr through tee
+# so every line lands in the bind-mounted log file AND on the workflow log.
+exec 3>&2
+exec > >(tee -a /home/agent/logs/container.log) 2>&1
+
+_log_capture_exit() {
+    # Clean up temp context file if it was created (mirrors the original
+    # trap 'rm -f "$CONTEXT_FILE"' EXIT that this trap supersedes).
+    rm -f "${CONTEXT_FILE:-}"
+
+    # 1. Emit any final messages before closing the fds — once stdout is
+    #    closed, further echo/log calls no longer appear in container.log.
+    log "Container exiting — harvesting session files and redacting secrets"
+
+    # 2. Signal EOF to tee by closing both fds that write into its stdin pipe.
+    #    stdout must be closed before restoring stderr; leaving either fd open
+    #    keeps the pipe open and tee will never see EOF, causing wait to hang.
+    #    Re-open stdout to /dev/null after closing so that child processes
+    #    (find, sed) have a valid fd and do not emit "bad file descriptor" on exit.
+    exec >&-          # close stdout — signals EOF on the pipe to tee
+    exec 1>/dev/null  # reopen stdout to /dev/null for subsequent child processes
+    exec 2>&3         # restore stderr to the saved original (fd 3)
+    exec 3>&-         # close the saved fd
+
+    # 3. Block until the tee subprocess has flushed everything to container.log.
+    wait
+
+    # 4. Copy Claude session files into the log directory.  Non-fatal if the
+    #    projects directory does not exist (a run that never invoked Claude has
+    #    no ~/.claude/projects/).
+    mkdir -p /home/agent/logs/session
+    cp -a ~/.claude/projects/. /home/agent/logs/session/ 2>/dev/null || true
+
+    # 5. Redact secret values before the workflow reads the bind-mount.
+    #    Skip redaction for any variable that is empty — an empty sed pattern
+    #    matches every character boundary and corrupts files.
+    #    Two-pass BRE escaping: first escape . ^ $ * \ /, then [ separately
+    #    ([ cannot appear inside its own bracket expression in a single pass).
+    if [ -n "${GH_TOKEN:-}" ]; then
+        _escaped_token=$(printf '%s\n' "${GH_TOKEN}" | sed 's/[.^$*\\/]/\\&/g; s/\[/\\[/g')
+        find /home/agent/logs -type f \
+            -exec sed -i "s/${_escaped_token}/***REDACTED-GH_TOKEN***/g" {} +
+    fi
+    if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+        _escaped_key=$(printf '%s\n' "${ANTHROPIC_API_KEY}" | sed 's/[.^$*\\/]/\\&/g; s/\[/\\[/g')
+        find /home/agent/logs -type f \
+            -exec sed -i "s/${_escaped_key}/***REDACTED-ANTHROPIC_API_KEY***/g" {} +
+    fi
+}
+# Save the exit code before the trap runs so the container exits with the
+# original code even after the trap body executes additional commands.
+trap '_exit_code=$?; _log_capture_exit || true; exit $_exit_code' EXIT
+
+# -----------------------------------------------------------------------------
 # Preamble: resolve provider and validate credentials/required vars
 # (before any gh call, clone, or agent invocation)
 # -----------------------------------------------------------------------------
@@ -217,9 +277,9 @@ BASE_SHA="$(git merge-base "origin/${BASE_REF}" HEAD)"
 #     variables; this avoids duplicating potentially large blobs in memory.
 log "Computing diff ${BASE_SHA}..HEAD"
 CONTEXT_FILE="$(mktemp)"
-# Ensure the temp file is removed on all exit paths (normal, error, SIGINT, …)
-# so that `set -e` failures before the explicit `rm -f` below don't leak it.
-trap 'rm -f "$CONTEXT_FILE"' EXIT
+# The log-capture EXIT trap installed above (see _log_capture_exit) removes
+# ${CONTEXT_FILE:-} on all exit paths, superseding a standalone
+# `trap 'rm -f "$CONTEXT_FILE"' EXIT` here.
 
 # --- Gather existing review threads WITH IDs. GraphQL is the only place the
 #     thread IDs (used by #41's resolve-thread flow) surface; the REST
