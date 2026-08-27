@@ -267,9 +267,9 @@ Download an artifact with:
 gh run download <run-id> --name <artifact-name>
 ```
 
-The bind-mount and upload steps are present in all seven agent-container workflows: `agent-implement.yml`, `agent-groom.yml`, `agent-design.yml`, `agent-fix-checks.yml`, `agent-fix-deployment.yml`, `agent-respond-review.yml`, and `agent-review.yml`.
+The bind-mount and upload steps are present in all eight agent-container workflows: `agent-implement.yml`, `agent-groom.yml`, `agent-design.yml`, `agent-fix-checks.yml`, `agent-fix-deployment.yml`, `agent-resolve-conflicts.yml`, `agent-respond-review.yml`, and `agent-review.yml`.
 
-**Redaction:** the entrypoint runs a `sed` pass over every file in `/home/agent/logs/` before the workflow reads the mount, replacing the literal values of `GH_TOKEN` and `ANTHROPIC_API_KEY` with `***REDACTED-GH_TOKEN***` and `***REDACTED-ANTHROPIC_API_KEY***`.
+**Redaction:** the entrypoint runs a `sed` pass over every file in `/home/agent/logs/` before the workflow reads the mount, replacing the literal values of `GH_TOKEN`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` with `***REDACTED-GH_TOKEN***`, `***REDACTED-ANTHROPIC_API_KEY***`, and `***REDACTED-OPENAI_API_KEY***` respectively.
 The substitution runs inside the container; the token values never appear in a workflow-side shell command, and the redacted directory is what `actions/upload-artifact` stores and retains.
 
 **Local runs:** add `-v "$PWD/logs:/home/agent/logs"` to the `docker run` invocation to get the same artifacts on disk (see [README.md](README.md#4-build-the-developer-agent-container)).
