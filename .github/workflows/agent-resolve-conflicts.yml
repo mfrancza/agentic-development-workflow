@@ -69,6 +69,12 @@ jobs:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
+      - name: Prepare agent log directory
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/agent-logs"
+          chmod 0777 "${RUNNER_TEMP}/agent-logs"
+
       - name: Run agent
         uses: ./.github/actions/run-agent
         with:
@@ -80,3 +86,13 @@ jobs:
           pr-number: ${{ matrix.pr_number }}
           model: ${{ vars.DEFAULT_MODEL }}
           escalation-assignee: ${{ github.repository_owner }}
+          logs-dir: ${{ runner.temp }}/agent-logs
+
+      - name: Upload agent logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: agent-logs-resolve-conflicts-pr-${{ matrix.pr_number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-logs
+          retention-days: 30
+          if-no-files-found: warn
