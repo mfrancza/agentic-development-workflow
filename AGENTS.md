@@ -111,12 +111,10 @@ The Terraform-managed `AUTO_TRIGGER_AGENTS` Actions variable (a JSON object) con
 
 | Key | Upstream signal | Label applied |
 |-----|-----------------|---------------|
-| `groom` | `issues.opened` (any actor may open an issue) | `agent:groom` |
+| `groom` | `issues.opened` (sender must be in `AGENT_ALLOWLIST`) | `agent:groom` |
 | `design` | `issues.labeled` where label is `plan` (sender must be in `AGENT_ALLOWLIST`) | `agent:design` |
 | `developer` | `issues.labeled` where label is `do`, or `issues.unlabeled` where label is `draft` (sender must be in `AGENT_ALLOWLIST`) | `agent:developer` |
 | `review` | `pull_request.opened` on a branch whose name starts with `agent/` or `design/` (same-repo PRs only) | `agent:review` |
-
-**Behavioral note for `groom = true`:** when this gate is enabled, `agent:groom` is applied to every newly opened issue regardless of who opened it — including non-allowlisted collaborators and, on public repos, any GitHub user. This is the intended behavior (automatically grooming all incoming issues). Operators who want only allowlisted users to trigger grooming should leave `groom = false` and continue applying the label by hand.
 
 ## Expected Deliverables
 

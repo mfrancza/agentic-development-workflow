@@ -31,15 +31,18 @@ jobs:
   # ── Transition 1 ─────────────────────────────────────────────────────────────
   # issues.opened → agent:groom
   #
-  # No sender allowlist: any actor may open an issue; when this gate is enabled,
-  # agent:groom is applied to every newly opened issue. See design doc Decision 1
-  # and the AGENTS.md behavioral note under Auto-trigger gates.
+  # Sender allowlist required: only actors on AGENT_ALLOWLIST may trigger
+  # agent workflows, including auto-groom. Without this check, any actor who
+  # opens an issue (including non-allowlisted collaborators or, on public repos,
+  # any GitHub user) would cause the auto-trigger job to apply agent:groom and
+  # thereby trigger an agent run.
   auto-groom:
     if: >
       github.event_name == 'issues' &&
       github.event.action == 'opened' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
+      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
