@@ -65,6 +65,8 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 
 The developer workflows build the container from [`docker/`](docker/) and mint a short-lived installation token from the `developer-agent` GitHub App. The **reviewer image** is built from [`docker/reviewer/`](docker/reviewer/) and uses the `reviewer-agent` App identity (see the reviewer image section below). The `agent-review` workflow triggers it when the `agent:review` label is applied to a PR.
 
+- `.github/workflows/agent-auto-trigger.yml` — applies the next-stage `agent:*` label at each SDLC transition (issue opened, classification label applied, design PR merged, agent PR opened) using a minted developer-agent token. No agent container runs; downstream workflows do the actual work. Each gate is controlled by a key in `vars.AUTO_TRIGGER_AGENTS` (see **Auto-trigger gates** under **Labels**).
+
 ## Agent Actions
 
 The developer container is a single image dispatched by `AGENT_ACTION`. Required environment variables:
@@ -109,12 +111,10 @@ The Terraform-managed `AUTO_TRIGGER_AGENTS` Actions variable (a JSON object) con
 
 | Key | Upstream signal | Label applied |
 |-----|-----------------|---------------|
-| `groom` | `issues.opened` (any actor may open an issue) | `agent:groom` |
+| `groom` | `issues.opened` (sender must be in `AGENT_ALLOWLIST`) | `agent:groom` |
 | `design` | `issues.labeled` where label is `plan` (sender must be in `AGENT_ALLOWLIST`) | `agent:design` |
 | `developer` | `issues.labeled` where label is `do`, or `issues.unlabeled` where label is `draft` (sender must be in `AGENT_ALLOWLIST`) | `agent:developer` |
 | `review` | `pull_request.opened` on a branch whose name starts with `agent/` or `design/` (same-repo PRs only) | `agent:review` |
-
-**Behavioral note for `groom = true`:** when this gate is enabled, `agent:groom` is applied to every newly opened issue regardless of who opened it — including non-allowlisted collaborators and, on public repos, any GitHub user. This is the intended behavior (automatically grooming all incoming issues). Operators who want only allowlisted users to trigger grooming should leave `groom = false` and continue applying the label by hand.
 
 ## Expected Deliverables
 
