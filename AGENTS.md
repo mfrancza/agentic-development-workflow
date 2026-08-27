@@ -247,6 +247,33 @@ for details). See the same doc for the required sequencing.
   handles renewal reminders. This call must be made after the repo is public
   (runbook step 8).
 
+## Debugging
+
+### Container logs and session transcripts
+
+Every agent container run produces two items inside `/home/agent/logs/`:
+
+- `container.log` — merged stdout/stderr of the run (all `log()` lines from the entrypoint, output from `gh`/`git` and other tools, and the final Claude response text).
+- `session/` — a copy of `~/.claude/projects/**/*.jsonl` (Claude Code session transcripts), one JSONL file per session, containing every turn, tool call, tool result, and model response with timestamps.
+
+The entrypoint writes `container.log` via a `tee` redirect installed at the top of the script — so even env-validation failure messages are captured — and copies session files in a trap-EXIT handler so they survive all exit paths (normal completion, `set -e` abort, SIGTERM).
+An OOM kill (SIGKILL) bypasses the trap; whatever `tee` has already written to the bind-mount is the only artifact that survives that scenario.
+
+**In CI**, the workflow pre-creates the host directory and the logs directory is uploaded as a GitHub Actions artifact after the container exits (`if: always()`, so it uploads on both success and failure).
+Artifact names encode the workflow context (e.g. `agent-logs-implement-issue-42-run-<run_id>-<attempt>`); retention is 30 days.
+Download an artifact with:
+
+```bash
+gh run download <run-id> --name <artifact-name>
+```
+
+The bind-mount and upload steps are present in all eight agent-container workflows: `agent-implement.yml`, `agent-groom.yml`, `agent-design.yml`, `agent-fix-checks.yml`, `agent-fix-deployment.yml`, `agent-resolve-conflicts.yml`, `agent-respond-review.yml`, and `agent-review.yml`.
+
+**Redaction:** the entrypoint runs a `sed` pass over every file in `/home/agent/logs/` before the workflow reads the mount, replacing the literal values of `GH_TOKEN`, `ANTHROPIC_API_KEY`, and `OPENAI_API_KEY` with `***REDACTED-GH_TOKEN***`, `***REDACTED-ANTHROPIC_API_KEY***`, and `***REDACTED-OPENAI_API_KEY***` respectively.
+The substitution runs inside the container; the token values never appear in a workflow-side shell command, and the redacted directory is what `actions/upload-artifact` stores and retains.
+
+**Local runs:** add `-v "$PWD/logs:/home/agent/logs"` to the `docker run` invocation to get the same artifacts on disk (see [README.md](README.md#4-build-the-developer-agent-container)).
+
 ## Keeping Documentation Current
 
 **Whenever you make a change that affects how agents are configured, triggered, or run, update the docs in the same PR.** Documentation drift makes onboarding painful and makes agent runs unpredictable.

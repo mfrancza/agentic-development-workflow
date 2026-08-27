@@ -45,6 +45,7 @@ Day-to-day operation is driven entirely by GitHub labels and events:
 - PR review submitted on an agent-authored PR → the agent addresses feedback and pushes.
 - Deployment failure → the agent opens a follow-up fix-up PR. (Triggers on any `deployment_status` failure; skips cleanly unless it can map the failing deployment SHA to a PR containing `Closes #N`.)
 - Add a **`model:<name>`** label (e.g. `model:opus`, `model:haiku`) to override the default Claude model for that issue's or PR's run. Works on both issues (developer/grooming/fix-deployment runs) and PRs (`agent:review` runs). The grooming agent automatically selects and applies one of these labels based on issue complexity — if a `model:*` label is already present when the grooming agent runs, it will leave it unchanged. At most one `model:*` label is allowed; workflows fail loudly if more than one is present.
+- **CI run logs** — container stdout/stderr and Claude Code session transcripts are captured as workflow-run artifacts with 30-day retention. Find them on the workflow-run page under **Artifacts**, or download with `gh run download <run-id>`. See [AGENTS.md](AGENTS.md#debugging) for what's in each artifact and how redaction works.
 
 Only usernames (and agent bot identities such as `<developer-agent-app-slug>[bot]`) in the Terraform-managed `AGENT_ALLOWLIST` can trigger the label-driven workflows (`agent:groom`, `agent:developer`, `agent:review`, `agent:design`). The agent bots are included so an agent can apply `agent:*` labels to hand work off — for example, the developer agent applying `agent:review` on its own PR to request a code review. Event-driven workflows then apply their own gates: `fix-checks`/`respond-review` run only for developer-agent PRs, and `fix-deployment` runs on any failed `deployment_status` event and skips cleanly unless it can map the deployment SHA to a PR containing `Closes #N`.
 
@@ -206,6 +207,7 @@ export GH_TOKEN=$(gh auth token)    # or set from another source
 [ -n "${ANTHROPIC_API_KEY:-}" ] || { read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY; }
 
 docker run --rm \
+  -v "$PWD/logs:/home/agent/logs" \
   -e ANTHROPIC_API_KEY \
   -e GH_TOKEN \
   -e GITHUB_REPO="owner/repo" \
