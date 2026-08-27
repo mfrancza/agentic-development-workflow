@@ -338,3 +338,49 @@ immediately. Issue #128 validates the full loop and picks up any small fixes.
 
 Dependencies are recorded natively as GitHub blocked-by relationships on the
 issues.
+
+## Validation record (issue #128)
+
+End-to-end validation completed 2026-08-27 against Claude Code v2.1.150
+(pinned in `docker/Dockerfile` and `docker/reviewer/Dockerfile`). All
+verification steps confirm the design behaves as specified.
+
+### Session path confirmed
+
+`~/.claude/projects/-home-agent-work/<session-uuid>.jsonl` — the
+`<encoded-cwd>` segment encodes `/home/agent/work` as `-home-agent-work`
+(leading `/` stripped, internal `/` replaced with `-`). Non-empty on every
+run that invokes Claude; absent when Claude was never invoked (e.g. the
+branch-not-found failure below). Subagent JSONL files land in a nested
+`subagents/` directory under the session UUID directory when Claude spawns
+sub-agents, and `tool-results/` contains tool-result blobs for large
+outputs.
+
+### Validated runs
+
+| Scenario | Run ID | Artifact | Findings |
+|----------|--------|----------|----------|
+| Developer image happy path (`implement`, issue #127) | [33033792385](https://github.com/mfrancza/agentic-development-workflow/actions/runs/33033792385) | [`agent-logs-implement-issue-127-run-33033792385-1`](https://github.com/mfrancza/agentic-development-workflow/actions/runs/33033792385/artifacts/9631311591) | `container.log` has `[agent] … Fetching issue`, `Running Claude`, `Container exiting — harvesting session files and redacting secrets`; `session/-home-agent-work/<uuid>.jsonl` has 78 lines; subagent JSONL present |
+| Reviewer image happy path (`agent-review`, PR #268) | [33034051074](https://github.com/mfrancza/agentic-development-workflow/actions/runs/33034051074) | [`agent-logs-review-pr-268-run-33034051074-1`](https://github.com/mfrancza/agentic-development-workflow/actions/runs/33034051074/artifacts/9631382463) | `container.log` has `[reviewer] … Reviewing PR`, `Running agent to review PR`, `Container exiting …`; `session/-home-agent-work/<uuid>.jsonl` has 82 lines; `tool-results/` populated |
+| Failure path (`respond-review`, branch deleted mid-run) | [33033554100](https://github.com/mfrancza/agentic-development-workflow/actions/runs/33033554100) | [`agent-logs-respond-review-pr-266-run-33033554100-1`](https://github.com/mfrancza/agentic-development-workflow/actions/runs/33033554100/artifacts/9631149656) | Container exited non-zero (`fatal: couldn't find remote ref`); `if: always()` uploaded the 430-byte artifact; `container.log` contains the error text; no `session/` (Claude never ran) |
+
+### Secret-redaction negative confirmation
+
+Five artifacts examined (three above plus two earlier `respond-review` runs).
+No raw GH installation tokens (`ghs_*` prefix) or Anthropic API key patterns
+appear in any `container.log` or `session/*.jsonl` file. The "harvesting
+session files and redacting secrets" trap message confirms the redaction pass
+ran on every exit path. A formal positive test (injecting a synthetic known
+token and confirming the `***REDACTED-GH_TOKEN***` replacement appears in the
+artifact) was not performed in this validation pass; it is tracked as a
+follow-up test step for the next Claude Code version bump.
+
+### Docs-match-reality spot-check
+
+PR #268 (`docs: document agent container log capture in AGENTS.md and
+README.md`, branch `agent/issue-127`) was open at validation time and adds
+`-v "$PWD/logs:/home/agent/logs"` to the local `docker run` example in
+`README.md`. The reviewer agent reviewed this PR during the validation pass
+and found two doc errors (seven vs eight workflows; missing
+`OPENAI_API_KEY` from the redaction list) — both tracked as review findings
+on that PR.
