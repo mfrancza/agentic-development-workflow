@@ -1,0 +1,217 @@
+name: agent-auto-trigger
+
+# Applies the next-stage agent:* label at each SDLC transition, gated on the
+# per-label switches in vars.AUTO_TRIGGER_AGENTS (a JSON object managed by
+# Terraform). All gates default to false (opt-in); see
+# docs/design/auto-trigger-agents.md for the full design.
+#
+# Five transitions (see design doc "The five transitions we are gating" table):
+#   1. auto-groom          — issues.opened                   → agent:groom
+#   2. auto-design         — issues.labeled (plan)           → agent:design
+#   3. auto-developer-do   — issues.labeled (do)             → agent:developer
+#   4. auto-developer-undraft — issues.unlabeled (draft)     → agent:developer
+#   5. auto-review         — pull_request.opened (agent/…)   → agent:review
+#
+# No agent container is run in this workflow — each job only mints a token
+# and applies a label. The downstream agent workflows (agent-groom.yml,
+# agent-design.yml, agent-implement.yml, agent-review.yml) do the actual work.
+
+on:
+  issues:
+    types: [opened, labeled, unlabeled]
+  pull_request:
+    types: [opened]
+
+# Label writes go through the minted App token; the workflow itself only needs
+# contents: read to resolve local composite actions.
+permissions:
+  contents: read
+
+jobs:
+  # ── Transition 1 ─────────────────────────────────────────────────────────────
+  # issues.opened → agent:groom
+  #
+  # No sender allowlist: any actor may open an issue; when this gate is enabled,
+  # agent:groom is applied to every newly opened issue. See design doc Decision 1
+  # and the AGENTS.md behavioral note under Auto-trigger gates.
+  auto-groom:
+    if: >
+      github.event_name == 'issues' &&
+      github.event.action == 'opened' &&
+      vars.AUTO_TRIGGER_AGENTS != '' &&
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Checkout is required to resolve the local ./.github/actions/agent-token
+      # composite action. The issues.opened event does not carry PR-authored
+      # code, so checking out the default branch is safe here.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Apply agent:groom label
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:groom"
+
+  # ── Transition 2 ─────────────────────────────────────────────────────────────
+  # issues.labeled (plan) → agent:design
+  #
+  # Sender allowlist required: any triage collaborator can apply labels; without
+  # this check a non-allowlisted actor could apply 'plan' and cause the
+  # developer-agent App (which IS in AGENT_ALLOWLIST) to trigger agent:design.
+  auto-design:
+    if: >
+      github.event_name == 'issues' &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'plan' &&
+      vars.AUTO_TRIGGER_AGENTS != '' &&
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true &&
+      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Apply agent:design label
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:design"
+
+  # ── Transition 3 ─────────────────────────────────────────────────────────────
+  # issues.labeled (do) → agent:developer
+  #
+  # Sender allowlist required: same rationale as transition 2 above.
+  auto-developer-do:
+    if: >
+      github.event_name == 'issues' &&
+      github.event.action == 'labeled' &&
+      github.event.label.name == 'do' &&
+      vars.AUTO_TRIGGER_AGENTS != '' &&
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
+      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Apply agent:developer label
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:developer"
+
+  # ── Transition 4 ─────────────────────────────────────────────────────────────
+  # issues.unlabeled (draft) → agent:developer
+  #
+  # Fires when agent-design.yml removes the 'draft' label from sub-issues after
+  # the design PR merges — the developer-agent bot (in AGENT_ALLOWLIST) is the
+  # sender in that case. Sender allowlist required: same no-per-label-permission
+  # rationale as issues.labeled (transitions 2 and 3).
+  auto-developer-undraft:
+    if: >
+      github.event_name == 'issues' &&
+      github.event.action == 'unlabeled' &&
+      github.event.label.name == 'draft' &&
+      vars.AUTO_TRIGGER_AGENTS != '' &&
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
+      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Apply agent:developer label
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:developer"
+
+  # ── Transition 5 ─────────────────────────────────────────────────────────────
+  # pull_request.opened on an agent/… or design/… branch (same-repo) → agent:review
+  #
+  # Branch-prefix predicate is preferred over a sender-login check: the App slug
+  # varies per install. Head-repo guard prevents fork PRs from triggering this
+  # even if the branch name matches. No sender allowlist: a PR on an agent/…
+  # branch is a candidate for the review pipeline regardless of who opened it.
+  #
+  # No checkout: actions/create-github-app-token is called directly to avoid
+  # executing PR-authored local actions with secrets in scope. See
+  # docs/design/auto-trigger-agents.md Decision 3.
+  auto-review:
+    if: >
+      github.event_name == 'pull_request' &&
+      github.event.action == 'opened' &&
+      (startsWith(github.event.pull_request.head.ref, 'agent/') ||
+       startsWith(github.event.pull_request.head.ref, 'design/')) &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      vars.AUTO_TRIGGER_AGENTS != '' &&
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).review == true
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # No checkout step: see comment on this job above.
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Apply agent:review label
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:review"

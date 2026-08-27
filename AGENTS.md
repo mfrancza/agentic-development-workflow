@@ -65,6 +65,8 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 
 The developer workflows build the container from [`docker/`](docker/) and mint a short-lived installation token from the `developer-agent` GitHub App. The **reviewer image** is built from [`docker/reviewer/`](docker/reviewer/) and uses the `reviewer-agent` App identity (see the reviewer image section below). The `agent-review` workflow triggers it when the `agent:review` label is applied to a PR.
 
+- `.github/workflows/agent-auto-trigger.yml` — applies the next-stage `agent:*` label at each SDLC transition (issue opened, classification label applied, design PR merged, agent PR opened) using a minted developer-agent token. No agent container runs; downstream workflows do the actual work. Each gate is controlled by a key in `vars.AUTO_TRIGGER_AGENTS` (see **Auto-trigger gates** under **Labels**).
+
 ## Agent Actions
 
 The developer container is a single image dispatched by `AGENT_ACTION`. Required environment variables:
