@@ -116,6 +116,8 @@ The Terraform-managed `AUTO_TRIGGER_AGENTS` Actions variable (a JSON object) con
 | `developer` | `issues.labeled` where label is `do`, or `issues.unlabeled` where label is `draft` (sender must be in `AGENT_ALLOWLIST`) | `agent:developer` |
 | `review` | `pull_request.opened` on a branch whose name starts with `agent/` or `design/` (same-repo PRs only) | `agent:review` |
 
+- **Troubleshooting silent skips.** If an auto-applied `agent:*` label does not start the downstream workflow (the run shows `skipped` with no error), check that the developer-agent bot identity (e.g. `mfrancza-developer-agent[bot]`) is present in `AGENT_ALLOWLIST` — a missing entry causes the auto-trigger job to succeed and apply the label while every downstream agent workflow silently skips.
+
 ## Expected Deliverables
 
 - **Developer agent container** — implemented at [`docker/`](docker/).
