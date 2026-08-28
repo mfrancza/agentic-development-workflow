@@ -174,10 +174,13 @@ This matters because the downstream workflows (`agent-groom.yml`,
 `agent-design.yml`, `agent-implement.yml`, `agent-review.yml`) gate on
 `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)`. The
 sender of the label-added event is whoever the token belongs to — so the
-developer-agent bot must be in `AGENT_ALLOWLIST`. It already is, per
-`AGENTS.md`: *"The agent bots are included in the allowlist so that agents
-can apply `agent:*` labels to route work to one another."* No allowlist
-change needed.
+developer-agent bot slug MUST be present in `agent_allowlist` (see
+`terraform.tfvars.example` for the required form). If the entry is missing,
+the auto-trigger job succeeds and the `agent:*` label lands on the issue,
+but every downstream agent workflow run concludes `skipped` with no error —
+the auto-trigger chain appears to work (the label is there) while the actual
+agent run never starts. Confirm the developer-agent bot identity is in
+`AGENT_ALLOWLIST` before enabling any auto-trigger gate.
 
 **Alternatives considered.**
 
