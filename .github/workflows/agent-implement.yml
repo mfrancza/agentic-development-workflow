@@ -86,6 +86,7 @@ jobs:
           agent-action: implement
           issue-number: ${{ github.event.issue.number }}
           model: ${{ steps.model.outputs.claude_model }}
+          code-reviewers: ${{ vars.CODE_REVIEWERS }}
           logs-dir: ${{ runner.temp }}/agent-logs
 
       - name: Upload agent logs

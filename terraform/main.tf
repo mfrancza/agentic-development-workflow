@@ -90,6 +90,26 @@ resource "github_actions_variable" "auto_trigger_agents" {
   value         = jsonencode(var.auto_trigger_agents)
 }
 
+# Expose admin assignee usernames as a JSON-encoded repository Actions variable
+# so agent-groom.yml can pass them into the grooming container as ADMIN_ASSIGNEES.
+# The grooming agent assigns every username in this list when it applies the
+# human-required label to an issue. Defaults to [] (no auto-assignment).
+resource "github_actions_variable" "admin_assignees" {
+  repository    = github_repository.this.name
+  variable_name = "ADMIN_ASSIGNEES"
+  value         = jsonencode(var.admin_assignees)
+}
+
+# Expose code reviewer usernames as a JSON-encoded repository Actions variable
+# so agent-implement.yml can pass them into the developer container as CODE_REVIEWERS.
+# The developer agent requests every username in this list as a PR reviewer when
+# the PR warrants human code review. Defaults to [] (no auto-reviewer-request).
+resource "github_actions_variable" "code_reviewers" {
+  repository    = github_repository.this.name
+  variable_name = "CODE_REVIEWERS"
+  value         = jsonencode(var.code_reviewers)
+}
+
 # Protection for the default branch via a repository ruleset (the modern
 # primitive — supports granular bypass actors, unlike the legacy
 # github_branch_protection resource).

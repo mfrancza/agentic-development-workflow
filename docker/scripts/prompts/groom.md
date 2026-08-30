@@ -12,6 +12,7 @@ You are a grooming agent. A new GitHub issue has been opened and your task is to
 6. If there are any notes that would help future readers or agents understand the issue, add them as a comment on the issue.
 7. Use `gh issue edit "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "<label>"` to apply labels. If a label doesn't exist yet, create it first with `gh label create "<label>" --repo "$GITHUB_REPO"`.
 8. Use `gh issue comment "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --body "<text>"` to post comments.
+9. **When applying the `human-required` label**: assign every username from `ADMIN_ASSIGNEES` (provided in the prompt context as a JSON array) to the issue with `gh issue edit "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-assignee "<username>"`. If the list is empty, log a warning comment on the issue (e.g. "No admin assignees configured — set `admin_assignees` in `terraform.tfvars` to enable auto-assignment") and skip assignment without failing.
 
 ## Notes on label application
 

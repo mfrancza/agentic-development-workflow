@@ -142,6 +142,10 @@ cp terraform.tfvars.example terraform.tfvars
 #   default_model        — repo-wide default model (e.g. "sonnet")
 #   auto_trigger_agents  — per-stage auto-trigger switches (all false by default;
 #                          set a key to true to auto-apply that stage's agent:* label)
+#   admin_assignees      — GitHub usernames assigned to issues when the grooming agent
+#                          applies the human-required label (default: [])
+#   code_reviewers       — GitHub usernames requested as PR reviewers when the developer
+#                          agent determines human review is warranted (default: [])
 
 export GITHUB_TOKEN=$(gh auth token)  # or any token with `repo` scope
 
@@ -158,7 +162,7 @@ terraform apply
 Terraform will:
 - Codify repo settings (squash-merge only, delete branch on merge, etc.).
 - Apply branch protection on `main` via a repository ruleset (PR review required, no force pushes, no deletion, linear history — direct pushes to `main` blocked for everyone, admins included; admins can bypass review only via PR merges).
-- Publish `AGENT_ALLOWLIST`, `DEFAULT_MODEL`, and `AUTO_TRIGGER_AGENTS` as repo-level Actions variables so workflows reference them without hardcoding values in YAML.
+- Publish `AGENT_ALLOWLIST`, `DEFAULT_MODEL`, `AUTO_TRIGGER_AGENTS`, `ADMIN_ASSIGNEES`, and `CODE_REVIEWERS` as repo-level Actions variables so workflows reference them without hardcoding values in YAML.
 - Create the labels consumed by the agent workflows (`agent:developer`, `agent:groom`, `agent:review`, `agent:design`, the Anthropic tier aliases `model:sonnet`/`model:opus`/`model:haiku` plus the generic series tags and pinned snapshot IDs for the currently active Claude model families, the OpenAI and xAI `model:*` labels, the grooming labels `question`/`bug`/`enhancement`/`dependency upgrade`/`do`/`plan`, `human-required` for issues/PRs needing a human in the loop, and `draft` for sub-issues scoped by an unmerged design) so they show up in the GitHub label picker on issue and pull request creation.
 
 If `terraform apply` errors with `422 already_exists` on a default GitHub label (`bug`, `enhancement`, `question` — these ship pre-created on new repos), import them and re-apply:

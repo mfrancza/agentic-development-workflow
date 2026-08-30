@@ -66,6 +66,7 @@ jobs:
           agent-action: groom
           issue-number: ${{ github.event.issue.number }}
           model: ${{ steps.model.outputs.claude_model }}
+          admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}
           logs-dir: ${{ runner.temp }}/agent-logs
 
       - name: Upload agent logs

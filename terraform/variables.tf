@@ -35,3 +35,15 @@ variable "auto_trigger_agents" {
     review    = false
   }
 }
+
+variable "admin_assignees" {
+  description = "GitHub usernames to assign to issues that require human action (e.g. issues receiving the human-required label during grooming). The grooming agent reads this list from the ADMIN_ASSIGNEES Actions variable and assigns every username when it applies the human-required label. Set to [] to disable auto-assignment; the agent will log a warning and skip assignment. Stored as a JSON-encoded repository Actions variable ADMIN_ASSIGNEES."
+  type        = list(string)
+  default     = []
+}
+
+variable "code_reviewers" {
+  description = "GitHub usernames to request as PR reviewers when the developer agent determines that a PR warrants human code review (e.g. security-sensitive changes). The developer agent reads this list from the CODE_REVIEWERS Actions variable and requests every username as a reviewer. Set to [] to disable auto-reviewer-request; the agent will log a warning and skip the request. Stored as a JSON-encoded repository Actions variable CODE_REVIEWERS."
+  type        = list(string)
+  default     = []
+}

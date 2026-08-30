@@ -20,3 +20,18 @@ auto_trigger_agents = {
   developer = false
   review    = false
 }
+
+# GitHub usernames assigned to issues that receive the human-required label
+# during grooming (e.g. security-sensitive requests). The grooming agent assigns
+# every username in this list. Leave empty to disable auto-assignment; the agent
+# will log a warning and skip assignment without failing.
+admin_assignees = [
+  # "your-github-username",
+]
+
+# GitHub usernames requested as PR reviewers when the developer agent determines
+# human code review is warranted (e.g. security-related changes). Leave empty to
+# disable auto-reviewer-request; the agent will log a warning and skip without failing.
+code_reviewers = [
+  # "your-github-username",
+]

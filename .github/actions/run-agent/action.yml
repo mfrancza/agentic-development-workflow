@@ -59,6 +59,20 @@ inputs:
       not applicable (agent-resolve-conflicts only).
     required: false
     default: ''
+  admin-assignees:
+    description: >
+      JSON-encoded list of GitHub usernames injected as ADMIN_ASSIGNEES; passed
+      to the grooming container so the agent can assign humans when it applies
+      the human-required label. Omit when not applicable (agent-groom only).
+    required: false
+    default: ''
+  code-reviewers:
+    description: >
+      JSON-encoded list of GitHub usernames injected as CODE_REVIEWERS; passed
+      to the developer container so the agent can request human PR reviewers
+      when the change warrants review. Omit when not applicable (agent-implement only).
+    required: false
+    default: ''
   output-dir:
     # NOTE: never write a template expression (dollar-brace syntax) in this
     # metadata section — the runner template-evaluates action.yml at manifest
@@ -118,6 +132,8 @@ runs:
         _GITHUB_PR_NUMBER: ${{ inputs.pr-number }}
         _GITHUB_RUN_ID: ${{ inputs.run-id }}
         _ESCALATION_ASSIGNEE: ${{ inputs.escalation-assignee }}
+        _ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }}
+        _CODE_REVIEWERS: ${{ inputs.code-reviewers }}
         _OUTPUT_DIR: ${{ inputs.output-dir }}
         _OUTPUT_MOUNT: ${{ inputs.output-mount }}
         _RESOLVE_THREADS_FILE: ${{ inputs.resolve-threads-file }}
@@ -135,6 +151,8 @@ runs:
         [[ -n "${_GITHUB_PR_NUMBER}" ]] && _opt_env+=(-e GITHUB_PR_NUMBER="${_GITHUB_PR_NUMBER}")
         [[ -n "${_GITHUB_RUN_ID}" ]] && _opt_env+=(-e GITHUB_RUN_ID="${_GITHUB_RUN_ID}")
         [[ -n "${_ESCALATION_ASSIGNEE}" ]] && _opt_env+=(-e ESCALATION_ASSIGNEE="${_ESCALATION_ASSIGNEE}")
+        [[ -n "${_ADMIN_ASSIGNEES}" ]] && _opt_env+=(-e ADMIN_ASSIGNEES="${_ADMIN_ASSIGNEES}")
+        [[ -n "${_CODE_REVIEWERS}" ]] && _opt_env+=(-e CODE_REVIEWERS="${_CODE_REVIEWERS}")
         [[ -n "${_RESOLVE_THREADS_FILE}" ]] && _opt_env+=(-e RESOLVE_THREADS_FILE="${_RESOLVE_THREADS_FILE}")
 
         # Create and prepare the host output directory if requested; build the
