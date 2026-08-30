@@ -92,8 +92,8 @@ the reviewer container. It uses the reviewer-app installation token (already
 minted for the review-post step) to:
 
 1. List reviews on the PR (paginated).
-2. Filter to reviews authored by the reviewer bot identity (matching
-   `steps.setup.outputs.app-slug` or `[bot]`-suffixed login) whose state is
+2. Filter to reviews authored by the reviewer bot identity (login derived from
+   `viewer.login` using the reviewer-app token) whose state is
    `CHANGES_REQUESTED` and not already `DISMISSED`.
 3. Call `PUT /repos/{repo}/pulls/{n}/reviews/{review_id}/dismissals` on each,
    with a fixed message: `Superseded by re-review from this bot.`
@@ -184,7 +184,7 @@ inline shell into a TypeScript activity. Implement it as:
   `CHANGES_REQUESTED` are targeted), and an API error on one review's
   dismissal (fail-open: continue with the remaining ones and warn).
 
-Inputs: `token`, `repo`, `pr-number`, `reviewer-login`.
+Inputs: `token`, `repo`, `pr-number`.
 Outputs: none required by consumers; the step logs the dismissed IDs (or a
 "nothing to dismiss" message) for the debug trail.
 
