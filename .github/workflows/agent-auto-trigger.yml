@@ -335,68 +335,8 @@ jobs:
           closed-issue-number: ${{ github.event.issue.number }}
 
       - name: Apply agent:developer and remove blocked from each newly-unblocked issue
-        env:
-          GH_TOKEN: ${{ steps.setup.outputs.token }}
-          GITHUB_REPO: ${{ github.repository }}
-          UNBLOCKED: ${{ steps.find-unblocked.outputs.unblocked }}
-        run: |
-          set -euo pipefail
-
-          mapfile -t ISSUE_NUMBERS < <(jq -r '.[]' <<< "${UNBLOCKED}")
-
-          if [ "${#ISSUE_NUMBERS[@]}" -eq 0 ]; then
-            echo "No newly-unblocked issues found; nothing to do."
-            exit 0
-          fi
-
-          echo "Found ${#ISSUE_NUMBERS[@]} newly-unblocked issue(s): ${ISSUE_NUMBERS[*]}"
-
-          for ISSUE_NUM in "${ISSUE_NUMBERS[@]}"; do
-            echo "Processing issue #${ISSUE_NUM}."
-
-            # Apply agent:developer first so the labeled event fires and downstream
-            # workflows (agent-implement.yml) can react to it.
-            echo "  Applying agent:developer to issue #${ISSUE_NUM}."
-            if ! gh issue edit "${ISSUE_NUM}" --repo "${GITHUB_REPO}" --add-label "agent:developer"; then
-              # Re-check: if the label is absent after the failure it's a real
-              # operational error (permissions, rate-limit, transient API error).
-              # If it's already present the edit exited non-zero because there
-              # was nothing to add — treat as a no-op warning.
-              _recheck_status=0
-              _recheck_output="$(gh api "repos/${GITHUB_REPO}/issues/${ISSUE_NUM}" \
-                  --jq 'any(.labels[]; .name == "agent:developer")')" || _recheck_status=$?
-              if [ "${_recheck_status}" -ne 0 ]; then
-                echo "::error::Failed to apply agent:developer to issue #${ISSUE_NUM}, and the re-check API call also failed (check token permissions and API rate limits)."
-                exit 1
-              elif [ "${_recheck_output}" != "true" ]; then
-                echo "::error::Failed to apply agent:developer to issue #${ISSUE_NUM} and the label is still absent. Check token permissions and API rate limits."
-                exit 1
-              else
-                echo "::warning::agent:developer was already present on issue #${ISSUE_NUM} — skipping add (non-fatal)."
-              fi
-            fi
-
-            # Remove blocked second: this fires an issues.unlabeled event for
-            # 'blocked', which is NOT 'draft', so transition #4 does not re-fire.
-            echo "  Removing blocked label from issue #${ISSUE_NUM}."
-            if ! gh issue edit "${ISSUE_NUM}" --repo "${GITHUB_REPO}" --remove-label "blocked"; then
-              # Re-check: if the label is still present after the failure it's a
-              # real operational error; if it's already absent treat as a no-op.
-              _recheck_status=0
-              _recheck_output="$(gh api "repos/${GITHUB_REPO}/issues/${ISSUE_NUM}" \
-                  --jq 'any(.labels[]; .name == "blocked")')" || _recheck_status=$?
-              if [ "${_recheck_status}" -ne 0 ]; then
-                echo "::error::Failed to remove blocked label from issue #${ISSUE_NUM}, and the re-check API call also failed (check token permissions and API rate limits)."
-                exit 1
-              elif [ "${_recheck_output}" = "true" ]; then
-                echo "::error::Failed to remove blocked label from issue #${ISSUE_NUM} and the label is still present. Check token permissions and API rate limits."
-                exit 1
-              else
-                echo "::warning::blocked label was already absent from issue #${ISSUE_NUM} — skipping remove (non-fatal)."
-              fi
-            fi
-
-            echo "  Done processing issue #${ISSUE_NUM}."
-          done
-
-          echo "Cascade complete. Applied agent:developer and removed blocked from ${#ISSUE_NUMBERS[@]} issue(s)."
+        uses: ./.github/actions/apply-unblocked-labels
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          unblocked: ${{ steps.find-unblocked.outputs.unblocked }}
