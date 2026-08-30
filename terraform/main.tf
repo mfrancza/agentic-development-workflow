@@ -155,7 +155,7 @@ resource "github_repository_ruleset" "main" {
 # to remember exact spellings for the trigger and model-override labels, and
 # the grooming agent doesn't need to `gh label create` on demand.
 #
-# Five groups:
+# Six groups:
 #  - agent:* trigger labels (the workflows in .github/workflows/ gate on
 #    these; applying one routes the issue or PR to that agent). Note that
 #    `agent:developer`, `agent:groom`, and `agent:design` are applied to
@@ -174,6 +174,12 @@ resource "github_repository_ruleset" "main" {
 #    IDs (e.g. `model:claude-sonnet-4-5-20250929`) — fully reproducible.
 #    The entrypoint accepts any `claude-*` model ID, so ad-hoc pinned labels
 #    that are not pre-provisioned here still route correctly at runtime.
+#  - model:<agent-type>:<name> per-agent overrides (take precedence over
+#    generic model:<name> labels for issue-driven workflows). Pre-provisioned
+#    agent types: developer, groom, design, review. Resolution waterfall for
+#    issue-driven workflows: (1) model:<agent-type>:* label on the issue;
+#    (2) generic model:<name> label; (3) vars.DEFAULT_MODEL. Fail loudly if
+#    more than one label matches at either tier.
 #  - grooming labels (the grooming agent applies these based on issue
 #    content — see agents/grooming/label-criteria.json).
 #  - workflow labels (`human-required` signals that an agent has escalated to
@@ -346,6 +352,62 @@ locals {
     "model:grok-code-fast-1" = {
       color       = "1d76db"
       description = "Run agents on this issue with xAI grok-code-fast-1 (overrides DEFAULT_MODEL)."
+    }
+
+    # Per-agent model overrides. Each label targets a single agent type and
+    # takes precedence over any generic model:<name> label on the same issue.
+    # Resolution waterfall: (1) model:<agent-type>:* on the issue; (2) generic
+    # model:<name> on the issue; (3) vars.DEFAULT_MODEL. Fail loudly if more
+    # than one label matches at either tier.
+    # The model:review:* labels are pre-provisioned for future workflow
+    # support; current PR-based workflows use single-tier model:* resolution.
+    "model:groom:haiku" = {
+      color       = "1d76db"
+      description = "Override model for the groom agent only: latest Claude Haiku (takes precedence over generic model:* labels)."
+    }
+    "model:groom:sonnet" = {
+      color       = "1d76db"
+      description = "Override model for the groom agent only: latest Claude Sonnet (takes precedence over generic model:* labels)."
+    }
+    "model:groom:opus" = {
+      color       = "1d76db"
+      description = "Override model for the groom agent only: latest Claude Opus (takes precedence over generic model:* labels)."
+    }
+    "model:design:haiku" = {
+      color       = "1d76db"
+      description = "Override model for the design agent only: latest Claude Haiku (takes precedence over generic model:* labels)."
+    }
+    "model:design:sonnet" = {
+      color       = "1d76db"
+      description = "Override model for the design agent only: latest Claude Sonnet (takes precedence over generic model:* labels)."
+    }
+    "model:design:opus" = {
+      color       = "1d76db"
+      description = "Override model for the design agent only: latest Claude Opus (takes precedence over generic model:* labels)."
+    }
+    "model:developer:haiku" = {
+      color       = "1d76db"
+      description = "Override model for the developer agent only: latest Claude Haiku (takes precedence over generic model:* labels)."
+    }
+    "model:developer:sonnet" = {
+      color       = "1d76db"
+      description = "Override model for the developer agent only: latest Claude Sonnet (takes precedence over generic model:* labels)."
+    }
+    "model:developer:opus" = {
+      color       = "1d76db"
+      description = "Override model for the developer agent only: latest Claude Opus (takes precedence over generic model:* labels)."
+    }
+    "model:review:haiku" = {
+      color       = "1d76db"
+      description = "Override model for the review agent only: latest Claude Haiku (takes precedence over generic model:* labels)."
+    }
+    "model:review:sonnet" = {
+      color       = "1d76db"
+      description = "Override model for the review agent only: latest Claude Sonnet (takes precedence over generic model:* labels)."
+    }
+    "model:review:opus" = {
+      color       = "1d76db"
+      description = "Override model for the review agent only: latest Claude Opus (takes precedence over generic model:* labels)."
     }
 
     "question" = {
