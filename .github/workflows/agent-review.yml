@@ -111,6 +111,20 @@ jobs:
           repo: ${{ github.repository }}
           default-model: ${{ vars.DEFAULT_MODEL }}
 
+      - name: Dismiss stale reviewer-bot CHANGES_REQUESTED reviews
+        # Fail-open: dismissal is defence-in-depth (see Decision 2 of
+        # docs/design/reviewer-supersede-stale-verdict.md). If this step
+        # errors the review pass still runs; continue-on-error ensures a step
+        # failure does not cancel the job. The activity itself also uses
+        # core.warning() rather than core.setFailed() for individual API
+        # errors, so the common case is a clean zero exit.
+        continue-on-error: true
+        uses: ./.github/actions/dismiss-stale-reviewer-reviews
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          pr-number: ${{ github.event.pull_request.number }}
+
       - name: Prepare agent log directory
         run: |
           set -euo pipefail
