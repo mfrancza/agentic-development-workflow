@@ -1,10 +1,9 @@
 # Model Guidance
 
 This document is the **single source of truth** for tier selection in this repository. Humans apply
-it when labeling issues manually or reviewing a labeled issue. Once issue #336 lands, the grooming
-agent will read it at run time when selecting a `model:*` label. Once issues #336 and #337 land,
-every other document that discusses model tiers will link back here rather than duplicating the
-guidance.
+it when labeling issues manually or reviewing a labeled issue. The grooming agent reads it at run
+time when selecting a `model:*` label. All other documents that discuss model tiers link back here
+rather than duplicating the guidance.
 
 ---
 
