@@ -42,6 +42,11 @@ USER agent
 WORKDIR /home/agent
 
 # Configure Codex CLI to use xAI's OpenAI-compatible API endpoint for Grok models.
+# Verification result (docs/design/grok-developer-image-entrypoint.md Decision 1):
+# at the pinned Codex CLI release (v0.146.0) a built-in first-class "xai" provider
+# was not confirmed via `codex --help`, so the explicit config block is required.
+# If a future pinned release ships a built-in xai provider the block is additive
+# (inert) rather than harmful — the custom entry is still read and remains correct.
 # Custom model_providers read credentials from the env var named by env_key
 # (XAI_API_KEY), not from ~/.codex/auth.json — so no codex login step is
 # needed for the xai arm (see docs/design/grok-models.md decision 2).
