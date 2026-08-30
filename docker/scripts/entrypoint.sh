@@ -782,7 +782,8 @@ Please resolve the conflicts manually, commit the merge, push, and remove the \`
     # (clearing the unmerged index entry) without producing any diff, so the marker
     # checks above all pass while the conflicting changes are silently discarded.
     # Per the design spec (docs/design/resolve-conflicts.md), such a result requires
-    # escalation rather than a silent merge commit.
+    # escalation — unless the agent explicitly justified it with the
+    # "**Kept PR side (ours):**" marker in the file's "### <file-path>" summary section.
     ZERO_DIFF_FILES=""
     for CFILE in $CONFLICTED_FILES; do
         if git diff --cached --quiet HEAD -- "$CFILE" 2>/dev/null; then
@@ -791,24 +792,45 @@ Please resolve the conflicts manually, commit the merge, push, and remove the \`
     done
     ZERO_DIFF_FILES="$(printf '%s' "$ZERO_DIFF_FILES" | sed '/^$/d')"
     if [ -n "$ZERO_DIFF_FILES" ]; then
-        log "Verification failed — the following conflicted files have no staged diff relative to HEAD (possible ours-only resolution); escalating"
-        log "Zero-diff files: $(echo "$ZERO_DIFF_FILES" | tr '\n' ' ')"
-        git merge --abort 2>/dev/null || true
-        log "Applying human-required label to PR #${GITHUB_PR_NUMBER}"
-        if [ -n "${ESCALATION_ASSIGNEE:-}" ]; then
-            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "$ESCALATION_ASSIGNEE"
-        else
-            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
-        fi
-        ZERODIFF_BODY="## Automated conflict resolution failed
+        log "Zero-diff files detected (staged result identical to PR branch HEAD): $(echo "$ZERO_DIFF_FILES" | tr '\n' ' ')"
+        UNJUSTIFIED_FILES=""
+        while IFS= read -r ZDFILE; do
+            [ -z "$ZDFILE" ] && continue
+            # Check whether CLAUDE_OUTPUT contains the justification marker within
+            # the "### <file-path>" summary section for this file.
+            if echo "$CLAUDE_OUTPUT" | awk -v hdr="### ${ZDFILE}" '
+                $0 == hdr { in_section=1; next }
+                in_section && /^### / { in_section=0 }
+                in_section && index($0, "**Kept PR side (ours):**") { found=1; exit }
+                END { exit !found }
+            '; then
+                log "Justification accepted for zero-diff file: ${ZDFILE} (found '**Kept PR side (ours):**' marker)"
+            else
+                log "No justification found for zero-diff file: ${ZDFILE} — adding to escalation list"
+                UNJUSTIFIED_FILES="${UNJUSTIFIED_FILES}${ZDFILE}"$'\n'
+            fi
+        done <<< "$ZERO_DIFF_FILES"
+        UNJUSTIFIED_FILES="$(printf '%s' "$UNJUSTIFIED_FILES" | sed '/^$/d')"
+        if [ -n "$UNJUSTIFIED_FILES" ]; then
+            log "Verification failed — the following conflicted files have no staged diff relative to HEAD and no justification; escalating"
+            log "Unjustified zero-diff files: $(echo "$UNJUSTIFIED_FILES" | tr '\n' ' ')"
+            git merge --abort 2>/dev/null || true
+            log "Applying human-required label to PR #${GITHUB_PR_NUMBER}"
+            if [ -n "${ESCALATION_ASSIGNEE:-}" ]; then
+                gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "$ESCALATION_ASSIGNEE"
+            else
+                gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
+            fi
+            ZERODIFF_BODY="## Automated conflict resolution failed
 
-The conflict-resolution agent resolved the following files with no staged change relative to HEAD (possible wholesale 'ours' selection — conflicting changes may have been silently discarded):
+The conflict-resolution agent resolved the following files with no staged change relative to HEAD (the resolution kept the PR side unchanged and no explicit justification was provided — this may be correct if the incoming hunk needed no preservation; please verify whether the incoming changes should be retained):
 
-$(echo "$ZERO_DIFF_FILES" | sed 's/^/- /')
+$(echo "$UNJUSTIFIED_FILES" | sed 's/^/- /')
 
 Please review each file, resolve the conflicts intentionally, commit the merge, push, and remove the \`human-required\` label when done."
-        gh pr comment "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --body "$ZERODIFF_BODY"
-        exit 1
+            gh pr comment "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --body "$ZERODIFF_BODY"
+            exit 1
+        fi
     fi
 
     log "Verification passed — committing merge"
