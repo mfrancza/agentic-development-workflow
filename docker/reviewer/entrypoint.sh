@@ -33,9 +33,9 @@ log() {
     echo "[reviewer] $(date -Iseconds) $*"
 }
 
-# resolve_provider: maps a model name to its provider string ("anthropic" or
-# "openai"). Fails loudly on unknown models — consistent with the fail-loud
-# security default.
+# resolve_provider: maps a model name to its provider string ("anthropic",
+# "openai", or "xai"). Fails loudly on unknown models — consistent with the
+# fail-loud security default.
 #
 # NOTE: This function is duplicated in docker/scripts/entrypoint.sh (developer
 # image). Keep both in sync when adding a model. Per design decision 2 in
