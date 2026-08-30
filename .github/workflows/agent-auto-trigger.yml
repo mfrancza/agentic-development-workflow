@@ -5,12 +5,13 @@ name: agent-auto-trigger
 # Terraform). All gates default to false (opt-in); see
 # docs/design/auto-trigger-agents.md for the full design.
 #
-# Five transitions (see design doc "The five transitions we are gating" table):
-#   1. auto-groom          — issues.opened                   → agent:groom
-#   2. auto-design         — issues.labeled (plan)           → agent:design
-#   3. auto-developer-do   — issues.labeled (do)             → agent:developer
-#   4. auto-developer-undraft — issues.unlabeled (draft)     → agent:developer
-#   5. auto-review         — pull_request.opened (agent/…)   → agent:review
+# Six transitions (see design doc "The six transitions we are gating" table):
+#   1. auto-groom             — issues.opened                   → agent:groom
+#   2. auto-design            — issues.labeled (plan)           → agent:design
+#   3. auto-developer-do      — issues.labeled (do)             → agent:developer
+#   4. auto-developer-undraft — issues.unlabeled (draft)        → agent:developer
+#   5. auto-review            — pull_request.opened (agent/…)   → agent:review
+#   6. auto-developer-unblock — issues.closed                   → agent:developer (cascade)
 #
 # No agent container is run in this workflow — each job only mints a token
 # and applies a label. The downstream agent workflows (agent-groom.yml,
@@ -18,7 +19,7 @@ name: agent-auto-trigger
 
 on:
   issues:
-    types: [opened, labeled, unlabeled]
+    types: [opened, labeled, unlabeled, closed]
   pull_request:
     types: [opened]
 
@@ -274,3 +275,68 @@ jobs:
         run: |
           set -euo pipefail
           gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:review"
+
+  # ── Transition 6 ─────────────────────────────────────────────────────────────
+  # issues.closed → agent:developer (cascade on newly-unblocked issues)
+  #
+  # When an issue closes, it may unblock downstream issues that are waiting for
+  # it. This job fans out: it walks the closed issue's blocking list, and for
+  # each issue whose remaining blockers are all now closed — and which is
+  # groomed-ready (open, carries 'blocked', no existing 'agent:developer' label,
+  # no open agent/issue-{N} PR) — it applies agent:developer and removes blocked.
+  #
+  # Ordering: agent:developer is applied before blocked is removed so that the
+  # label transition emits an event; removing blocked second prevents the
+  # resulting issues.unlabeled event from matching the 'draft' condition in
+  # transition #4 and firing a spurious downstream run.
+  #
+  # Sender allowlist required: any actor in AGENT_ALLOWLIST may close issues
+  # that trigger this cascade (e.g. the developer-agent bot closing its own
+  # implementation issue when the PR merges). Without this check, any
+  # collaborator closing an issue could trigger a developer-agent run on
+  # unblocked downstream issues — spending Anthropic credits without being
+  # in the allowlist themselves.
+  #
+  # Fail-loud pattern: after each label mutation, re-check the actual label
+  # state via the API and exit non-zero with ::error:: if the mutation
+  # silently no-oped (e.g. permissions failure that returned HTTP 200).
+  # This matches the pattern in the undraft-sub-issues job in agent-design.yml.
+  auto-developer-unblock:
+    if: >
+      github.event_name == 'issues' &&
+      github.event.action == 'closed' &&
+      vars.AUTO_TRIGGER_AGENTS != '' &&
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
+      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Checkout is required to resolve the local composite actions
+      # (./.github/actions/agent-token and ./.github/actions/find-newly-unblocked).
+      # The issues.closed event does not carry PR-authored code, so checking
+      # out the default branch is safe here.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Find newly unblocked issues
+        id: find-unblocked
+        uses: ./.github/actions/find-newly-unblocked
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          closed-issue-number: ${{ github.event.issue.number }}
+
+      - name: Apply agent:developer and remove blocked from each newly-unblocked issue
+        uses: ./.github/actions/apply-unblocked-labels
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          unblocked: ${{ steps.find-unblocked.outputs.unblocked }}

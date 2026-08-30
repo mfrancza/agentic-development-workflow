@@ -1,0 +1,40 @@
+name: 'Apply unblocked labels'
+description: >
+  For each issue number in the unblocked list, applies the `agent:developer`
+  label and removes the `blocked` label. Used by the auto-trigger unblock
+  cascade after find-newly-unblocked identifies eligible issues.
+
+inputs:
+  token:
+    description: 'GitHub token with issue write access'
+    required: true
+  repo:
+    description: 'Repository in "owner/name" format (e.g. github.repository)'
+    required: true
+  unblocked:
+    description: 'JSON array of integer issue numbers to process'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: .github/scripts/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: .github/scripts
+      run: npm ci
+
+    - name: Apply unblocked labels
+      shell: bash
+      working-directory: .github/scripts
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_UNBLOCKED: ${{ inputs.unblocked }}
+      run: npx --no-install tsx src/apply-unblocked-labels.ts
