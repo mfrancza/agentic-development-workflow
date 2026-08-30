@@ -226,7 +226,7 @@ The following patterns are already used across this repo. A review must flag any
 - **(Post-flip) GitHub-native secret scanning + push protection.** Both are enabled via the `security_and_analysis` block in [`terraform/main.tf`](terraform/main.tf). Secret scanning posts alerts for secrets detected anywhere in the full commit history; push protection blocks pushes that contain detected secret patterns before they enter the history. Both features are free on public repos and run independently of the gitleaks workflow (different detection engine; useful overlap). A review must flag any PR that removes or downgrades these settings.
 - **(Post-flip) `allowed_actions = "selected"`, GitHub-owned only.** `github_actions_repository_permissions` in `terraform/main.tf` restricts allowed Actions to `github_owned_allowed = true` with `verified_allowed = false` and an empty `patterns_allowed`. Workflows in this repo use `actions/*` actions and local actions under `./.github/actions/` (referenced by path; local actions are not subject to the `allowed_actions` policy), so the policy has zero configured-pattern surface outside of GitHub-owned actions. A workflow that adds a non-GitHub, non-local action must also extend `patterns_allowed` with a full-SHA pin (same SHA-pin convention as the rest of this repo) — omitting the entry causes a loud workflow failure, which is the intended signal. Reviews must flag workflows that skip this update.
 - **(Post-flip) Fork-PR approval policy: all external contributors.** Workflow runs triggered by fork PRs from external contributors (users without write access) require explicit approval before running; the policy is set to `all_external_contributors` via Settings → Actions → General or Terraform (see issue [#185](https://github.com/mfrancza/agentic-development-workflow/issues/185)). This is defence-in-depth: the agent workflows already gate on head-repo identity and AGENT_ALLOWLIST membership at the job level, so the approval gate is an additional layer. A review must flag any change that weakens this policy.
-- **(Post-flip) Interaction limit: `collaborators_only`, manually renewed.** Non-collaborators cannot open issues or PRs. The limit is applied by the maintainer at flip time using the exact command in the [README.md public-flip runbook](README.md#interaction-limit) and renewed every six months via the reminder-issue workflow ([#176](https://github.com/mfrancza/agentic-development-workflow/issues/176)). No identity in Actions holds `administration:write`, so renewal is a manual step — automated renewal is out of scope. A review must flag any PR that removes the interaction-limit documentation or weakens the renewal process.
+- **(Post-flip) Interaction limit: `collaborators_only`, manually renewed.** Non-collaborators cannot open issues or PRs. The limit is applied by the maintainer at flip time using the command in [`docs/design/public-visibility-flip.md`](docs/design/public-visibility-flip.md#flip-day-runbook) and renewed every six months via the reminder-issue workflow ([#176](https://github.com/mfrancza/agentic-development-workflow/issues/176)). No identity in Actions holds `administration:write`, so renewal is a manual step — automated renewal is out of scope. A review must flag any PR that removes the interaction-limit documentation or weakens the renewal process.
 
 ## Adding a New Agent Action
 
@@ -249,7 +249,7 @@ for details). See the same doc for the required sequencing.
   the GitHub UI after the repo is public: Settings → Actions → General →
   "Fork pull request workflows from outside collaborators" → select
   **"Require approval for all outside collaborators"** (the strictest of the
-  three options). This is runbook step 7.
+  three options). See the [flip-day runbook](docs/design/public-visibility-flip.md#flip-day-runbook) for the required sequencing.
 - **Interaction limit.** No identity holds `administration:write` in Actions,
   so `collaborators_only` is set manually via:
   ```
@@ -259,7 +259,7 @@ for details). See the same doc for the required sequencing.
   ```
   The [#176 reminder-issue workflow](https://github.com/mfrancza/agentic-development-workflow/issues/176)
   handles renewal reminders. This call must be made after the repo is public
-  (runbook step 8).
+  (see the [flip-day runbook](docs/design/public-visibility-flip.md#flip-day-runbook) for sequencing).
 
 ## Debugging
 
