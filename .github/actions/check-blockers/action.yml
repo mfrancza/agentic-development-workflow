@@ -1,0 +1,50 @@
+name: 'Check blockers'
+description: >
+  Query a GitHub issue's blocked-by list and report whether any blockers are
+  still open. Sets blocked=true and emits an open-blockers JSON array when at
+  least one blocker issue remains open. Fails loudly on API errors so a
+  transient GitHub failure never silently marks an issue "not blocked."
+
+inputs:
+  token:
+    description: 'GitHub token with issue read access'
+    required: true
+  repo:
+    description: 'Repository in "owner/name" format (e.g. github.repository)'
+    required: true
+  issue-number:
+    description: 'Issue number to inspect'
+    required: true
+
+outputs:
+  blocked:
+    description: '"true" if the issue has at least one open blocker, "false" otherwise'
+    value: ${{ steps.run.outputs.blocked }}
+  open-blockers:
+    description: 'JSON array of open blocker objects — each has number, url, and title fields'
+    value: ${{ steps.run.outputs.open-blockers }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: .github/scripts/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: .github/scripts
+      run: npm ci
+
+    - name: Check blockers
+      id: run
+      shell: bash
+      working-directory: .github/scripts
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_ISSUE_NUMBER: ${{ inputs.issue-number }}
+      run: npx --no-install tsx src/check-blockers.ts
