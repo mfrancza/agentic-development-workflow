@@ -180,7 +180,9 @@ resource "github_repository_ruleset" "main" {
 #    a human and the issue/PR should be assigned to a human actor).
 #  - lifecycle labels (`draft` is applied by the designer agent to sub-issues
 #    it creates; means the issue is scoped by an unmerged design and is not
-#    yet ready for implementation).
+#    yet ready for implementation; `blocked` is applied by the auto-trigger
+#    when open blockers prevent immediate `agent:developer` dispatch, and is
+#    also usable as a manual "hold for later" marker).
 #
 # Note on pre-existing labels: `bug`, `enhancement`, and `question` ship as
 # GitHub defaults on new repos. If `terraform apply` errors with 422
@@ -373,6 +375,11 @@ locals {
     "human-required" = {
       color       = "b60205"
       description = "A human is needed in the loop — agent should also assign the issue/PR to a human actor."
+    }
+
+    "blocked" = {
+      color       = "d1d5da"
+      description = "Auto-trigger deferred pending blocker closure; a human may also apply this label as a manual 'hold for later' marker."
     }
 
     "draft" = {
