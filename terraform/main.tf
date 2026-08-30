@@ -399,15 +399,15 @@ locals {
     }
     "model:review:haiku" = {
       color       = "1d76db"
-      description = "Override model for the review agent only: latest Claude Haiku (takes precedence over generic model:* labels)."
+      description = "Pre-provisioned for future use; current PR-based workflows use single-tier model:* resolution (not yet active)."
     }
     "model:review:sonnet" = {
       color       = "1d76db"
-      description = "Override model for the review agent only: latest Claude Sonnet (takes precedence over generic model:* labels)."
+      description = "Pre-provisioned for future use; current PR-based workflows use single-tier model:* resolution (not yet active)."
     }
     "model:review:opus" = {
       color       = "1d76db"
-      description = "Override model for the review agent only: latest Claude Opus (takes precedence over generic model:* labels)."
+      description = "Pre-provisioned for future use; current PR-based workflows use single-tier model:* resolution (not yet active)."
     }
 
     "question" = {
