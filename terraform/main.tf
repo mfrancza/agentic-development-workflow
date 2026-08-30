@@ -363,51 +363,51 @@ locals {
     # support; current PR-based workflows use single-tier model:* resolution.
     "model:groom:haiku" = {
       color       = "1d76db"
-      description = "Override model for the groom agent only: latest Claude Haiku (takes precedence over generic model:* labels)."
+      description = "Groom agent only: use latest Claude Haiku (overrides generic model:* labels)."
     }
     "model:groom:sonnet" = {
       color       = "1d76db"
-      description = "Override model for the groom agent only: latest Claude Sonnet (takes precedence over generic model:* labels)."
+      description = "Groom agent only: use latest Claude Sonnet (overrides generic model:* labels)."
     }
     "model:groom:opus" = {
       color       = "1d76db"
-      description = "Override model for the groom agent only: latest Claude Opus (takes precedence over generic model:* labels)."
+      description = "Groom agent only: use latest Claude Opus (overrides generic model:* labels)."
     }
     "model:design:haiku" = {
       color       = "1d76db"
-      description = "Override model for the design agent only: latest Claude Haiku (takes precedence over generic model:* labels)."
+      description = "Design agent only: use latest Claude Haiku (overrides generic model:* labels)."
     }
     "model:design:sonnet" = {
       color       = "1d76db"
-      description = "Override model for the design agent only: latest Claude Sonnet (takes precedence over generic model:* labels)."
+      description = "Design agent only: use latest Claude Sonnet (overrides generic model:* labels)."
     }
     "model:design:opus" = {
       color       = "1d76db"
-      description = "Override model for the design agent only: latest Claude Opus (takes precedence over generic model:* labels)."
+      description = "Design agent only: use latest Claude Opus (overrides generic model:* labels)."
     }
     "model:developer:haiku" = {
       color       = "1d76db"
-      description = "Override model for the developer agent only: latest Claude Haiku (takes precedence over generic model:* labels)."
+      description = "Developer agent only: use latest Claude Haiku (overrides generic model:* labels)."
     }
     "model:developer:sonnet" = {
       color       = "1d76db"
-      description = "Override model for the developer agent only: latest Claude Sonnet (takes precedence over generic model:* labels)."
+      description = "Developer agent only: use latest Claude Sonnet (overrides generic model:* labels)."
     }
     "model:developer:opus" = {
       color       = "1d76db"
-      description = "Override model for the developer agent only: latest Claude Opus (takes precedence over generic model:* labels)."
+      description = "Developer agent only: use latest Claude Opus (overrides generic model:* labels)."
     }
     "model:review:haiku" = {
       color       = "1d76db"
-      description = "Pre-provisioned for future use; current PR-based workflows use single-tier model:* resolution (not yet active)."
+      description = "Pre-provisioned for future use; PR-based workflows still use single-tier model:* resolution."
     }
     "model:review:sonnet" = {
       color       = "1d76db"
-      description = "Pre-provisioned for future use; current PR-based workflows use single-tier model:* resolution (not yet active)."
+      description = "Pre-provisioned for future use; PR-based workflows still use single-tier model:* resolution."
     }
     "model:review:opus" = {
       color       = "1d76db"
-      description = "Pre-provisioned for future use; current PR-based workflows use single-tier model:* resolution (not yet active)."
+      description = "Pre-provisioned for future use; PR-based workflows still use single-tier model:* resolution."
     }
 
     "question" = {
