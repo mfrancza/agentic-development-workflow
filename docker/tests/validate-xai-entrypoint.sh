@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # =============================================================================
 # Validation script for issue #309: Grok developer image — local docker run
 # validation of the xAI runner changes from issue #308.
@@ -99,7 +99,6 @@ echo ""
 echo "Check F: NO active codex login call in xai) preamble arm"
 # The openai) arm calls codex login. The xai) arm must not.
 # Verify that codex login only appears in the openai) arm (line 240 per baseline).
-CODEX_LOGIN_COUNT=$(grep -c "codex login" "${ENTRYPOINT}" || true)
 # Comment-only references are acceptable; only executable invocations must be in openai)
 NON_COMMENT_LOGIN_COUNT=$(grep -v "^\s*#" "${ENTRYPOINT}" | grep -c "codex login" || true)
 if [ "${NON_COMMENT_LOGIN_COUNT}" -eq 1 ]; then
@@ -155,7 +154,7 @@ fi
 
 echo ""
 echo "Check J: run_xai() uses --sandbox workspace-write"
-if grep -A30 "^run_xai()" "${ENTRYPOINT}" | grep -q "workspace-write"; then
+if awk '/^run_xai\(\)/,/^\}/' "${ENTRYPOINT}" | grep -q "workspace-write"; then
     pass "run_xai() passes --sandbox workspace-write to codex exec"
 else
     fail "run_xai() missing --sandbox workspace-write"
