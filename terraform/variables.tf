@@ -15,7 +15,7 @@ variable "agent_allowlist" {
 }
 
 variable "default_model" {
-  description = "Repo-wide default model passed to all agent workflows via the DEFAULT_MODEL Actions variable. The agent-implement, agent-groom, and agent-fix-deployment workflows can override this on a per-issue basis using a model:<name> label (e.g. model:opus, model:haiku); all other workflows always use this value. Accepts any value supported by the agent --model flag."
+  description = "Repo-wide default model passed to all agent workflows via the DEFAULT_MODEL Actions variable. Issue-driven workflows (agent-implement, agent-groom, agent-design, agent-fix-deployment) can override this per-issue via a model:<agent-type>:<name> label (e.g. model:developer:opus, model:groom:haiku — per-agent, takes precedence) or a generic model:<name> label (e.g. model:opus, model:haiku — applies to all agents for that issue); all other workflows always use this value. Accepts any value supported by the agent --model flag."
   type        = string
   default     = "sonnet"
 }
