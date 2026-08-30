@@ -94,13 +94,13 @@ The value is included in the prompt context passed to Claude. The updated
    but ADMIN_ASSIGNEES is empty — no assignees will be added"`) and skip
    assignment.
 
-Currently `groom.md` says to assign "the human(s) whose input is needed" but
-provides no list. This change makes that list operator-configured rather than
-left to Claude's discretion.
-
-The `agents/grooming/label-criteria.json` `human-required` entry already
-documents that assignment should happen alongside the label; no change is
-needed to the criteria file itself.
+Currently `agents/grooming/label-criteria.json` instructs the agent to
+"assign the issue or PR to the human(s) whose input is needed" when applying
+the `human-required` label, but provides no list to draw from. `groom.md`
+itself has no explicit assignment step. This change adds an
+`ADMIN_ASSIGNEES`-backed list so the assignment is operator-configured rather
+than left to Claude's discretion, and updates `groom.md` to include the
+explicit assignment step using that list.
 
 **Alternatives considered.**
 
