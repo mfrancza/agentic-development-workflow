@@ -43,11 +43,11 @@ resolve_provider() {
         gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5|o3)
             echo "openai"
             ;;
-        grok-3|grok-3-mini|grok-code-fast-1)
+        grok-4.6|grok-4.5|grok-4.3|grok-build-0.1)
             echo "xai"
             ;;
         *)
-            log "ERROR: Unknown model '${model}'. Anthropic models must be one of the aliases 'sonnet', 'opus', 'haiku', or a model ID beginning with 'claude-' (e.g. 'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', 'claude-3-5-haiku-latest'). Other supported values: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5, o3, grok-3, grok-3-mini, grok-code-fast-1" >&2
+            log "ERROR: Unknown model '${model}'. Anthropic models must be one of the aliases 'sonnet', 'opus', 'haiku', or a model ID beginning with 'claude-' (e.g. 'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', 'claude-3-5-haiku-latest'). Other supported values: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5, o3, grok-4.6, grok-4.5, grok-4.3, grok-build-0.1" >&2
             exit 1
             ;;
     esac
@@ -93,34 +93,40 @@ run_xai() {
 
     local system_prompt combined
     system_prompt="$(cat "${SCRIPTS_DIR}/prompts/${prompt_file}")"
-    # Codex exec has no --system-prompt flag; prepend the per-action system
-    # prompt to the task prompt with a clear separator (same convention as
-    # run_openai).
+    # Grok Build CLI's headless mode (-p/--single) takes the prompt as a
+    # positional string argument; there is no stdin-via-dash sigil (verified
+    # against `grok --help` at CLI v1.0.13 — see PR description). Prepend
+    # the per-action system prompt to the task prompt with the same `---`
+    # separator convention used by run_openai(). See
+    # docs/design/grok-build-cli.md Decision 3.
     combined="${system_prompt}
 
 ---
 
 ${user_prompt}"
 
-    # --config model_provider="xai" points Codex at the [model_providers.xai]
-    # block in ~/.codex/config.toml (base_url = xAI's OpenAI-compatible endpoint;
-    # env_key = XAI_API_KEY). --model passes the Grok model name through
-    # directly. No codex login step needed — custom model_providers read
-    # credentials from the process environment via env_key, not auth.json
-    # (contrast the openai arm above which does need codex login; see
-    # docs/design/grok-models.md decision 2).
-    #
-    # AGENT_MAX_TURNS is intentionally not passed: the pinned Codex CLI
-    # (v0.146.0) does not expose a --max-turns equivalent for `codex exec`
-    # the way Claude Code's --max-turns works. The turn bound is left to
-    # Codex's own internal policy — best-effort, same omission as
-    # run_openai(). See docs/design/grok-developer-image-entrypoint.md
-    # Decision 2 and docs/design/grok-models.md decision 4.
-    printf '%s\n' "$combined" | codex exec \
-        --config model_provider="xai" \
+    # `grok -p` / `grok --single` is the headless / scripting mode (verified
+    # against `grok --help` at CLI v1.0.13 — see PR description for the
+    # exact help excerpt).
+    # --model selects the specific Grok model (short form -m also accepted).
+    # --sandbox workspace confines agent writes to the workspace directory
+    # (the profile closest to Codex's --sandbox workspace-write).
+    # --always-approve auto-approves tool executions (equivalent to Claude
+    # Code's --dangerously-skip-permissions); required for unattended CI runs.
+    # --max-turns passes AGENT_MAX_TURNS through to the CLI's built-in turn
+    # cap (the pinned v1.0.13 release exposes --max-turns <N>; see PR
+    # description). This matches the best-effort policy stated in
+    # docs/design/grok-build-cli.md Decision 3.
+    # --no-auto-update suppresses background update-check network calls in CI.
+    # XAI_API_KEY is read directly from the environment — no grok login step
+    # needed (shape a; see docs/design/grok-build-cli.md Decision 4 and the
+    # PR description for the verified authentication details).
+    grok -p "$combined" \
         --model "$AGENT_MODEL" \
-        --sandbox workspace-write \
-        -
+        --sandbox workspace \
+        --always-approve \
+        --max-turns "$AGENT_MAX_TURNS" \
+        --no-auto-update
 }
 
 run_agent() {
@@ -248,10 +254,12 @@ case "$AGENT_PROVIDER" in
         ;;
     xai)
         : "${XAI_API_KEY:?XAI_API_KEY is required}"
-        # No codex login step needed — the [model_providers.xai] block in
-        # ~/.codex/config.toml binds XAI_API_KEY via env_key, so Codex reads
-        # the key directly from the process environment (see
-        # docs/design/grok-models.md decision 2).
+        # Grok Build CLI v1.0.13 reads XAI_API_KEY directly from the
+        # environment (shape a — bare env-var; verified against `grok --help`
+        # at the pinned release — see PR description). No grok login step
+        # needed: the CLI uses XAI_API_KEY as the auth fallback when no
+        # session token is active. See docs/design/grok-build-cli.md Decision 4.
+        command -v grok >/dev/null 2>&1 || { log "ERROR: grok binary not found on PATH — image build is broken"; exit 1; }
         ;;
 esac
 
