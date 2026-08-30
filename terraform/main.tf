@@ -44,8 +44,10 @@ resource "github_repository" "this" {
   allow_squash_merge     = true
   allow_rebase_merge     = false
   delete_branch_on_merge = true
+}
 
-  vulnerability_alerts = true
+resource "github_repository_vulnerability_alerts" "this" {
+  repository = github_repository.this.name
 }
 
 # Expose the sender allowlist as a repository Actions variable so workflow
