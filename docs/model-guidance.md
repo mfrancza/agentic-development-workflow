@@ -369,7 +369,38 @@ Anthropic-only is in
 
 ---
 
+## Repo Defaults
+
+This section records the configured default model for the repo-wide Actions variable and for each agent workflow, and confirms alignment against the guidance in this document. It is the canonical reference for the end-to-end validation task (issue [#334](https://github.com/mfrancza/agentic-development-workflow/issues/334)).
+
+### Repo-wide default
+
+`DEFAULT_MODEL` defaults to `"sonnet"` in [`terraform/variables.tf`](../terraform/variables.tf). This matches the guidance: Sonnet is documented as the **repo-standard default** in the Tier Summary above — "the right pick for the large middle band of typical implementation tasks."
+
+### Per-workflow defaults
+
+All eight agent workflow files pass `vars.DEFAULT_MODEL` to the container without an additional per-workflow override; no workflow hard-codes a different fallback. Each workflow therefore inherits `"sonnet"` as its effective default.
+
+| Workflow | `AGENT_ACTION` | Role | Applicable guidance tier | Default | Aligned? |
+|---|---|---|---|---|---|
+| `agent-implement.yml` | `implement` | Implements issues: creates branch, writes solution, opens PR | `do` — typical scoped implementation → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
+| `agent-groom.yml` | `groom` | Classifies issues and applies labels | Structured issue-analysis; not mechanical, not architectural → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
+| `agent-design.yml` | `design` | Writes design docs for `plan` issues | Scoped feature design → `model:sonnet`; architectural design handled by the `model:opus` label the grooming agent applies before `agent:design` fires | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
+| `agent-review.yml` | *(reviewer image)* | Reviews PR changes and posts a review | Standard multi-file code review → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
+| `agent-resolve-conflicts.yml` | `resolve-conflicts` | Resolves merge conflicts on developer-agent PRs | Scoped semantic merge; not mechanical but well-bounded → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
+| `agent-fix-checks.yml` | `fix-checks` | Diagnoses and fixes CI failures | Scoped debugging and implementation → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
+| `agent-fix-deployment.yml` | `fix-deployment` | Diagnoses deployment failures and opens a fix-up PR | Scoped deployment debugging → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
+| `agent-respond-review.yml` | `respond-review` | Addresses review feedback and pushes updates | Scoped review-driven implementation → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
+
+All eight workflows are aligned with the guidance. No disagreements were found; no follow-up issues were opened.
+
+**Note on label overrides.** Issue-driven workflows (`agent-implement`, `agent-groom`, `agent-design`, `agent-fix-deployment`) use the default only when no `model:*` label is present on the issue. The grooming agent typically applies `model:haiku` for mechanical tasks and `model:opus` for `plan` issues before `agent:developer` or `agent:design` fires, so the effective model at runtime often differs from the default. The default is the safety net for issues that skip grooming or that the groomer classifies as typical `do` work.
+
+---
+
 ## Change Log
+
+- **2026-08-30 (rev 5)** — Added *Repo Defaults* section auditing the repo-wide `DEFAULT_MODEL = "sonnet"` setting and all eight `agent-*.yml` per-workflow defaults against the guidance. All confirmed aligned; no follow-up issues opened. Added cross-links to this document from the `model:<name>` entry in `AGENTS.md` and from the `model:<name>` bullet in `README.md`. Addresses [issue #337](https://github.com/mfrancza/agentic-development-workflow/issues/337).
 
 - **2026-08-30 (rev 4)** — Added `code review` and `design` task classes to the Task-Class Matrix.
   Code review rows cover three sub-flavors (targeted/haiku, standard/sonnet,
