@@ -258,6 +258,43 @@ Rejected: the App slug varies per install, so pinning it in YAML would
 require another Terraform var; and it excludes the legitimate "human
 pushes a rescue commit and opens the PR" case.
 
+### Decision 6: Blocked-by deferral for the developer transitions
+
+**Decision.** Both `auto-developer-do` (transition #3) and
+`auto-developer-undraft` (transition #4) run a `check-blockers` step
+immediately after minting the token. If the issue has open blockers
+(`blocked == "true"`), the job applies the `blocked` label (instead of
+`agent:developer`) and exits success. If the issue has no open blockers
+(`blocked == "false"`), the job applies `agent:developer` as normal.
+
+The `check-blockers` composite action (`./.github/actions/check-blockers`)
+wraps `GET /repos/{owner}/{repo}/issues/{n}/dependencies/blocked_by` and
+returns `blocked="true"|"false"` plus a JSON array of open-blocker objects
+for diagnostic purposes.
+
+See [`docs/design/blocked-by-dependencies.md`](blocked-by-dependencies.md)
+Decision 6 for the full rationale: the withholding must happen at the
+label-application site to avoid the one-shot `labeled` event trap (issue
+#284) — if `agent:developer` were applied and then the preflight failed
+loudly, the issue would carry `agent:developer` permanently and the
+un-block cascade could never re-fire it. Applying `blocked` instead records
+the deferred state in a machine-readable way that the `auto-developer-unblock`
+cascade job can query and re-drive when the last blocker closes.
+
+The `auto-groom` (transition #1), `auto-design` (transition #2), and
+`auto-review` (transition #5) transitions are intentionally excluded from
+this pattern. See blocked-by-dependencies.md Decision 6 for the full
+rationale (fail-loud preflight already covers the manual-application case
+for design; grooming and review run on signals that predate or are
+orthogonal to issue-level dependency relationships).
+
+**Alternatives considered.**
+- *Apply `agent:developer` and rely on the preflight to skip.* Rejected:
+  consumes the one-shot `labeled` event (#284 trap), permanently stranding
+  the issue.
+- *Apply no label and do nothing.* Rejected: leaves no machine-readable
+  record for the un-block cascade to identify and re-drive the issue.
+
 ## Out of scope
 
 - **Auto-triggering for `fix-checks`, `respond-review`, `fix-deployment`, and `resolve-conflicts`.**
