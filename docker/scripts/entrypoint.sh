@@ -112,11 +112,10 @@ ${user_prompt}"
     #
     # AGENT_MAX_TURNS is intentionally not passed: the pinned Codex CLI
     # (v0.146.0) does not expose a --max-turns equivalent for `codex exec`
-    # the way Claude Code's --max-turns works. Turn-cap behavior is
-    # best-effort — same omission as run_openai(). See
-    # docs/design/grok-developer-image-entrypoint.md Decision 2 and the
-    # parent design's accepted out-of-scope on symmetric AGENT_MAX_TURNS
-    # semantics across providers.
+    # the way Claude Code's --max-turns works. The turn bound is left to
+    # Codex's own internal policy — best-effort, same omission as
+    # run_openai(). See docs/design/grok-developer-image-entrypoint.md
+    # Decision 2 and docs/design/grok-models.md decision 4.
     printf '%s\n' "$combined" | codex exec \
         --config model_provider="xai" \
         --model "$AGENT_MODEL" \

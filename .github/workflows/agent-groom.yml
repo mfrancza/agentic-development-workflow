@@ -57,6 +57,8 @@ jobs:
 
       - name: Run grooming agent
         uses: ./.github/actions/run-agent
+        env:
+          ADMIN_ASSIGNEES: ${{ vars.ADMIN_ASSIGNEES }}
         with:
           gh-token: ${{ steps.setup.outputs.token }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
