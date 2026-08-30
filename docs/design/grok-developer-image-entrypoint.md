@@ -1,5 +1,7 @@
 # Design: Grok models — developer image + entrypoint
 
+**Amended (Issue [#353](https://github.com/mfrancza/agentic-development-workflow/issues/353)):** The runner described in this document (OpenAI Codex CLI with a `[model_providers.xai]` config block) has been superseded. Grok models are now executed by the Grok Build CLI (`grok -p`); see [`grok-build-cli.md`](grok-build-cli.md) for the current runtime design.
+
 **Issue:** [#279](https://github.com/mfrancza/agentic-development-workflow/issues/279)
 
 **Parent design:** [`docs/design/grok-models.md`](grok-models.md) (Issue [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275))

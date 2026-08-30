@@ -31,6 +31,18 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 ARG CODEX_CLI_VERSION=0.146.0
 RUN npm install -g "@openai/codex@${CODEX_CLI_VERSION}"
 
+# Install Grok Build CLI. Pin to a specific version so workflow runs are
+# reproducible; override at build time with --build-arg if you want a different
+# release. Kept in sync with docker/Dockerfile so the reviewer and developer
+# images ship the same Grok Build CLI release. The vendor install script supports
+# version pinning via a positional argument; GROK_BIN_DIR writes the binary to
+# /usr/local/bin so it is on the system PATH before the USER agent directive
+# (matching how gh, claude, and codex are installed). See
+# docs/design/grok-build-cli.md Decision 2.
+ARG GROK_BUILD_CLI_VERSION=1.0.13
+RUN curl -fsSL https://x.ai/cli/install.sh | \
+    GROK_BIN_DIR=/usr/local/bin bash -s -- "${GROK_BUILD_CLI_VERSION}"
+
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent
 
@@ -44,13 +56,5 @@ RUN chmod +x /opt/agent/entrypoint.sh
 # Run as agent user
 USER agent
 WORKDIR /home/agent
-
-# Configure Codex CLI to use xAI's OpenAI-compatible API endpoint for Grok models.
-# Custom model_providers read credentials from the env var named by env_key
-# (XAI_API_KEY), not from ~/.codex/auth.json — so no codex login step is
-# needed for the xai arm (see docs/design/grok-models.md decision 2).
-RUN mkdir -p /home/agent/.codex && \
-    printf '[model_providers.xai]\nname = "xAI"\nbase_url = "https://api.x.ai/v1"\nenv_key = "XAI_API_KEY"\n' \
-    > /home/agent/.codex/config.toml
 
 ENTRYPOINT ["/opt/agent/entrypoint.sh"]
