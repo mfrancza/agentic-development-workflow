@@ -26,6 +26,9 @@ inputs:
   openai-api-key:
     description: 'OpenAI API key injected as OPENAI_API_KEY'
     required: true
+  xai-api-key:
+    description: 'xAI API key injected as XAI_API_KEY'
+    required: true
   repo:
     description: 'GitHub repository (owner/name) injected as GITHUB_REPO'
     required: true
@@ -107,6 +110,7 @@ runs:
         GH_TOKEN: ${{ inputs.gh-token }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+        XAI_API_KEY: ${{ inputs.xai-api-key }}
         GITHUB_REPO: ${{ inputs.repo }}
         AGENT_MODEL: ${{ inputs.model }}
         _AGENT_ACTION: ${{ inputs.agent-action }}
@@ -150,6 +154,7 @@ runs:
           -e GH_TOKEN \
           -e ANTHROPIC_API_KEY \
           -e OPENAI_API_KEY \
+          -e XAI_API_KEY \
           -e GITHUB_REPO \
           -e AGENT_MODEL \
           "${_opt_env[@]}" \

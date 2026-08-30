@@ -180,7 +180,8 @@ Run once after `terraform apply`, and again whenever you rotate a key:
 gh secret set DEVELOPER_APP_ID         --body "<developer App Client ID>"  # the Iv23.xxx Client ID, not the numeric App ID
 gh secret set DEVELOPER_APP_PRIVATE_KEY < ~/.config/agentic-agents/developer-agent.pem
 gh secret set ANTHROPIC_API_KEY        --body "<anthropic api key>"
-gh secret set OPENAI_API_KEY           --body "<openai api key>"      # optional if using Anthropic only
+gh secret set OPENAI_API_KEY           --body "<openai api key>"      # optional if not using OpenAI models
+gh secret set XAI_API_KEY             --body "<xai api key>"         # optional if not using Grok models
 
 # Required for the reviewer agent (used by agent-review.yml)
 gh secret set REVIEWER_APP_ID          --body "<reviewer App Client ID>"   # the Iv23.xxx Client ID, not the numeric App ID
