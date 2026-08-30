@@ -50,8 +50,11 @@ resolve_provider() {
         gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5|o3)
             echo "openai"
             ;;
+        grok-3|grok-3-mini|grok-code-fast-1)
+            echo "xai"
+            ;;
         *)
-            log "ERROR: Unknown model '${model}'. Supported values: sonnet, opus, haiku, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5, o3" >&2
+            log "ERROR: Unknown model '${model}'. Supported values: sonnet, opus, haiku, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5, o3, grok-3, grok-3-mini, grok-code-fast-1" >&2
             exit 1
             ;;
     esac
@@ -89,6 +92,33 @@ run_openai() {
         -
 }
 
+run_xai() {
+    local prompt_file="$1"
+    local user_prompt_file="$2"
+
+    local system_prompt
+    system_prompt="$(cat "${SCRIPTS_DIR}/prompts/${prompt_file}")"
+    # Codex exec has no --system-prompt flag; prepend the per-action system
+    # prompt to the task prompt with a clear separator (same convention as
+    # run_openai).
+    # Sandbox is workspace-write: preserves the reviewer image's structural
+    # no-write guarantee (no git-askpass.sh, no push credentials, Contents:read
+    # reviewer token — see docs/design/reviewer-container.md decision 3).
+    # --config model_provider="xai" points Codex at the [model_providers.xai]
+    # block in ~/.codex/config.toml (base_url = xAI's OpenAI-compatible endpoint;
+    # env_key = XAI_API_KEY). No codex login step needed — custom model_providers
+    # read credentials from the process environment via env_key, not auth.json
+    # (contrast run_openai above; see docs/design/grok-models.md decision 2).
+    {
+        printf '%s\n\n---\n\n' "$system_prompt"
+        cat "$user_prompt_file"
+    } | codex exec \
+        --config model_provider="xai" \
+        --model "$AGENT_MODEL" \
+        --sandbox workspace-write \
+        -
+}
+
 run_agent() {
     local prompt_file="$1"
     local user_prompt_file="$2"
@@ -99,6 +129,9 @@ run_agent() {
             ;;
         openai)
             run_openai "$prompt_file" "$user_prompt_file"
+            ;;
+        xai)
+            run_xai "$prompt_file" "$user_prompt_file"
             ;;
         *)
             log "ERROR: Unknown provider '${AGENT_PROVIDER}'" >&2
@@ -167,6 +200,11 @@ _log_capture_exit() {
         find /home/agent/logs -type f \
             -exec sed -i "s/${_escaped_openai}/***REDACTED-OPENAI_API_KEY***/g" {} +
     fi
+    if [ -n "${XAI_API_KEY:-}" ]; then
+        _escaped_xai=$(printf '%s\n' "${XAI_API_KEY}" | sed 's/[.^$*\\/]/\\&/g; s/\[/\\[/g')
+        find /home/agent/logs -type f \
+            -exec sed -i "s/${_escaped_xai}/***REDACTED-XAI_API_KEY***/g" {} +
+    fi
 }
 # Save the exit code before the trap runs so the container exits with the
 # original code even after the trap body executes additional commands.
@@ -193,6 +231,13 @@ case "$AGENT_PROVIDER" in
         # (issue #227 — without it every request goes out with no
         # Authorization header and fails 401).
         printenv OPENAI_API_KEY | codex login --with-api-key
+        ;;
+    xai)
+        : "${XAI_API_KEY:?XAI_API_KEY is required}"
+        # No codex login step needed — the [model_providers.xai] block in
+        # ~/.codex/config.toml binds XAI_API_KEY via env_key, so Codex reads
+        # the key directly from the process environment (see
+        # docs/design/grok-models.md decision 2).
         ;;
 esac
 

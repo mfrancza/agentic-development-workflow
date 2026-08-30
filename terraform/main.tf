@@ -213,6 +213,19 @@ locals {
       description = "Run agents on this issue with OpenAI o3 (overrides DEFAULT_MODEL)."
     }
 
+    "model:grok-3" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with xAI grok-3 (overrides DEFAULT_MODEL)."
+    }
+    "model:grok-3-mini" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with xAI grok-3-mini (overrides DEFAULT_MODEL)."
+    }
+    "model:grok-code-fast-1" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with xAI grok-code-fast-1 (overrides DEFAULT_MODEL)."
+    }
+
     "question" = {
       color       = "d876e3"
       description = "Issue lacks sufficient detail; clarifying questions posted."
