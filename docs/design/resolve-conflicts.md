@@ -83,11 +83,12 @@ PRs are squash-merged, so branch-local merge commits never reach `main`.
 ### Fallback: abort and flag, never guess
 
 If Claude reports it cannot reconcile confidently, or entrypoint verification
-fails (markers remain, unmerged paths, an empty diff with no justification
-triggers the fallback; an empty diff with a valid justification in the
-resolution summary (the `**Kept PR side (ours):**` marker) is accepted),
+fails (markers remain, unmerged paths, or a zero-diff file with no
+justification — an empty diff with a valid `**Kept PR side (ours):**`
+justification in the resolution summary is accepted),
 the entrypoint runs `git merge --abort`, applies the `human-required` label,
-and comments on the PR naming the files it could not resolve and why. It never pushes a partial resolution. This reuses the
+and comments on the PR naming the files it could not resolve and why. It
+never pushes a partial resolution. This reuses the
 escalation convention added by #46: label + comment, human takes over.
 
 ### Human review of resolutions: considered options
