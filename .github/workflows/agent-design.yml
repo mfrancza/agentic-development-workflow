@@ -54,6 +54,25 @@ jobs:
           branch: design/issue-${{ github.event.issue.number }}
           owner: ${{ github.repository_owner }}
 
+      - name: "Preflight: check for open blockers"
+        id: blockers-check
+        if: steps.preflight.outputs.skip != 'true'
+        uses: ./.github/actions/check-blockers
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ github.event.issue.number }}
+
+      - name: "Preflight: fail if blockers are open"
+        if: steps.preflight.outputs.skip != 'true' && steps.blockers-check.outputs.blocked == 'true'
+        env:
+          OPEN_BLOCKERS: ${{ steps.blockers-check.outputs.open-blockers }}
+        run: |
+          set -euo pipefail
+          msg=$(jq -r '[.[] | "#\(.number): \(.title)"] | join(", ")' <<< "${OPEN_BLOCKERS}")
+          echo "::error::Issue #${{ github.event.issue.number }} is blocked by open issues: ${msg}"
+          exit 1
+
       - name: Resolve Claude model from issue labels
         if: steps.preflight.outputs.skip != 'true'
         id: model
