@@ -151,7 +151,7 @@ else
 fi
 
 # ---
-# Test 1e: Rejection — marker present but as part of a word boundary (index check is substring, so this should accept)
+# Test 1e: Acceptance — marker present but as part of a word boundary (index check is substring, so this should accept)
 #           Confirm the awk index() function matches as a substring correctly.
 # ---
 CLAUDE_OUTPUT_INLINE=$(cat <<'EOF'
@@ -180,8 +180,6 @@ fi
 # ---
 # Test 1g: Acceptance — multiple files, all justified
 # ---
-ZDFILE2="src/index.ts"
-
 CLAUDE_OUTPUT_MULTI=$(cat <<'EOF'
 ### config/version.txt
 **Conflict type:** version bump conflict
@@ -295,7 +293,7 @@ git commit -q -m "base: patch bump and greeting tweak"
 # Return to the PR branch and start the merge (this will conflict)
 git checkout -q pr-branch
 set +e
-git merge main 2>/dev/null
+git merge base 2>/dev/null
 MERGE_EXIT="$?"
 set -e
 
