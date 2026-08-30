@@ -76,6 +76,24 @@ moved {
   to   = github_actions_variable.default_model
 }
 
+# Expose the admin assignees list as a JSON-encoded repository Actions variable
+# so workflows can assign issues and PRs to the right humans when the agent
+# applies the human-required label and needs a human in the loop.
+resource "github_actions_variable" "admin_assignees" {
+  repository    = github_repository.this.name
+  variable_name = "ADMIN_ASSIGNEES"
+  value         = jsonencode(var.admin_assignees)
+}
+
+# Expose the code reviewers list as a JSON-encoded repository Actions variable
+# so workflows can request human PR reviewers when the agent opens a PR and
+# wants human sign-off.
+resource "github_actions_variable" "code_reviewers" {
+  repository    = github_repository.this.name
+  variable_name = "CODE_REVIEWERS"
+  value         = jsonencode(var.code_reviewers)
+}
+
 # Expose the auto-trigger gates as a JSON-encoded repository Actions variable
 # so agent-auto-trigger.yml can gate each job on
 # fromJSON(vars.AUTO_TRIGGER_AGENTS).<key> == true. All keys default to false

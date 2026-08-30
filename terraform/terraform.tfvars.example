@@ -10,6 +10,21 @@ agent_allowlist = [
 ]
 default_model = "sonnet"
 
+# Humans to assign to issues and PRs when the agent applies the human-required
+# label (e.g. escalations requiring security, billing, or permission decisions).
+# Stored as ADMIN_ASSIGNEES Actions variable; workflows parse it with fromJSON().
+# Leave empty ([]) if you prefer to assign manually.
+admin_assignees = [
+  "your-github-username",
+]
+
+# Humans to request as PR reviewers when the agent opens a PR and wants human
+# code review. Stored as CODE_REVIEWERS Actions variable; workflows parse it
+# with fromJSON(). Leave empty ([]) to skip automatic reviewer requests.
+code_reviewers = [
+  "your-github-username",
+]
+
 # Auto-trigger configuration. Set a key to true to automatically apply the
 # corresponding agent:* label at the natural upstream signal, advancing the
 # SDLC pipeline without manual labeling. All keys default to false (opt-in).
