@@ -27,6 +27,11 @@ export interface FeedbackCheckInput {
  * fail-open / fall-through policy.
  */
 export interface FeedbackCheckDeps {
+  /**
+   * Returns the current PR state string (e.g. "open", "closed"). Throws on
+   * error so the caller can apply fail-open policy.
+   */
+  getPrState(): Promise<string>;
   /** Returns the total number of unresolved PR review threads. Throws on error. */
   countUnresolvedThreads(): Promise<number>;
   /**
@@ -53,6 +58,9 @@ export interface FeedbackCheckResult {
  * skip, replicating the ~85-line inline shell script in agent-respond-review.yml.
  *
  * Decision flow:
+ *  0. PR is not open (closed or merged) — skip immediately; a review on a
+ *     closed/merged PR never needs a response. On API error, fail open and
+ *     continue to the feedback checks.
  *  1. Non-approval reviews always proceed (changes_requested, commented, …).
  *  2. Approved review — primary check: count unresolved PR review threads via
  *     GraphQL. Zero threads → skip; non-zero → proceed. On error, fall through.
@@ -67,6 +75,22 @@ export async function checkReviewerFeedback(
   deps: FeedbackCheckDeps,
 ): Promise<FeedbackCheckResult> {
   const { state, body } = input;
+
+  // --- Step 0: skip if PR is no longer open (closed or merged) ---
+  let prState: string | undefined;
+  try {
+    prState = await deps.getPrState();
+  } catch (err) {
+    core.warning(
+      `Failed to fetch PR state: ${err instanceof Error ? err.message : String(err)}; proceeding.`,
+    );
+  }
+  if (prState !== undefined && prState !== "open") {
+    return {
+      proceed: false,
+      reason: `PR is '${prState}'; skipping respond-review — a review on a closed or merged PR needs no response.`,
+    };
+  }
 
   // --- Step 1: non-approval states always proceed ---
   if (state.toLowerCase() !== "approved") {
@@ -168,6 +192,26 @@ interface ReviewThreadsPage {
 type OctokitClient = ReturnType<typeof getOctokit>;
 
 /**
+ * Returns a callback that fetches the current PR state string (e.g. "open",
+ * "closed") from the REST API. GitHub reports merged PRs as `state: "closed"`.
+ */
+export function makePrStateGetter(
+  octokit: OctokitClient,
+  owner: string,
+  repo: string,
+  prNumber: number,
+): () => Promise<string> {
+  return async () => {
+    const { data } = await octokit.rest.pulls.get({
+      owner,
+      repo,
+      pull_number: prNumber,
+    });
+    return data.state;
+  };
+}
+
+/**
  * Returns a callback that paginates the GraphQL `reviewThreads` connection and
  * sums the unresolved count across all pages.
  */
@@ -257,6 +301,7 @@ async function run(): Promise<void> {
   const result = await checkReviewerFeedback(
     { state, body, reviewId, prNumber, owner, repo },
     {
+      getPrState: makePrStateGetter(octokit, owner, repo, prNumber),
       countUnresolvedThreads: makeUnresolvedThreadCounter(
         octokit,
         owner,

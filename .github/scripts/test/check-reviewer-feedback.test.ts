@@ -31,11 +31,75 @@ const BASE_INPUT: FeedbackCheckInput = {
 
 function makeDeps(overrides?: Partial<FeedbackCheckDeps>): FeedbackCheckDeps {
   return {
+    getPrState: vi.fn().mockResolvedValue("open"),
     countUnresolvedThreads: vi.fn(),
     countInlineComments: vi.fn(),
     ...overrides,
   };
 }
+
+// ---------------------------------------------------------------------------
+// 0. PR state check — skip immediately if PR is no longer open
+// ---------------------------------------------------------------------------
+
+describe("PR state check", () => {
+  it("skips without calling feedback APIs when PR is closed", async () => {
+    const deps = makeDeps({
+      getPrState: vi.fn().mockResolvedValue("closed"),
+    });
+    const result = await checkReviewerFeedback(
+      { ...BASE_INPUT, state: "approved" },
+      deps,
+    );
+    expect(result.proceed).toBe(false);
+    expect(result.reason).toMatch(/closed/);
+    expect(deps.countUnresolvedThreads).not.toHaveBeenCalled();
+    expect(deps.countInlineComments).not.toHaveBeenCalled();
+  });
+
+  it("skips for a merged PR (GitHub reports merged PRs as state 'closed')", async () => {
+    // GitHub sets state='closed' for merged PRs; a separate `merged` boolean
+    // distinguishes them, but the state string is still "closed".
+    const deps = makeDeps({
+      getPrState: vi.fn().mockResolvedValue("closed"),
+    });
+    const result = await checkReviewerFeedback(
+      { ...BASE_INPUT, state: "changes_requested" },
+      deps,
+    );
+    expect(result.proceed).toBe(false);
+    expect(deps.countUnresolvedThreads).not.toHaveBeenCalled();
+    expect(deps.countInlineComments).not.toHaveBeenCalled();
+  });
+
+  it("proceeds (fail-open) when getPrState throws, then applies normal feedback checks", async () => {
+    const deps = makeDeps({
+      getPrState: vi.fn().mockRejectedValue(new Error("API timeout")),
+      countUnresolvedThreads: vi.fn().mockResolvedValue(1),
+    });
+    const result = await checkReviewerFeedback(
+      { ...BASE_INPUT, state: "approved" },
+      deps,
+    );
+    // Fail-open: PR state unknown, so proceed to the normal feedback logic.
+    expect(result.proceed).toBe(true);
+    expect(deps.countUnresolvedThreads).toHaveBeenCalledOnce();
+  });
+
+  it("proceeds for an open PR and continues to normal feedback checks", async () => {
+    const deps = makeDeps({
+      getPrState: vi.fn().mockResolvedValue("open"),
+      countUnresolvedThreads: vi.fn().mockResolvedValue(0),
+    });
+    const result = await checkReviewerFeedback(
+      { ...BASE_INPUT, state: "approved" },
+      deps,
+    );
+    // PR is open; zero unresolved threads → skip (not because PR is closed).
+    expect(result.proceed).toBe(false);
+    expect(deps.countUnresolvedThreads).toHaveBeenCalledOnce();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // 1. Non-approval review states
