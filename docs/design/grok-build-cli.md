@@ -236,9 +236,41 @@ ${user_prompt}"
 }
 ```
 
-The reviewer image's `run_xai()` mirrors this shape but honors the
-reviewer image's structural no-write posture (no `git-askpass.sh`, no
-push credentials in the image, Contents:read reviewer token — see
+The reviewer image's `run_xai()` mirrors this logical shape (system-prompt
+prepend, stdin pipe, sandbox flag) but uses a **different calling
+convention** from the developer image's sketch above. The reviewer image's
+`run_agent()` passes a **file path** as its second positional argument
+rather than variadic inline text, because the reviewer's single call-site
+already writes the context to a file (`$CONTEXT_FILE`). The reviewer
+entrypoint's new `run_xai()` (Issue [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356)) therefore has this shape:
+
+```bash
+run_xai() {
+    local prompt_file="$1"
+    local user_prompt_file="$2"   # FILE PATH — not inline text
+
+    local system_prompt
+    system_prompt="$(cat "${SCRIPTS_DIR}/prompts/${prompt_file}")"
+    {
+        printf '%s\n\n---\n\n' "$system_prompt"
+        cat "$user_prompt_file"
+    } | grok -p \
+        --model "$AGENT_MODEL" \
+        <workspace-sandbox-flag-if-supported> \
+        -
+}
+```
+
+This matches the convention the current (Codex-based) reviewer `run_xai()`
+already uses, and must be preserved — the developer sketch above with
+`shift; local user_prompt="$*"` is the wrong signature for the reviewer
+image. Issues [#355](https://github.com/mfrancza/agentic-development-workflow/issues/355) and [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356) are parallel tasks that may be
+picked up by different agents, so both sketches are provided here to avoid
+ambiguity.
+
+The reviewer image's `run_xai()` also honors the reviewer image's
+structural no-write posture (no `git-askpass.sh`, no push credentials in
+the image, Contents:read reviewer token — see
 [`reviewer-container.md`](reviewer-container.md) decision 3). If the
 pinned Grok Build CLI release does not expose a workspace-write
 sandbox flag, the reviewer runner still preserves its no-write posture
