@@ -9,7 +9,7 @@ CODE_REVIEWERS feature, implemented across issues #288 (Terraform), #289
 (Entrypoint/prompts), #290 (Workflow updates), and #291 (Documentation).
 
 All four test-plan items from the issue have been validated through static code
-analysis and the full unit test suite (122 tests, 0 failures; `tsc --noEmit` clean).
+analysis and the full unit test suite (135 tests, 0 failures; `tsc --noEmit` clean).
 
 ---
 
@@ -151,12 +151,12 @@ warning comment and no failure exit.
 
 ## Test suite results
 
-Ran at commit `aad3adc` (the merge base of this branch):
+Ran at commit `694e0b8` (current `main`):
 
 ```
-Test Files  8 passed (8)
-     Tests  122 passed (122)
-  Duration  1.12s
+Test Files  9 passed (9)
+     Tests  135 passed (135)
+  Duration  1.54s
 ```
 
 `tsc --noEmit` exits cleanly with no errors.
