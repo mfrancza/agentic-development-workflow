@@ -173,7 +173,7 @@ prompts add a second guard at the action layer (Decision 5).
 run on every pull request) runs `scripts/generate-docs.sh` and then:
 
 ```bash
-git diff --exit-code docs/AGENTS.md README.md || {
+git diff --exit-code AGENTS.md README.md || {
   echo "::error::Generated sections in AGENTS.md/README.md are out of date."
   echo "::error::Run 'scripts/generate-docs.sh' locally and commit the result."
   exit 1
