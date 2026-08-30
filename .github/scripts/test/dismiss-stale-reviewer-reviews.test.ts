@@ -149,6 +149,18 @@ describe("fetchAllReviews", () => {
 
     expect(reviews).toEqual([{ id: 99, userLogin: null, state: "COMMENTED" }]);
   });
+
+  it("returns an empty array and does not throw when the API call fails (fail-open)", async () => {
+    const listReviews = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Network error"));
+    const octokit = makeOctokit({ listReviews });
+
+    const reviews = await fetchAllReviews(octokit, "owner", "repo", 5);
+
+    expect(reviews).toEqual([]);
+    expect(listReviews).toHaveBeenCalledOnce();
+  });
 });
 
 // ---------------------------------------------------------------------------
