@@ -109,6 +109,14 @@ ${user_prompt}"
     # credentials from the process environment via env_key, not auth.json
     # (contrast the openai arm above which does need codex login; see
     # docs/design/grok-models.md decision 2).
+    #
+    # AGENT_MAX_TURNS is intentionally not passed: the pinned Codex CLI
+    # (v0.146.0) does not expose a --max-turns equivalent for `codex exec`
+    # the way Claude Code's --max-turns works. Turn-cap behavior is
+    # best-effort — same omission as run_openai(). See
+    # docs/design/grok-developer-image-entrypoint.md Decision 2 and the
+    # parent design's accepted out-of-scope on symmetric AGENT_MAX_TURNS
+    # semantics across providers.
     printf '%s\n' "$combined" | codex exec \
         --config model_provider="xai" \
         --model "$AGENT_MODEL" \
