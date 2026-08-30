@@ -142,6 +142,13 @@ cp terraform.tfvars.example terraform.tfvars
 #   default_model        — repo-wide default model (e.g. "sonnet")
 #   auto_trigger_agents  — per-stage auto-trigger switches (all false by default;
 #                          set a key to true to auto-apply that stage's agent:* label)
+#   admin_assignees      — (optional) list of GitHub usernames to assign when the
+#                          human-required label is applied; stored as the JSON-encoded
+#                          ADMIN_ASSIGNEES Actions variable; omit or set to [] to skip
+#   code_reviewers       — (optional) list of GitHub usernames to request as PR
+#                          reviewers when the agent opens or updates a PR; stored as
+#                          the JSON-encoded CODE_REVIEWERS Actions variable; omit or
+#                          set to [] to request no specific reviewers
 
 export GITHUB_TOKEN=$(gh auth token)  # or any token with `repo` scope
 
