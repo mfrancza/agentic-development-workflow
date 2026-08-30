@@ -1,9 +1,10 @@
 # Model Guidance
 
-This document is the **single source of truth** for tier selection in this repository. The grooming
-agent reads it at run time when selecting a `model:*` label; humans apply it when labeling issues
-manually or reviewing a labeled issue. Every other document that discusses model tiers links back
-here rather than duplicating the guidance.
+This document is the **single source of truth** for tier selection in this repository. Humans apply
+it when labeling issues manually or reviewing a labeled issue. Once issue #336 lands, the grooming
+agent will read it at run time when selecting a `model:*` label. Once issues #336 and #337 land,
+every other document that discusses model tiers will link back here rather than duplicating the
+guidance.
 
 ---
 
@@ -95,6 +96,12 @@ confirm the same tier ordering as SWE-Bench. The practical implication for this 
 meaningfully stronger when an issue requires the agent to reason about scope, weigh trade-offs,
 or interpret an ambiguous specification — that is, exactly the conditions that trigger `model:opus`
 in the task-class matrix above.
+
+### Community sources
+
+No stable community source (Anthropic engineering blog posts, "how we use Claude" write-ups from
+other public projects) was identified at time of writing that met the bar for longevity required
+to link from a reference document. This section will be updated if a durable source is found.
 
 ### Repo history (last ~50 closed issues)
 
