@@ -17,3 +17,16 @@ If you hit a point where a human needs to be in the loop — you are blocked, un
 gh issue edit "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "<github-username>"
 gh pr edit    "<pr-number>"          --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "<github-username>"
 ```
+
+## Requesting code review
+
+`CODE_REVIEWERS` is provided in the prompt context as a JSON array of GitHub usernames (e.g. `["alice", "bob"]`). When the PR requires human code review — because the changes are security-sensitive, involve complex architectural decisions, or you are applying the `human-required` label — request reviews from every username in the list:
+
+- If the array is non-empty, run one `--add-reviewer` flag per username:
+  ```bash
+  gh pr edit "<pr-number>" --repo "$GITHUB_REPO" --add-reviewer "<username1>" --add-reviewer "<username2>"
+  ```
+- If the array is empty (`[]` or blank), skip the reviewer request and post a comment warning that no code reviewers are configured:
+  ```bash
+  gh pr comment "<pr-number>" --repo "$GITHUB_REPO" --body "Warning: human code review is needed but CODE_REVIEWERS is not configured — no reviewers added. Please assign a reviewer manually."
+  ```

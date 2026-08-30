@@ -10,7 +10,8 @@ set -euo pipefail
 # Optional configuration (accept old names as a transient fallback; see #82)
 AGENT_MODEL="${AGENT_MODEL:-${CLAUDE_MODEL:-sonnet}}"
 AGENT_MAX_TURNS="${AGENT_MAX_TURNS:-${CLAUDE_MAX_TURNS:-100}}"
-REVIEWERS="${REVIEWERS:-}"
+ADMIN_ASSIGNEES="${ADMIN_ASSIGNEES:-}"
+CODE_REVIEWERS="${CODE_REVIEWERS:-}"
 ESCALATION_ASSIGNEE="${ESCALATION_ASSIGNEE:-}"
 
 SCRIPTS_DIR="/opt/agent"
@@ -291,7 +292,9 @@ Repository: ${GITHUB_REPO}
 Issue #${GITHUB_ISSUE_NUMBER}: ${ISSUE_TITLE}
 Branch: ${BRANCH_NAME}
 
-${ISSUE_BODY}"
+${ISSUE_BODY}
+
+CODE_REVIEWERS: ${CODE_REVIEWERS}"
 
     log "Verifying PR was opened for ${BRANCH_NAME}"
     # Query by branch name only (owner:branch is treated as a literal name by
@@ -591,7 +594,9 @@ ${ISSUE_BODY}
 
 Existing labels: ${EXISTING_LABELS:-none}
 
-Label criteria are defined in: agents/grooming/label-criteria.json (already checked out in your working directory at ${WORK_DIR})"
+Label criteria are defined in: agents/grooming/label-criteria.json (already checked out in your working directory at ${WORK_DIR})
+
+ADMIN_ASSIGNEES: ${ADMIN_ASSIGNEES}"
 }
 
 action_resolve_conflicts() {
