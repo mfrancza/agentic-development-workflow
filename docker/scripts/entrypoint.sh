@@ -109,6 +109,11 @@ ${user_prompt}"
     # credentials from the process environment via env_key, not auth.json
     # (contrast the openai arm above which does need codex login; see
     # docs/design/grok-models.md decision 2).
+    #
+    # AGENT_MAX_TURNS: codex exec has no --max-turns equivalent; the turn
+    # bound is left to Codex's own internal policy. This is intentional and
+    # matches run_openai()'s behaviour — best-effort per
+    # docs/design/grok-models.md decision 4.
     printf '%s\n' "$combined" | codex exec \
         --config model_provider="xai" \
         --model "$AGENT_MODEL" \
