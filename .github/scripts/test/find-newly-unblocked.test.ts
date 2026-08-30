@@ -411,6 +411,32 @@ describe("find-newly-unblocked run()", () => {
     await expect(run()).rejects.toThrow("Invalid closed-issue-number");
   });
 
+  it("throws when closed-issue-number is zero", async () => {
+    mockInputs({
+      token: "gh-token",
+      repo: "myorg/myrepo",
+      closed_issue_number: "0",
+    });
+    vi.mocked(github.getOctokit).mockReturnValue(
+      asOctokit(makeMockOctokit({ blockingIssues: [] }))
+    );
+
+    await expect(run()).rejects.toThrow("Invalid closed-issue-number");
+  });
+
+  it("throws when closed-issue-number is negative", async () => {
+    mockInputs({
+      token: "gh-token",
+      repo: "myorg/myrepo",
+      closed_issue_number: "-1",
+    });
+    vi.mocked(github.getOctokit).mockReturnValue(
+      asOctokit(makeMockOctokit({ blockingIssues: [] }))
+    );
+
+    await expect(run()).rejects.toThrow("Invalid closed-issue-number");
+  });
+
   it("throws when the repo format is invalid", async () => {
     mockInputs({
       token: "gh-token",
