@@ -38,7 +38,7 @@ container, entrypoint, or prompt changes.
 
 ## Design
 
-### The five transitions we are gating
+### The six transitions we are gating
 
 The SDLC is a chain of stages linked by `agent:*` labels. Each transition
 is a "the previous stage finished; apply the next stage's label" event.
@@ -52,8 +52,9 @@ Enumerated exhaustively (matching the trigger labels defined in
 | 3 | `issues.labeled` where label is `do` | `agent:developer` | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | Yes — `!contains(github.event.issue.labels.*.name, 'draft')` |
 | 4 | `issues.unlabeled` where label is `draft` | `agent:developer` | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | No (draft is being removed; this transition _is_ the un-draft path) |
 | 5 | `pull_request.opened` on an agent-created branch | `agent:review` | `review` | No (head-repo guard covers fork PRs; see Decision 5) | N/A |
+| 6 | `issues.closed` | `agent:developer` (cascade on newly-unblocked issues) | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | N/A — cascade fires on blocker closure; each candidate must carry `blocked`, be open, have no `agent:developer`, have no open `agent/issue-{N}` PR, and have all remaining blockers closed |
 
-All five transitions apply the `AGENT_ALLOWLIST` sender gate where a meaningful sender exists. Transitions #1–#4 are triggered by `issues` events. GitHub has no per-label or per-action permission model, so any collaborator with triage permission can open issues, apply labels, or remove labels. Without a sender check, a non-allowlisted actor could cause the auto-trigger job to apply an `agent:*` label under the developer-agent App identity — which is in `AGENT_ALLOWLIST` — and thereby trigger an agent run, spending Anthropic credits, without ever being in the allowlist themselves. The `AGENT_ALLOWLIST` sender gate on all `issues`-event jobs closes this gap and preserves the invariant that agent workflows are only triggered by actors on `AGENT_ALLOWLIST`.
+All six transitions apply the `AGENT_ALLOWLIST` sender gate where a meaningful sender exists. Transitions #1–#4 and #6 are triggered by `issues` events. GitHub has no per-label or per-action permission model, so any collaborator with triage permission can open issues, apply labels, or remove labels. Without a sender check, a non-allowlisted actor could cause the auto-trigger job to apply an `agent:*` label under the developer-agent App identity — which is in `AGENT_ALLOWLIST` — and thereby trigger an agent run, spending Anthropic credits, without ever being in the allowlist themselves. The `AGENT_ALLOWLIST` sender gate on all `issues`-event jobs closes this gap and preserves the invariant that agent workflows are only triggered by actors on `AGENT_ALLOWLIST`.
 
 Transition #5 (`pull_request.opened`) uses the branch-prefix predicate instead of a sender-login check: the App slug varies per install, and a PR on an `agent/…` branch is a candidate for the review pipeline regardless of who opened it. A head-repo guard (`github.event.pull_request.head.repo.full_name == github.repository`) covers the fork-PR case, preventing outside contributors from triggering auto-review via a matching branch name.
 
@@ -228,7 +229,8 @@ Two loops considered and ruled out, plus one new non-loop confirmed safe after c
   `pull_request.synchronize`**: only `opened` is subscribed. `synchronize`
   re-runs the *reviewer* workflow (which the reviewer image already handles
   in-place), not the auto-trigger workflow.
-- **Automatic label removals causing spurious `issues.unlabeled` events**: since this design was first written, several automatic label-cleanup behaviors have been added to the codebase — `agent:groom` is removed from an issue after a successful grooming run (by `agent-groom.yml`), `agent:design` is removed from the parent issue when the design PR merges (by `agent-design.yml`'s undraft job), and `agent:developer` is removed from the linked issue when the developer-agent's PR is closed — merged or abandoned — (by `agent-pr-merged.yml`). Each removal fires an `issues.unlabeled` event, which causes `agent-auto-trigger.yml` to evaluate its five jobs. No unintended auto-trigger fires: each job gates on a specific label name, and transition #4 (the only `issues.unlabeled` job) gates on `draft` being removed — none of the cleanup events remove `draft`. The no-re-entry guarantee holds.
+- **Automatic label removals causing spurious `issues.unlabeled` events**: since this design was first written, several automatic label-cleanup behaviors have been added to the codebase — `agent:groom` is removed from an issue after a successful grooming run (by `agent-groom.yml`), `agent:design` is removed from the parent issue when the design PR merges (by `agent-design.yml`'s undraft job), and `agent:developer` is removed from the linked issue when the developer-agent's PR is closed — merged or abandoned — (by `agent-pr-merged.yml`). Each removal fires an `issues.unlabeled` event, which causes `agent-auto-trigger.yml` to evaluate its six jobs. No unintended auto-trigger fires: each job gates on a specific label name, and transition #4 (the only `issues.unlabeled` job) gates on `draft` being removed — none of the cleanup events remove `draft`. The no-re-entry guarantee holds.
+- **The cascade (transition #6) applying labels that fire further events**: when `auto-developer-unblock` applies `agent:developer` and removes `blocked` from a newly-unblocked issue, those mutations fire `issues.labeled` (for `agent:developer`) and `issues.unlabeled` (for `blocked`) events. The `issues.labeled` event drives `agent-implement.yml` (the intended downstream), not the auto-trigger workflow (transition #3 gates on label `do`, not `agent:developer`). The `issues.unlabeled` event evaluates the six jobs but matches no job — transition #4 gates on label `draft`, not `blocked`. The closing of newly-unblocked issues (by their own developer agents) would fire `issues.closed`, potentially triggering further cascades; this is the *intended* chain, not a loop — `find-newly-unblocked` only returns issues with all remaining blockers closed, so each cascade step advances the dependency graph monotonically toward "no blocked issues remain". The no-re-entry guarantee holds.
 
 The edge case to note: `agent:developer` is now automatically removed by `agent-pr-merged.yml` when the developer agent's PR closes (merged or abandoned). This generates an `issues.unlabeled` event for `agent:developer`, which — as analyzed above — does not trigger transition #3 or #4. A human who wants to re-run implementation on that issue must re-apply `do`, which causes transition #3 to fire — that is the expected retry path.
 
@@ -294,6 +296,65 @@ orthogonal to issue-level dependency relationships).
   the issue.
 - *Apply no label and do nothing.* Rejected: leaves no machine-readable
   record for the un-block cascade to identify and re-drive the issue.
+
+### Decision 7: Transition 6 — unblock cascade on `issues.closed`
+
+**Context.** Transitions #3 and #4 apply the `blocked` label (instead of
+`agent:developer`) when an issue has open blockers at the time the
+grooming-classification or un-draft signal fires. The `blocked` label
+records the deferred state in a machine-readable way so that the cascade
+job can identify and re-drive those issues when their last blocker closes.
+See Decision 6 and [`docs/design/blocked-by-dependencies.md`](blocked-by-dependencies.md)
+for the rationale.
+
+**Decision.** Add a sixth job `auto-developer-unblock` that fires on
+`issues.closed`. The job:
+
+1. Mints a developer-agent installation token (same pattern as transitions #1–#4).
+2. Calls `./.github/actions/find-newly-unblocked`, passing the closed issue number.
+   That composite action walks the closed issue's `blocking` list and returns a JSON
+   array of issue numbers that are now eligible: open, carry `blocked`, do not carry
+   `agent:developer`, have no open `agent/issue-{N}` PR, and have all remaining
+   blockers closed.
+3. Iterates over the array with `mapfile` (one issue per iteration) and, for each:
+   - Applies `agent:developer` first — this fires the `issues.labeled` event that
+     `agent-implement.yml` listens to, starting implementation.
+   - Removes `blocked` second — this fires `issues.unlabeled` for `blocked`; since
+     that label is not `draft`, transition #4 does not re-fire.
+4. After each mutation, re-checks the actual label state via the API and exits
+   non-zero with `::error::` if the mutation silently no-oped — the same fail-loud
+   pattern as the `undraft-sub-issues` job in `agent-design.yml`.
+
+**Sender gate.** The job gates on
+`contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` (Decision 7's
+counterpart to the sender gate on transitions #1–#4). Any actor in `AGENT_ALLOWLIST`
+may close an issue that triggers the cascade — in practice this is usually the
+developer-agent bot closing its own implementation issue when the PR merges. Without
+this gate, any collaborator closing an issue could indirectly trigger a developer-agent
+run on unblocked downstream issues and spend Anthropic credits without being in the
+allowlist.
+
+**Token / checkout.** Like transitions #1–#4 (and unlike transition #5), this job
+checks out the default branch before resolving the local composite actions. The
+`issues.closed` event carries no PR-authored code, so checking out the default branch
+is safe here (see Decision 3).
+
+**Label ordering rationale.** `agent:developer` is applied before `blocked` is
+removed so that the `labeled` event fires unconditionally, even if `blocked` removal
+were to fail. Removing `blocked` second ensures the resulting `unlabeled` event is
+for `blocked` (not `draft`), which does not match transition #4's gate and does not
+cause a spurious re-trigger.
+
+**Dependency.** This job depends on:
+- The `blocked` label existing (issue TBD-1 — the label must be created before the
+  cascade can remove it).
+- The `./.github/actions/find-newly-unblocked` composite action (issue TBD-3 — the
+  action must exist to fan out from the closed issue's `blocking` list).
+  Both are recorded as blockers on this task.
+
+This transition is cross-referenced in the parent design issue
+[#299](https://github.com/mfrancza/agentic-development-workflow/issues/299)
+under Decisions 2 and 7.
 
 ## Out of scope
 
