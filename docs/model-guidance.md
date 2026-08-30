@@ -204,6 +204,11 @@ Cross-vendor alternatives are listed cheapest-first within the same capability t
 | Single-file config bump (sub-flavor) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#225](https://github.com/mfrancza/agentic-development-workflow/issues/225) | Adding `.editorconfig` or updating a single Terraform variable — pure mechanical change. |
 | Cross-cutting refactor (sub-flavor) | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component refactors that touch workflow, entrypoint, activities, and infrastructure simultaneously. |
 | New agent type (sub-flavor) | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Any issue that adds a new agent identity, container image, or entrypoint dispatch path. |
+| `code review` — targeted (single file, small diff) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | | Mechanical correctness scan of a single-file or small isolated change; no cross-component reasoning required. |
+| `code review` — standard (multi-file PR) | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | | Standard PR review evaluating correctness, style, AGENTS.md compliance, and test coverage across multiple files. |
+| `code review` — architectural / security-sensitive | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | | Cross-cutting reviews, security-sensitive changes (auth, secrets, tokens), or reviews that require system-wide trade-off reasoning. |
+| `design` — scoped feature design | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | | Design for a bounded, well-specified feature where requirements are clear and scope is limited to one or two components. |
+| `design` — system / architectural design | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#262](https://github.com/mfrancza/agentic-development-workflow/issues/262), [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275) | Cross-cutting system design, new subsystem architecture, or design work requiring broad contextual reasoning across multiple components. Overlaps with `plan` — high-level design. |
 
 ---
 
@@ -365,6 +370,12 @@ Anthropic-only is in
 ---
 
 ## Change Log
+
+- **2026-08-30 (rev 4)** — Added `code review` and `design` task classes to the Task-Class Matrix.
+  Code review rows cover three sub-flavors (targeted/haiku, standard/sonnet,
+  architectural-security-sensitive/opus); design rows cover scoped feature design (sonnet) and
+  system/architectural design (opus). Addresses
+  [PR #350](https://github.com/mfrancza/agentic-development-workflow/pull/350) reviewer feedback.
 
 - **2026-08-30 (rev 3)** — Expanded Task-Class Matrix to include all vendors. Each row now shows
   the Anthropic grooming default with its cost/task figure and cross-vendor alternatives (OpenAI
