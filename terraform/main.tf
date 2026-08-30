@@ -341,25 +341,17 @@ locals {
       description = "Run agents on this issue with OpenAI o3 (overrides DEFAULT_MODEL)."
     }
 
-    "model:grok-4.6" = {
+    "model:grok-3" = {
       color       = "1d76db"
-      description = "Run agents on this issue with xAI grok-4.6 via Grok Build CLI (overrides DEFAULT_MODEL)."
+      description = "Run agents on this issue with xAI grok-3 (overrides DEFAULT_MODEL)."
     }
-    "model:grok-4.5" = {
+    "model:grok-3-mini" = {
       color       = "1d76db"
-      description = "Run agents on this issue with xAI grok-4.5 via Grok Build CLI (overrides DEFAULT_MODEL)."
+      description = "Run agents on this issue with xAI grok-3-mini (overrides DEFAULT_MODEL)."
     }
-    "model:grok-4.3" = {
+    "model:grok-code-fast-1" = {
       color       = "1d76db"
-      description = "Run agents on this issue with xAI grok-4.3 via Grok Build CLI (overrides DEFAULT_MODEL)."
-    }
-    "model:grok-4.20" = {
-      color       = "1d76db"
-      description = "Run agents on this issue with xAI grok-4.20 via Grok Build CLI (overrides DEFAULT_MODEL)."
-    }
-    "model:grok-build-0.1" = {
-      color       = "1d76db"
-      description = "Run agents on this issue with xAI grok-build-0.1 via Grok Build CLI (overrides DEFAULT_MODEL)."
+      description = "Run agents on this issue with xAI grok-code-fast-1 (overrides DEFAULT_MODEL)."
     }
 
     # Per-agent model overrides. Each label targets a single agent type and
