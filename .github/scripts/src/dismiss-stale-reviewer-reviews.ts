@@ -43,6 +43,9 @@ export async function fetchBotLogin(
 /**
  * Paginates through all reviews on the PR using page-based REST pagination
  * (100 reviews per page) and returns a minimal summary of each.
+ *
+ * Returns an empty array and logs a warning if the API call fails, mirroring
+ * the fail-open pattern of fetchBotLogin.
  */
 export async function fetchAllReviews(
   octokit: OctokitType,
@@ -54,26 +57,35 @@ export async function fetchAllReviews(
   let page = 1;
   const perPage = 100;
 
-  while (true) {
-    const { data } = await octokit.rest.pulls.listReviews({
-      owner,
-      repo,
-      pull_number: prNumber,
-      per_page: perPage,
-      page,
-    });
-
-    for (const r of data) {
-      all.push({
-        id: r.id,
-        userLogin: r.user?.login ?? null,
-        state: r.state,
+  try {
+    while (true) {
+      const { data } = await octokit.rest.pulls.listReviews({
+        owner,
+        repo,
+        pull_number: prNumber,
+        per_page: perPage,
+        page,
       });
-    }
 
-    // Fewer than a full page means this was the last page.
-    if (data.length < perPage) break;
-    page++;
+      for (const r of data) {
+        all.push({
+          id: r.id,
+          userLogin: r.user?.login ?? null,
+          state: r.state,
+        });
+      }
+
+      // Fewer than a full page means this was the last page.
+      if (data.length < perPage) break;
+      page++;
+    }
+  } catch (err) {
+    core.warning(
+      `Could not fetch reviews for PR #${prNumber}: ${
+        err instanceof Error ? err.message : String(err)
+      }. Skipping stale-review dismissal.`
+    );
+    return [];
   }
 
   return all;
@@ -138,10 +150,22 @@ export async function dismissReviews(
 
 async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
+  // The composite action declares the input as "pr-number" (hyphen) and
+  // bridges it to the env var INPUT_PR_NUMBER (underscore) explicitly.
+  // @actions/core maps getInput(name) to process.env["INPUT_" + name with
+  // spaces→underscores]; hyphens are NOT converted, so getInput("pr-number")
+  // would look for INPUT_PR-NUMBER and miss the env var. Using "pr_number"
+  // here matches the explicit INPUT_PR_NUMBER env var set by the action.
   const prNumberStr = core.getInput("pr_number", { required: true });
   const repo = core.getInput("repo", { required: true });
 
   const prNumber = parseInt(prNumberStr, 10);
+  if (isNaN(prNumber)) {
+    core.warning(
+      `dismiss-stale-reviewer-reviews: pr_number "${prNumberStr}" is not a valid integer. Skipping stale-review dismissal.`
+    );
+    return;
+  }
   const [owner, repoName] = repo.split("/");
   const octokit = getOctokit(token);
 
