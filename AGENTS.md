@@ -286,7 +286,7 @@ At minimum, before opening a PR, check whether your change alters any of the fol
 - The set of `AGENT_ACTION` values, their env vars, or their trigger events.
 - Workflow files under `.github/workflows/` (triggers, gating conditions, secrets, env vars passed to the container). Also update the doc when adding or removing an entry in [`.gitleaksignore`](.gitleaksignore) — an allowlisted fingerprint is a review-relevant deviation, not silent config.
 - Labels that gate or configure agent behaviour (`agent:*`, `model:*`, grooming labels).
-- Terraform variables, resources, or Actions variables (`AGENT_ALLOWLIST`, `DEFAULT_MODEL`, `AUTO_TRIGGER_AGENTS`, branch-protection rules).
+- Terraform variables, resources, or Actions variables (`AGENT_ALLOWLIST`, `ADMIN_ASSIGNEES`, `CODE_REVIEWERS`, `DEFAULT_MODEL`, `AUTO_TRIGGER_AGENTS`, branch-protection rules).
 - Required GitHub App permissions or repo Actions secrets.
 - The repository layout section above (new top-level directories or removed files).
 - The `docker/` image (base image, installed tools, or entrypoint contract).
