@@ -165,7 +165,8 @@ developer-agent" step and before "Run agent":
    `resolve-model` composite with `token: ${{ steps.setup.outputs.token }}`
    (the minted developer-agent token), `subject-type: issue`,
    `subject-number: ${{ steps.linked-issue.outputs.issue_number }}`,
-   `agent-type: developer`, `default-model: ${{ vars.DEFAULT_MODEL }}`. This
+   `repo: ${{ github.repository }}`, `agent-type: developer`,
+   `default-model: ${{ vars.DEFAULT_MODEL }}`. This
    step is gated on `steps.linked-issue.outputs.proceed == 'true'` so it is
    skipped when no `Closes #N` was found.
 
@@ -206,12 +207,22 @@ cleanly than one thick one.
 ### Decision 5: `AGENTS.md` update in the same PR as the workflow changes
 
 **Decision:** In the sub-issue that updates `agent-fix-checks.yml` and
-`agent-respond-review.yml`, also update the `model:<agent-type>:<name>`
-bullet in `AGENTS.md`'s Labels section — specifically the sentence
-`review (\`model:review:haiku/sonnet/opus\` pre-provisioned in the label
-picker; current PR-based workflows use single-tier \`model:*\` resolution
-and ignore per-agent labels)`. Once all three PR-based workflows are on the
-two-tier waterfall, that caveat is stale and must be removed.
+`agent-respond-review.yml`, also update two stale sentences in `AGENTS.md`:
+
+1. In the `model:<agent-type>:<name>` bullet (Labels section): remove the
+   parenthetical `review (\`model:review:haiku/sonnet/opus\` pre-provisioned
+   in the label picker; current PR-based workflows use single-tier \`model:*\`
+   resolution and ignore per-agent labels)` — it will be false once all three
+   PR-based workflows are on the waterfall.
+
+2. In the `agent:review` label bullet: update the model-selection sentence
+   "Model selection follows the same `model:*` label logic as issue-driven
+   runs: if a `model:*` label is present on the PR, that model is used; if
+   none is present, `vars.DEFAULT_MODEL` is used; if more than one `model:*`
+   label is present, the workflow fails loudly." — after issue #361 ships
+   `agent-type: review`, this sentence understates the two-tier waterfall
+   (per-agent labels are checked first, then generic `model:*`, then default)
+   and must be updated to describe it accurately.
 
 **Rationale:** `AGENTS.md`'s "Keeping Documentation Current" section makes
 documentation-in-the-same-PR the standard; the current wording explicitly
