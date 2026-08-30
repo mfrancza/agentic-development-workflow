@@ -36,13 +36,20 @@ jobs:
   # opens an issue (including non-allowlisted collaborators or, on public repos,
   # any GitHub user) would cause the auto-trigger job to apply agent:groom and
   # thereby trigger an agent run.
+  #
+  # Draft guard: skip issues that already carry the 'draft' label. Design
+  # sub-issues are opened with 'draft' already applied and are fully scoped by
+  # construction — re-grooming them is a no-op at best and a deadlock source at
+  # worst (see issue #284). The un-draft transition (auto-developer-undraft)
+  # owns the hand-off for these issues once the design PR merges.
   auto-groom:
     if: >
       github.event_name == 'issues' &&
       github.event.action == 'opened' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login) &&
+      !contains(github.event.issue.labels.*.name, 'draft')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -110,6 +117,16 @@ jobs:
   # issues.labeled (do) → agent:developer
   #
   # Sender allowlist required: same rationale as transition 2 above.
+  #
+  # Draft guard: skip issues that carry the 'draft' label. When auto-groom is
+  # also on, the groomer runs on a draft sub-issue (opened by the design agent)
+  # and may classify it 'do', which would apply agent:developer while the issue
+  # is still draft. The agent-implement preflight skips the draft issue (defence
+  # in depth), but — critically — consumes the one-shot label event so that the
+  # un-draft transition's subsequent --add-label agent:developer is a no-op and
+  # emits no new event, deadlocking the issue. Skipping here ensures
+  # auto-developer-undraft (transition #4) is the sole path for design
+  # sub-issues. See issue #284.
   auto-developer-do:
     if: >
       github.event_name == 'issues' &&
@@ -117,7 +134,8 @@ jobs:
       github.event.label.name == 'do' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login) &&
+      !contains(github.event.issue.labels.*.name, 'draft')
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:

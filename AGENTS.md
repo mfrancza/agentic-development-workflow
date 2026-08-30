@@ -109,12 +109,13 @@ Only usernames (and agent bot identities like `<developer-agent-app-slug>[bot]`)
 
 The Terraform-managed `AUTO_TRIGGER_AGENTS` Actions variable (a JSON object) controls whether each `agent:*` label is applied automatically at the natural upstream signal, advancing the SDLC pipeline without manual labeling. All four gates default to `false` (opt-in); the operator flips a key to `true` in `terraform.tfvars` and runs `terraform apply` to enable that stage. See [`docs/design/auto-trigger-agents.md`](docs/design/auto-trigger-agents.md) for the full design rationale.
 
-| Key | Upstream signal | Label applied |
-|-----|-----------------|---------------|
-| `groom` | `issues.opened` (sender must be in `AGENT_ALLOWLIST`) | `agent:groom` |
-| `design` | `issues.labeled` where label is `plan` (sender must be in `AGENT_ALLOWLIST`) | `agent:design` |
-| `developer` | `issues.labeled` where label is `do`, or `issues.unlabeled` where label is `draft` (sender must be in `AGENT_ALLOWLIST`) | `agent:developer` |
-| `review` | `pull_request.opened` on a branch whose name starts with `agent/` or `design/` (same-repo PRs only) | `agent:review` |
+| Key | Upstream signal | Label applied | Draft guard? |
+|-----|-----------------|---------------|--------------|
+| `groom` | `issues.opened` (sender must be in `AGENT_ALLOWLIST`) | `agent:groom` | Yes — skipped if the issue already carries `draft`; design sub-issues are fully scoped by construction and must not be re-groomed |
+| `design` | `issues.labeled` where label is `plan` (sender must be in `AGENT_ALLOWLIST`) | `agent:design` | No |
+| `developer` | `issues.labeled` where label is `do` (sender must be in `AGENT_ALLOWLIST`) | `agent:developer` | Yes — skipped if the issue carries `draft`; the un-draft transition owns the hand-off for design sub-issues |
+| `developer` | `issues.unlabeled` where label is `draft` (sender must be in `AGENT_ALLOWLIST`) | `agent:developer` | N/A — draft is being removed; this transition _is_ the un-draft path |
+| `review` | `pull_request.opened` on a branch whose name starts with `agent/` or `design/` (same-repo PRs only) | `agent:review` | N/A |
 
 - **Troubleshooting silent skips.** If an auto-applied `agent:*` label does not start the downstream workflow (the run shows `skipped` with no error), check that the developer-agent bot identity (e.g. `mfrancza-developer-agent[bot]`) is present in `AGENT_ALLOWLIST` — a missing entry causes the auto-trigger job to succeed and apply the label while every downstream agent workflow silently skips.
 

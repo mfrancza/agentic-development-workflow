@@ -45,13 +45,13 @@ is a "the previous stage finished; apply the next stage's label" event.
 Enumerated exhaustively (matching the trigger labels defined in
 `terraform/main.tf`):
 
-| # | Upstream signal | Label to apply | Gate | Sender gate? |
-|---|---|---|---|---|
-| 1 | `issues.opened` | `agent:groom` | `groom` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` |
-| 2 | `issues.labeled` where label is `plan` | `agent:design` | `design` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` |
-| 3 | `issues.labeled` where label is `do` | `agent:developer` | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` |
-| 4 | `issues.unlabeled` where label is `draft` | `agent:developer` | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` |
-| 5 | `pull_request.opened` on an agent-created branch | `agent:review` | `review` | No (head-repo guard covers fork PRs; see Decision 5) |
+| # | Upstream signal | Label to apply | Gate | Sender gate? | Draft guard? |
+|---|---|---|---|---|---|
+| 1 | `issues.opened` | `agent:groom` | `groom` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | Yes — `!contains(github.event.issue.labels.*.name, 'draft')` |
+| 2 | `issues.labeled` where label is `plan` | `agent:design` | `design` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | No |
+| 3 | `issues.labeled` where label is `do` | `agent:developer` | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | Yes — `!contains(github.event.issue.labels.*.name, 'draft')` |
+| 4 | `issues.unlabeled` where label is `draft` | `agent:developer` | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | No (draft is being removed; this transition _is_ the un-draft path) |
+| 5 | `pull_request.opened` on an agent-created branch | `agent:review` | `review` | No (head-repo guard covers fork PRs; see Decision 5) | N/A |
 
 All five transitions apply the `AGENT_ALLOWLIST` sender gate where a meaningful sender exists. Transitions #1–#4 are triggered by `issues` events. GitHub has no per-label or per-action permission model, so any collaborator with triage permission can open issues, apply labels, or remove labels. Without a sender check, a non-allowlisted actor could cause the auto-trigger job to apply an `agent:*` label under the developer-agent App identity — which is in `AGENT_ALLOWLIST` — and thereby trigger an agent run, spending Anthropic credits, without ever being in the allowlist themselves. The `AGENT_ALLOWLIST` sender gate on all `issues`-event jobs closes this gap and preserves the invariant that agent workflows are only triggered by actors on `AGENT_ALLOWLIST`.
 
@@ -123,6 +123,7 @@ jobs (one per row of the transitions table). Each job:
 - has its own `on:` filter for the upstream signal (or a shared `on:` with
   per-job `if:` predicates — see below),
 - gates on `fromJSON(vars.AUTO_TRIGGER_AGENTS).<key> == true`, and — for jobs triggered by `issues.labeled` or `issues.unlabeled` (transitions #2, #3, #4) — additionally on `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` per `AGENTS.md`'s repo-specific security standard (see transitions table above),
+- for transitions #1 and #3, additionally gates on `!contains(github.event.issue.labels.*.name, 'draft')` — design sub-issues are opened with `draft` already applied, are fully scoped by construction, and must not be re-groomed or prematurely handed to the developer agent while the design PR is still open (see Decision 2 note below and issue #284),
 - mints a developer-agent installation token via
   `./.github/actions/agent-token`, and
 - applies the target label with `gh issue edit --add-label` or
@@ -134,6 +135,22 @@ pull_request: [opened] }` at the top and each job's `if:` narrows to its
 specific event/label — the standard multi-trigger pattern already used by
 `agent-design.yml` (`issues.labeled` for the design job, `pull_request.closed`
 for the un-draft job).
+
+**Draft guard on transitions #1 and #3 (issue #284).** When both `groom` and
+`developer` auto-trigger gates are on, design sub-issues created by the design
+agent (which already carry `draft`) would otherwise be auto-groomed (transition
+#1) and then have `agent:developer` applied when the groomer classifies them
+`do` (transition #3) — all while the issue is still `draft`. The
+`agent-implement` preflight correctly skips draft issues, but by doing so it
+consumes the one-shot `labeled` event for `agent:developer`; when the design
+PR later merges and `auto-developer-undraft` runs its `--add-label
+agent:developer`, GitHub sees the label already present and emits no new
+`labeled` event, leaving the issue permanently stalled. Adding
+`!contains(github.event.issue.labels.*.name, 'draft')` to the `if:` predicate
+of both `auto-groom` and `auto-developer-do` makes `auto-developer-undraft`
+(transition #4) the sole path for design sub-issues, keeping the label event
+available for the un-draft hand-off. `agent-implement`'s draft preflight is
+retained as defence in depth.
 
 **Alternatives considered.**
 
