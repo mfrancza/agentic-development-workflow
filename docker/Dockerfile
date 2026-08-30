@@ -41,4 +41,12 @@ RUN chmod +x /opt/agent/entrypoint.sh /opt/agent/git-askpass.sh
 USER agent
 WORKDIR /home/agent
 
+# Configure Codex CLI to use xAI's OpenAI-compatible API endpoint for Grok models.
+# Custom model_providers read credentials from the env var named by env_key
+# (XAI_API_KEY), not from ~/.codex/auth.json — so no codex login step is
+# needed for the xai arm (see docs/design/grok-models.md decision 2).
+RUN mkdir -p /home/agent/.codex && \
+    printf '[model_providers.xai]\nname = "xAI"\nbase_url = "https://api.x.ai/v1"\nenv_key = "XAI_API_KEY"\n' \
+    > /home/agent/.codex/config.toml
+
 ENTRYPOINT ["/opt/agent/entrypoint.sh"]
