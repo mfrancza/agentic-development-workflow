@@ -60,9 +60,15 @@ jobs:
           persist-credentials: false
 
       # Skip cleanly when there is nothing to respond to.
+      # Checks are applied in order:
+      #   0. PR is not open (closed or merged): skip immediately. A review on a
+      #      closed or merged PR never needs a response. This guards against a
+      #      race where the human approves-and-merges within seconds and the
+      #      head branch is deleted before the container can check it out.
+      #      On API error the check fails open (proceeds to the feedback checks).
       # Non-approval states (changes_requested, commented) always proceed — they
       # signal the reviewer wants something changed or opened a discussion.
-      # For approved reviews two skip conditions apply, checked in order:
+      # For approved reviews two additional skip conditions apply, checked in order:
       #   1. Zero unresolved PR review threads (primary check): threads are the
       #      ground truth for outstanding feedback. Skip even when the review
       #      carries body text or inline comments — those are advisory when
