@@ -59,6 +59,7 @@ jobs:
           subject-number: ${{ steps.lookup.outputs.issue_number }}
           repo: ${{ github.repository }}
           default-model: ${{ vars.DEFAULT_MODEL }}
+          agent-type: developer
 
       - name: Prepare agent log directory
         run: |

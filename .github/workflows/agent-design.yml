@@ -83,6 +83,7 @@ jobs:
           subject-number: ${{ github.event.issue.number }}
           repo: ${{ github.repository }}
           default-model: ${{ vars.DEFAULT_MODEL }}
+          agent-type: design
 
       - name: Prepare agent log directory
         run: |
