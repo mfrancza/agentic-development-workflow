@@ -4,9 +4,10 @@ description: >
   of environment variables (GH_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY,
   GITHUB_REPO, AGENT_MODEL) and any optional per-workflow identifiers
   (AGENT_ACTION, GITHUB_ISSUE_NUMBER, GITHUB_PR_NUMBER, GITHUB_RUN_ID,
-  ESCALATION_ASSIGNEE, RESOLVE_THREADS_FILE). Also creates and mounts an
-  output directory when output-dir and output-mount are supplied (used by
-  agent-review for the RESOLVE_THREADS_FILE hand-off).
+  ESCALATION_ASSIGNEE, RESOLVE_THREADS_FILE, ADMIN_ASSIGNEES,
+  CODE_REVIEWERS). Also creates and mounts an output directory when
+  output-dir and output-mount are supplied (used by agent-review for the
+  RESOLVE_THREADS_FILE hand-off).
 
 inputs:
   build-context:
@@ -136,6 +137,12 @@ runs:
         [[ -n "${_GITHUB_RUN_ID}" ]] && _opt_env+=(-e GITHUB_RUN_ID="${_GITHUB_RUN_ID}")
         [[ -n "${_ESCALATION_ASSIGNEE}" ]] && _opt_env+=(-e ESCALATION_ASSIGNEE="${_ESCALATION_ASSIGNEE}")
         [[ -n "${_RESOLVE_THREADS_FILE}" ]] && _opt_env+=(-e RESOLVE_THREADS_FILE="${_RESOLVE_THREADS_FILE}")
+        # Caller-supplied env vars forwarded from the step's env: block; present
+        # only on specific workflows (ADMIN_ASSIGNEES on agent-groom,
+        # CODE_REVIEWERS on agent-implement) — omit when unset to keep the
+        # container env clean.
+        [[ -n "${ADMIN_ASSIGNEES:-}" ]] && _opt_env+=(-e ADMIN_ASSIGNEES="${ADMIN_ASSIGNEES}")
+        [[ -n "${CODE_REVIEWERS:-}" ]] && _opt_env+=(-e CODE_REVIEWERS="${CODE_REVIEWERS}")
 
         # Create and prepare the host output directory if requested; build the
         # volume mount flag. chmod 777 is required because the container's
