@@ -189,7 +189,7 @@ export async function run(): Promise<void> {
   });
 
   const closedIssueNumber = parseInt(closedIssueNumberStr, 10);
-  if (isNaN(closedIssueNumber)) {
+  if (isNaN(closedIssueNumber) || closedIssueNumber <= 0) {
     throw new Error(
       `Invalid closed-issue-number: "${closedIssueNumberStr}". Expected a positive integer.`
     );
