@@ -91,6 +91,14 @@ and comments on the PR naming the files it could not resolve and why. It
 never pushes a partial resolution. This reuses the
 escalation convention added by #46: label + comment, human takes over.
 
+**Exception — justified "ours"-equal resolutions:** A zero-diff result (staged
+file identical to PR branch HEAD) is not automatically an error. When Claude
+deliberately keeps the PR-branch side of a conflict and explicitly documents
+that choice with a `**Kept PR side (ours):**` marker in the per-file
+`### <file-path>` summary section of its output, the entrypoint accepts the
+result rather than escalating. Any zero-diff file that lacks this justification
+marker still triggers escalation.
+
 ### Human review of resolutions: considered options
 
 Per Q&A item 5, three options were considered:
