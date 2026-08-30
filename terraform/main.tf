@@ -379,7 +379,7 @@ locals {
 
     "blocked" = {
       color       = "d1d5da"
-      description = "Auto-trigger deferred pending blocker closure; a human may also apply this label as a manual 'hold for later' marker."
+      description = "Deferred pending blocker closure; also usable as a manual 'hold for later' marker."
     }
 
     "draft" = {
