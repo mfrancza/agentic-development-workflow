@@ -173,28 +173,37 @@ Anthropic-only. This table supports operator-driven label overrides, not routine
 ## Task-Class Matrix
 
 The table below maps each task class (classification labels the grooming agent already applies,
-plus concrete common flavors) to the recommended tier. The *Example issue* column links to a
-closed issue from this repo's history where that tier was applied and the PR merged cleanly. Where
-a task class can fall into more than one tier, the driving factor is noted in the *Notes* column.
+plus concrete common flavors) to the recommended tier and lists all suitable models across all
+vendors with per-task cost estimates. Cost figures use the normalized standard coding task
+benchmark (20,000 input + 5,000 output tokens) defined in the Cross-Vendor Cost Analysis section.
+The *Anthropic default* column is what the grooming agent picks; the *Cross-vendor alternatives*
+column supports operator-driven label overrides when cost or provider diversity is a factor.
+The *Example issue* column links to a closed issue from this repo's history where that tier was
+applied and the PR merged cleanly. Where a task class can fall into more than one tier, the
+driving factor is noted in the *Notes* column.
 
-| Task class | Recommended tier | Example issue | Notes |
-|---|---|---|---|
-| `bug` — single-file or single-component, scoped fix | `model:sonnet` | [#284](https://github.com/mfrancza/agentic-development-workflow/issues/284), [#263](https://github.com/mfrancza/agentic-development-workflow/issues/263), [#276](https://github.com/mfrancza/agentic-development-workflow/issues/276) | The implementation path is clear; sonnet handles typical bug fixes efficiently. |
-| `bug` — single-line syntax / typo fix | `model:haiku` | [#243](https://github.com/mfrancza/agentic-development-workflow/issues/243) | Empty `${{ }}` expression in a YAML comment — purely mechanical, no design decisions. |
-| `bug` — cross-cutting, multi-component | `model:opus` | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Respecting blocked-by dependencies across fail-loud, deferral, and cascade paths required cross-cutting design; carried both `bug` and `plan` labels. |
-| `enhancement` — docs-only | `model:haiku` | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117), [#224](https://github.com/mfrancza/agentic-development-workflow/issues/224), [#161](https://github.com/mfrancza/agentic-development-workflow/issues/161) | Pure documentation edits with no logic changes. Exception: docs that touch security-sensitive prose (auth, token handling) should use `model:sonnet`. |
-| `enhancement` — well-specified feature | `model:sonnet` | [#302](https://github.com/mfrancza/agentic-development-workflow/issues/302), [#301](https://github.com/mfrancza/agentic-development-workflow/issues/301), [#280](https://github.com/mfrancza/agentic-development-workflow/issues/280) | New composite actions, runner support, and Terraform plumbing — implementation paths were clear from the issue description. |
-| `enhancement` — cross-cutting refactor | `model:opus` | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component changes that span workflow, entrypoint, TypeScript activities, and Terraform. |
-| `enhancement` — new agent type | `model:opus` | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#32](https://github.com/mfrancza/agentic-development-workflow/issues/32) | New agent types inherently require design decisions about scope, identity, and integration; always `plan`-class work. |
-| `dependency upgrade` | `model:sonnet` | [#30](https://github.com/mfrancza/agentic-development-workflow/issues/30) | Typical version bumps are well-specified; sonnet is sufficient. If the upgrade involves a breaking-change migration across many files, consider `model:opus`. |
-| `do` — mechanical (typo, single config value, comment) | `model:haiku` | [#243](https://github.com/mfrancza/agentic-development-workflow/issues/243), [#228](https://github.com/mfrancza/agentic-development-workflow/issues/228) | If `do` and clearly trivial, haiku is appropriate. When in doubt between haiku and sonnet, prefer sonnet. |
-| `do` — typical scoped implementation | `model:sonnet` | [#304](https://github.com/mfrancza/agentic-development-workflow/issues/304), [#302](https://github.com/mfrancza/agentic-development-workflow/issues/302), [#263](https://github.com/mfrancza/agentic-development-workflow/issues/263) | The large majority of `do` issues fall here — non-trivial but well-specified. |
-| `plan` — high-level design / architecture | `model:opus` | [#262](https://github.com/mfrancza/agentic-development-workflow/issues/262), [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Design documents require cross-cutting analysis and trade-off reasoning; opus is almost always the right pick for `plan`. |
-| `plan` — bounded validation / E2E test | `model:sonnet` | [#139](https://github.com/mfrancza/agentic-development-workflow/issues/139), [#57](https://github.com/mfrancza/agentic-development-workflow/issues/57) | E2E validation plans are scoped and procedural; sonnet handles them well despite carrying the `plan` label. |
-| Docs-only enhancement (sub-flavor) | `model:haiku` | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117), [#161](https://github.com/mfrancza/agentic-development-workflow/issues/161) | Subtype of docs-only enhancement — updating `AGENTS.md` or `README.md` for a limitation note or label description. |
-| Single-file config bump (sub-flavor) | `model:haiku` | [#225](https://github.com/mfrancza/agentic-development-workflow/issues/225) | Adding `.editorconfig` or updating a single Terraform variable — pure mechanical change. |
-| Cross-cutting refactor (sub-flavor) | `model:opus` | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component refactors that touch workflow, entrypoint, activities, and infrastructure simultaneously. |
-| New agent type (sub-flavor) | `model:opus` | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Any issue that adds a new agent identity, container image, or entrypoint dispatch path. |
+**Cost/task key:** All figures use the standard 20k-input / 5k-output token benchmark. Figures
+marked † are variable; see the o3 benchmark note in the Cross-Vendor Cost Analysis section.
+Cross-vendor alternatives are listed cheapest-first within the same capability tier.
+
+| Task class | Anthropic default | Anthropic cost/task | Cross-vendor alternatives (cost/task, cheapest first) | Example issue | Notes |
+|---|---|---|---|---|---|
+| `bug` — single-file or single-component, scoped fix | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | [#284](https://github.com/mfrancza/agentic-development-workflow/issues/284), [#263](https://github.com/mfrancza/agentic-development-workflow/issues/263), [#276](https://github.com/mfrancza/agentic-development-workflow/issues/276) | The implementation path is clear; sonnet handles typical bug fixes efficiently. |
+| `bug` — single-line syntax / typo fix | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#243](https://github.com/mfrancza/agentic-development-workflow/issues/243) | Empty `${{ }}` expression in a YAML comment — purely mechanical, no design decisions. |
+| `bug` — cross-cutting, multi-component | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Respecting blocked-by dependencies across fail-loud, deferral, and cascade paths required cross-cutting design; carried both `bug` and `plan` labels. |
+| `enhancement` — docs-only | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117), [#224](https://github.com/mfrancza/agentic-development-workflow/issues/224), [#161](https://github.com/mfrancza/agentic-development-workflow/issues/161) | Pure documentation edits with no logic changes. Exception: docs that touch security-sensitive prose (auth, token handling) should use `model:sonnet`. |
+| `enhancement` — well-specified feature | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | [#302](https://github.com/mfrancza/agentic-development-workflow/issues/302), [#301](https://github.com/mfrancza/agentic-development-workflow/issues/301), [#280](https://github.com/mfrancza/agentic-development-workflow/issues/280) | New composite actions, runner support, and Terraform plumbing — implementation paths were clear from the issue description. |
+| `enhancement` — cross-cutting refactor | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component changes that span workflow, entrypoint, TypeScript activities, and Terraform. |
+| `enhancement` — new agent type | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#32](https://github.com/mfrancza/agentic-development-workflow/issues/32) | New agent types inherently require design decisions about scope, identity, and integration; always `plan`-class work. |
+| `dependency upgrade` | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | [#30](https://github.com/mfrancza/agentic-development-workflow/issues/30) | Typical version bumps are well-specified; sonnet is sufficient. If the upgrade involves a breaking-change migration across many files, consider `model:opus`. |
+| `do` — mechanical (typo, single config value, comment) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#243](https://github.com/mfrancza/agentic-development-workflow/issues/243), [#228](https://github.com/mfrancza/agentic-development-workflow/issues/228) | If `do` and clearly trivial, haiku is appropriate. When in doubt between haiku and sonnet, prefer sonnet. |
+| `do` — typical scoped implementation | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | [#304](https://github.com/mfrancza/agentic-development-workflow/issues/304), [#302](https://github.com/mfrancza/agentic-development-workflow/issues/302), [#263](https://github.com/mfrancza/agentic-development-workflow/issues/263) | The large majority of `do` issues fall here — non-trivial but well-specified. |
+| `plan` — high-level design / architecture | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#262](https://github.com/mfrancza/agentic-development-workflow/issues/262), [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Design documents require cross-cutting analysis and trade-off reasoning; opus is almost always the right pick for `plan`. |
+| `plan` — bounded validation / E2E test | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | [#139](https://github.com/mfrancza/agentic-development-workflow/issues/139), [#57](https://github.com/mfrancza/agentic-development-workflow/issues/57) | E2E validation plans are scoped and procedural; sonnet handles them well despite carrying the `plan` label. |
+| Docs-only enhancement (sub-flavor) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117), [#161](https://github.com/mfrancza/agentic-development-workflow/issues/161) | Subtype of docs-only enhancement — updating `AGENTS.md` or `README.md` for a limitation note or label description. |
+| Single-file config bump (sub-flavor) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#225](https://github.com/mfrancza/agentic-development-workflow/issues/225) | Adding `.editorconfig` or updating a single Terraform variable — pure mechanical change. |
+| Cross-cutting refactor (sub-flavor) | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component refactors that touch workflow, entrypoint, activities, and infrastructure simultaneously. |
+| New agent type (sub-flavor) | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Any issue that adds a new agent identity, container image, or entrypoint dispatch path. |
 
 ---
 
@@ -356,6 +365,12 @@ Anthropic-only is in
 ---
 
 ## Change Log
+
+- **2026-08-30 (rev 3)** — Expanded Task-Class Matrix to include all vendors. Each row now shows
+  the Anthropic grooming default with its cost/task figure and cross-vendor alternatives (OpenAI
+  and xAI labels, cheapest-first within the same capability tier). Added introductory key
+  explaining the benchmark and the † notation for variable o3 costs. Addresses
+  [PR #350](https://github.com/mfrancza/agentic-development-workflow/pull/350) reviewer feedback.
 
 - **2026-08-30 (rev 2)** — Expanded Tier Summary to cover all provisioned providers: added OpenAI
   (`gpt-5.6-luna/terra/sol`, `gpt-5`, `o3`) and xAI (`grok-3`, `grok-3-mini`, `grok-code-fast-1`,
