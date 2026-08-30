@@ -172,6 +172,17 @@ actionable (evaluate + resolve if addressed). The rewrite is a
 localized-string edit inside `docker/reviewer/entrypoint.sh`; no structural
 change.
 
+**Amended (issue #267):** The re-review flow's terminal-`APPROVE` requirement
+was regressing on PRs where the reviewer bot itself had a prior standing
+`CHANGES_REQUESTED` review: even on fully clean re-review passes (zero
+findings, positive body), the reviewer chose `COMMENTED` instead of `APPROVE`,
+so the loop never terminated. The fix is documented in
+[`docs/design/reviewer-supersede-stale-verdict.md`](reviewer-supersede-stale-verdict.md):
+a prompt-level clarification that a clean current pass must post `APPROVE`
+regardless of the bot's own prior blocking reviews (Decision 1 of that doc),
+and mechanical dismissal of the reviewer bot's stale `CHANGES_REQUESTED` before
+each re-review pass in `agent-review.yml` (Decision 2 of that doc).
+
 ### 3. Loop guard in `agent-respond-review.yml`
 
 Today's guard skips only a **bare approval** — state == `approved`, empty
