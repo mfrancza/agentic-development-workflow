@@ -57,12 +57,10 @@ RUN chmod +x /opt/agent/entrypoint.sh
 USER agent
 WORKDIR /home/agent
 
-# Configure Codex CLI to use xAI's OpenAI-compatible API endpoint for Grok models.
-# Custom model_providers read credentials from the env var named by env_key
-# (XAI_API_KEY), not from ~/.codex/auth.json — so no codex login step is
-# needed for the xai arm (see docs/design/grok-models.md decision 2).
-RUN mkdir -p /home/agent/.codex && \
-    printf '[model_providers.xai]\nname = "xAI"\nbase_url = "https://api.x.ai/v1"\nenv_key = "XAI_API_KEY"\n' \
-    > /home/agent/.codex/config.toml
+# Note: no Codex [model_providers.xai] config block here. The xai provider arm
+# previously used Codex pointed at xAI's OpenAI-compatible endpoint; it now uses
+# the Grok Build CLI (grok) instead (see docs/design/grok-build-cli.md Decision 6
+# and run_xai() in entrypoint.sh). The Codex openai arm is unchanged and still
+# authenticates via `codex login --with-api-key` in the preamble.
 
 ENTRYPOINT ["/opt/agent/entrypoint.sh"]
