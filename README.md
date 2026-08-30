@@ -44,8 +44,8 @@ Day-to-day operation is driven entirely by GitHub labels and events:
 - Push to `main` → the agent checks all open developer-agent PRs for merge conflicts and resolves them automatically; each conflicted PR is resolved in its own parallel job so a single failure does not block the others. If the agent cannot resolve a conflict confidently, it aborts, applies `human-required`, and posts a PR comment naming the files that need manual attention. `workflow_dispatch` with a `pr_number` input is available as a manual backstop for a specific PR.
 - PR review submitted on an agent-authored PR → the agent addresses feedback and pushes.
 - Deployment failure → the agent opens a follow-up fix-up PR. (Triggers on any `deployment_status` failure; skips cleanly unless it can map the failing deployment SHA to a PR containing `Closes #N`.)
-- Add a **`model:<name>`** label to override the default Claude model for that issue's or PR's run. Works on both issues (developer/grooming/fix-deployment runs) and PRs (`agent:review` runs). Anthropic labels come in three flavors: **tier aliases** — `model:sonnet`/`model:opus`/`model:haiku` — resolve to the latest snapshot of each series (kept as-is for backwards compatibility); **generic series tags** such as `model:claude-sonnet-4-5` or `model:claude-3-5-haiku-latest` pin to a named series but float across its snapshots; **pinned snapshot IDs** such as `model:claude-sonnet-4-5-20250929` are fully reproducible. Any `claude-*` model ID is accepted at runtime even if the label was not pre-provisioned by Terraform. The grooming agent automatically selects and applies one of the three tier aliases based on issue complexity — if any `model:*` label (tier alias, series tag, or pinned snapshot) is already present when the grooming agent runs, it will leave it unchanged. At most one `model:*` label is allowed; workflows fail loudly if more than one is present.
-- **CI run logs** — container stdout/stderr and Claude Code session transcripts are captured as workflow-run artifacts with 30-day retention. Find them on the workflow-run page under **Artifacts**, or download with `gh run download <run-id>`. See [AGENTS.md](AGENTS.md#debugging) for what's in each artifact and how redaction works.
+- Add a **`model:<name>`** label to override the default Claude model for that run. Works on both issues and PRs. See [AGENTS.md](AGENTS.md#labels) for the three label flavors (tier aliases, generic series tags, pinned snapshots) and groomer auto-selection behavior. At most one `model:*` label is allowed; workflows fail loudly if more than one is present.
+- **CI run logs** — container logs and Claude session transcripts are captured as workflow artifacts with 30-day retention. See [AGENTS.md](AGENTS.md#debugging) for download instructions and what each artifact contains.
 
 Only usernames (and agent bot identities such as `<developer-agent-app-slug>[bot]`) in the Terraform-managed `AGENT_ALLOWLIST` can trigger the label-driven workflows (`agent:groom`, `agent:developer`, `agent:review`, `agent:design`). The agent bots are included so an agent can apply `agent:*` labels to hand work off — for example, the developer agent applying `agent:review` on its own PR to request a code review. Event-driven workflows then apply their own gates: `fix-checks`/`respond-review` run only for developer-agent PRs, and `fix-deployment` runs on any failed `deployment_status` event and skips cleanly unless it can map the deployment SHA to a PR containing `Closes #N`.
 
@@ -241,84 +241,16 @@ docker build -t agent-reviewer ./docker/reviewer
 
 **Credentials**
 
-The container needs two secrets: a GitHub token (`GH_TOKEN`) with **Contents read**, **Pull requests read/write**, and **Checks: read** on the target repo, and an Anthropic API key (`ANTHROPIC_API_KEY`). Contents read is required because the reviewer entrypoint clones the repo and checks out the PR branch; Pull requests read/write is required to post the review; Checks: read is required because the entrypoint calls `gh pr checks` to fetch CI check status and include it in the review prompt.
-
-*Sourcing `GH_TOKEN`*
-
-Option A — your personal GitHub token (simplest, for local testing):
+The container needs a GitHub token (`GH_TOKEN`) with **Contents read**, **Pull requests read/write**, and **Checks: read**, and an Anthropic API key (`ANTHROPIC_API_KEY`). For local testing, your personal token is the simplest source:
 
 ```sh
 export GH_TOKEN=$(gh auth token)
-```
-
-Reviews are posted under your GitHub identity rather than the reviewer-agent bot. This is fine for validating review logic locally; in CI the review is attributed to the reviewer-agent App.
-
-Option B — reviewer-agent installation token (matches CI exactly):
-
-If you need the review to appear as coming from the `reviewer-agent` bot, mint a short-lived installation token from the App's private key. You need the **numeric App ID** (visible on the App's settings page at `https://github.com/settings/apps/<app-name>` — it is a plain integer, not the `Iv23.xxx` Client ID) and the private key downloaded in step 1 (the `.pem` file).
-
-> **Note on App ID vs. Client ID:** The CI workflow uses `.github/actions/agent-token`, which calls `actions/create-github-app-token` via the `client-id` input — it expects the `Iv23.xxx` Client ID. If your `REVIEWER_APP_ID` repository secret contains the Client ID (valid for that action), it **will not work** as `APP_ID` here — the GitHub JWT API requires the numeric App ID in the `iss` claim. To find the numeric ID, open the App's settings page and look for the plain-integer "App ID" field; it is distinct from the Client ID shown further down the page.
-
-> **Tip:** The guards in this snippet use `exit 1` for error reporting. If you paste it directly into an interactive shell session, a failure will close that session. To avoid this, paste the snippet into a script file and run it, or wrap the whole block in a subshell — but note that a subshell will not export `GH_TOKEN` to the parent shell, so you would need to re-export it after (`export GH_TOKEN="$(...)"` form).
-
-```sh
-# Requires: openssl, curl, jq
-APP_ID="123456"                            # numeric GitHub App ID (not the Iv23.xxx Client ID)
-OWNER="your-org-or-user"
-REPO="your-repo"
-KEY_FILE="$HOME/.config/agentic-agents/reviewer-agent.pem"
-
-[ -f "$KEY_FILE" ] && [ -r "$KEY_FILE" ] || \
-  { echo "KEY_FILE not found or not readable: $KEY_FILE"; exit 1; }
-
-_b64url() { openssl enc -base64 -A | tr '+/' '-_' | tr -d '='; }
-now=$(date +%s)
-jwt_header=$(printf '{"alg":"RS256","typ":"JWT"}' | _b64url)
-jwt_payload=$(printf '{"iat":%s,"exp":%s,"iss":%s}' \
-  "$((now - 60))" "$((now + 600))" "$APP_ID" | _b64url)
-jwt_sig=$(printf '%s.%s' "$jwt_header" "$jwt_payload" \
-  | openssl dgst -sha256 -sign "$KEY_FILE" | _b64url)
-JWT="${jwt_header}.${jwt_payload}.${jwt_sig}"
-
-# Fetch the installation for the specific repo (avoids picking the wrong
-# installation when the App is installed on multiple accounts/repos)
-installation_id=$(curl -sf \
-  -H "Authorization: Bearer $JWT" \
-  -H "Accept: application/vnd.github+json" \
-  "https://api.github.com/repos/${OWNER}/${REPO}/installation" \
-  | jq -r '.id')
-
-[ -n "$installation_id" ] && [ "$installation_id" != "null" ] || \
-  { echo "No installation found for ${OWNER}/${REPO} — check APP_ID and that the App is installed on the repo."; exit 1; }
-
-_token=$(curl -sf -X POST \
-  -H "Authorization: Bearer $JWT" \
-  -H "Accept: application/vnd.github+json" \
-  "https://api.github.com/app/installations/${installation_id}/access_tokens" \
-  | jq -r '.token')
-
-[ -n "$_token" ] && [ "$_token" != "null" ] || \
-  { echo "Failed to mint installation token — check that the App is installed and the JWT is valid."; exit 1; }
-
-export GH_TOKEN="$_token"
-```
-
-The token expires in one hour and carries the same scopes as the CI installation token.
-
-*Sourcing `ANTHROPIC_API_KEY`*
-
-```sh
 read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY
 ```
 
-*Passing credentials without leaking them*
-
-Use `-e VARNAME` (without `=value`) so Docker reads each secret from your shell environment — the value does not appear in the `docker run` command text or shell history. Note that the secret is still present in the container's environment and visible via `docker inspect` while the container runs:
+Use `-e VARNAME` (without `=value`) so Docker reads each secret from your shell environment — the value does not appear in the `docker run` command text or shell history:
 
 ```sh
-export GH_TOKEN=$(gh auth token)           # or use Option B above
-read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo && export ANTHROPIC_API_KEY
-
 docker run --rm \
   -e ANTHROPIC_API_KEY \
   -e GH_TOKEN \
@@ -327,31 +259,7 @@ docker run --rm \
   agent-reviewer
 ```
 
-For a reusable setup, write secrets to a permissions-restricted file outside the repo and use `--env-file`:
-
-```sh
-# Create once; never commit this file.
-# umask 077 ensures the file is created with 600 permissions from the start;
-# read -rsp prompts for each secret without echoing it, so values never
-# appear in command text or shell history.
-(
-  umask 077
-  read -rsp "ANTHROPIC_API_KEY: " ANTHROPIC_API_KEY && echo
-  read -rsp "GH_TOKEN: " GH_TOKEN && echo
-  printf 'ANTHROPIC_API_KEY=%s\nGH_TOKEN=%s\n' "$ANTHROPIC_API_KEY" "$GH_TOKEN" \
-    > ~/.reviewer-env
-)
-```
-
-```sh
-docker run --rm \
-  --env-file ~/.reviewer-env \
-  -e GITHUB_REPO="owner/repo" \
-  -e GITHUB_PR_NUMBER="42" \
-  agent-reviewer
-```
-
-Optional: `-e AGENT_MODEL="sonnet"` and `-e AGENT_MAX_TURNS="100"` (both default to these values, matching the CI workflow knobs).
+To mint a reviewer-agent installation token that matches the CI identity exactly, or to set up a persistent credentials file, see [`docs/local-reviewer-setup.md`](docs/local-reviewer-setup.md).
 
 The entrypoint clones the repo read-only, gathers the diff against the merge-base, fetches open review threads and CI check status, invokes Claude, then verifies that a review by the authenticated GitHub identity was posted against the PR head SHA — exiting non-zero if the agent did not complete the review.
 
@@ -367,83 +275,14 @@ The entrypoint clones the repo read-only, gathers the diff against the merge-bas
 
 ## Security defaults
 
-The following security settings are active on this repository after completing the public-flip runbook below. See [AGENTS.md](AGENTS.md#repo-specific-security-defaults) for the full list of security patterns the reviewer agent and human reviewers enforce on every PR.
+The following security settings are active on this repository. See [AGENTS.md](AGENTS.md#repo-specific-security-defaults) for the full list of security patterns the reviewer agent and human reviewers enforce on every PR.
 
 - **Secret scanning** — GitHub natively scans the full commit history for secret patterns and posts alerts; enabled via `security_and_analysis` in [`terraform/main.tf`](terraform/main.tf). Complements the existing [`secret-scan.yml`](.github/workflows/secret-scan.yml) gitleaks workflow (different detection engine; both are active).
 - **Push protection** — GitHub blocks pushes containing detected secret patterns at the git server before they enter the history; enabled alongside secret scanning in `terraform/main.tf`.
 - **`allowed_actions = "selected"`, GitHub-owned only** — only GitHub-owned actions (e.g., `actions/*`, `github/*`) are permitted to run in workflows; local actions under `./.github/actions/` are referenced by path and are not subject to the `allowed_actions` policy. Configured via `github_actions_repository_permissions` in `terraform/main.tf` with `github_owned_allowed = true`, `verified_allowed = false`, and an empty `patterns_allowed`. If a workflow adds a non-GitHub, non-local action, the author must also extend `patterns_allowed` in `terraform/main.tf` with a full-SHA pin — omitting the entry causes a loud workflow failure, not a silent bypass.
 - **Fork-PR approval policy: all external contributors** — workflow runs triggered by fork PRs from external contributors (users without write access) require explicit approval before running; set to `all_external_contributors` via Settings → Actions → General or Terraform (see issue [#185](https://github.com/mfrancza/agentic-development-workflow/issues/185)).
-- **Interaction limit: `collaborators_only`** — non-collaborators cannot open issues or PRs; applied manually at flip time and renewed every six months via the reminder-issue workflow ([#176](https://github.com/mfrancza/agentic-development-workflow/issues/176)). See the [public-flip runbook](#public-flip-runbook) for the exact renewal command.
+- **Interaction limit: `collaborators_only`** — non-collaborators cannot open issues or PRs; applied manually at flip time and renewed every six months via the reminder-issue workflow ([#176](https://github.com/mfrancza/agentic-development-workflow/issues/176)). See [`docs/design/public-visibility-flip.md`](docs/design/public-visibility-flip.md#flip-day-runbook) for the renewal command.
 
 ## Public-flip runbook
 
-This is the step-by-step procedure the maintainer follows to flip the repository from private to public and activate the security defaults above. Run these steps in order from a shell with maintainer admin credentials. The flip is irreversible — once git history is public it is cached externally and cannot be un-exposed.
-
-See the design document at [`docs/design/public-visibility-flip.md`](docs/design/public-visibility-flip.md) for the full rationale and decision log.
-
-### Pre-flip gate check (step 1)
-
-Confirm all of the following before continuing:
-
-- Issues [#125](https://github.com/mfrancza/agentic-development-workflow/issues/125) (agent-log redaction) and [#128](https://github.com/mfrancza/agentic-development-workflow/issues/128) (redaction e2e validation) are closed and redaction is confirmed live.
-- Issue [#176](https://github.com/mfrancza/agentic-development-workflow/issues/176) is closed with the reminder-issue workflow deployed and tested.
-- All sibling sub-issues of [#171](https://github.com/mfrancza/agentic-development-workflow/issues/171) are closed.
-- Historical workflow-run sweep decision is recorded as a comment on [#177](https://github.com/mfrancza/agentic-development-workflow/issues/177) (review accumulated logs via Settings → Actions → Management; delete any logs containing sensitive data, or explicitly accept that they become world-readable).
-
-### Terraform state 1 — visibility flip
-
-- Merge **Prep PR 1**: contains `visibility = "public"` and `github_actions_repository_permissions` (from issues [#183](https://github.com/mfrancza/agentic-development-workflow/issues/183) and [#184](https://github.com/mfrancza/agentic-development-workflow/issues/184), plus the Terraform portion of [#185](https://github.com/mfrancza/agentic-development-workflow/issues/185) if it landed in branch (a)). This PR must **not** include the `security_and_analysis` block.
-- Confirm the docs PR (issue [#186](https://github.com/mfrancza/agentic-development-workflow/issues/186), merged as [#191](https://github.com/mfrancza/agentic-development-workflow/pull/191)) is already merged — if you are reading this runbook from `main`, this step is already satisfied. Order relative to Prep PR 1 does not matter.
-- Confirm the `security_and_analysis` block is absent from the current Terraform config. Then plan and review:
-  ```bash
-  terraform -chdir=terraform plan
-  ```
-  The diff must show only the visibility flip and `allowed_actions` change — nothing else.
-- Apply state 1:
-  ```bash
-  terraform -chdir=terraform apply
-  ```
-  The repo becomes public and `allowed_actions` narrows to GitHub-owned only.
-
-### Terraform state 2 — security settings
-
-- Merge **Prep PR 2**: contains only the `security_and_analysis` block (from issue [#183](https://github.com/mfrancza/agentic-development-workflow/issues/183); prepared and reviewed before the session).
-- Plan and review:
-  ```bash
-  terraform -chdir=terraform plan
-  ```
-  The diff must show only the `secret_scanning` and `secret_scanning_push_protection` additions.
-- Apply state 2:
-  ```bash
-  terraform -chdir=terraform apply
-  ```
-  Secret scanning and push protection are enabled.
-- **If this apply fails** (provider limitation on user-owned repos): enable both features manually via Settings → Code security and Analysis. Do not leave the repo public without push protection active — complete this before continuing.
-
-### Fork-PR approval policy
-
-- If issue [#185](https://github.com/mfrancza/agentic-development-workflow/issues/185) landed in branch (b) (the Terraform provider does not expose the fork-PR approval policy): set it in the GitHub UI — Settings → Actions → General → "Fork pull request workflows" → select "Require approval for all external contributors".
-
-### Interaction limit
-
-The `gh api PUT` call requires the repo to be public — the state 1 apply above must be complete first.
-
-```bash
-gh api -X PUT repos/mfrancza/agentic-development-workflow/interaction-limits \
-  -f limit=collaborators_only \
-  -f expiry=six_months
-```
-
-This blocks non-collaborators from opening issues or PRs for six months. For renewal, follow the reminder-issue workflow ([#176](https://github.com/mfrancza/agentic-development-workflow/issues/176)).
-
-### Post-flip verification
-
-Work through the checklist below and comment the results on the flip-execution issue ([#187](https://github.com/mfrancza/agentic-development-workflow/issues/187)):
-
-- **Label-triggered workflow** — apply `agent:groom` (or any `agent:*` label) to a real issue and confirm the workflow dispatches and the container starts.
-- **Fork PR job gate** — open a fork PR from a collaborator account; submit a review and apply `agent:review` to the fork PR; confirm the `agent-review.yml` job fires but is skipped by the head-repo `if:` gate (the label-triggered path must also skip; the collaborator's fork-PR run must not start the reviewer container).
-- **Interaction-limit rejection** — ask a non-collaborator GitHub account to try opening an issue or PR; confirm GitHub returns the interaction-limits rejection message.
-
-### Close the epic
-
-Close [#177](https://github.com/mfrancza/agentic-development-workflow/issues/177) once all verification checks pass.
+The step-by-step procedure for flipping the repository from private to public — including pre-flip gate checks, staged Terraform applies, fork-PR approval policy, interaction-limit setup, and post-flip verification — is documented in [`docs/design/public-visibility-flip.md`](docs/design/public-visibility-flip.md#flip-day-runbook).
