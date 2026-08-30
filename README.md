@@ -146,9 +146,10 @@ cp terraform.tfvars.example terraform.tfvars
 #                          human-required label is applied; stored as the JSON-encoded
 #                          ADMIN_ASSIGNEES Actions variable; omit or set to [] to skip
 #   code_reviewers       — (optional) list of GitHub usernames to request as PR
-#                          reviewers when the agent opens or updates a PR; stored as
-#                          the JSON-encoded CODE_REVIEWERS Actions variable; omit or
-#                          set to [] to request no specific reviewers
+#                          reviewers when the implement agent determines human review
+#                          is warranted; stored as the JSON-encoded CODE_REVIEWERS
+#                          Actions variable; omit or set to [] to request no specific
+#                          reviewers
 
 export GITHUB_TOKEN=$(gh auth token)  # or any token with `repo` scope
 
