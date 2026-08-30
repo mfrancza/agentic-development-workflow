@@ -213,7 +213,7 @@ locals {
       color       = "1d76db"
       description = "Run agents with the latest Claude Opus 4.1 snapshot (overrides DEFAULT_MODEL)."
     }
-    "model:claude-opus-4-0" = {
+    "model:claude-opus-4" = {
       color       = "1d76db"
       description = "Run agents with the latest Claude Opus 4 snapshot (overrides DEFAULT_MODEL)."
     }
@@ -221,7 +221,7 @@ locals {
       color       = "1d76db"
       description = "Run agents with the latest Claude Sonnet 4.5 snapshot (overrides DEFAULT_MODEL)."
     }
-    "model:claude-sonnet-4-0" = {
+    "model:claude-sonnet-4" = {
       color       = "1d76db"
       description = "Run agents with the latest Claude Sonnet 4 snapshot (overrides DEFAULT_MODEL)."
     }
