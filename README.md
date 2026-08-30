@@ -279,6 +279,16 @@ The entrypoint clones the repo read-only, gathers the diff against the merge-bas
 - Claude model override via `model:<name>` labels on issues (developer/grooming/fix-deployment runs) and PRs (reviewer agent runs).
 - Local run guides for the developer agent ([Build the developer agent container](#4-build-the-developer-agent-container)) and the reviewer agent ([Build and run the reviewer agent container](#5-build-and-run-the-reviewer-agent-container)).
 
+## Debugging
+
+Agent container logs and Claude session transcripts are captured as GitHub Actions workflow artifacts after each run. **Agent log artifacts are retained for 30 days.** Download artifacts before they expire using:
+
+```bash
+gh run download <run-id> --name <artifact-name>
+```
+
+For details on artifact names and contents, see [AGENTS.md](AGENTS.md#debugging).
+
 ## Security defaults
 
 The following security settings are active on this repository. See [AGENTS.md](AGENTS.md#repo-specific-security-defaults) for the full list of security patterns the reviewer agent and human reviewers enforce on every PR.
