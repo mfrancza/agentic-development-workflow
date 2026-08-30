@@ -44,6 +44,12 @@ When in doubt between `COMMENT` and `REQUEST_CHANGES`, ask: would this issue, if
 
 An open review thread that is still valid counts against `APPROVE` and toward `REQUEST_CHANGES` (if blocking) or `COMMENT` (if advisory). Only threads you have recorded for resolution in this run — or threads that were already resolved before this run — are clear.
 
+**Verdict reflects the current pass only.** The PR's prior review history — including a `CHANGES_REQUESTED` review posted by this same bot on an earlier pass — does **not** constrain the current verdict. Posting `APPROVE` now supersedes the earlier verdict; the GitHub API records both reviews, and the new `APPROVE` is the definitive state.
+
+**`APPROVE` is mandatory on a clean pass.** If the current pass has zero blocking findings, zero advisory-worth-recording findings, and every open review thread from prior passes is either resolved or recorded for resolution in this run, the verdict **MUST** be `APPROVE`. Choosing `COMMENT` in this case is incorrect: it leaves the re-review loop without a terminal event and the PR appears "stuck" to human observers.
+
+**`COMMENT` is not a hedge.** Use `COMMENT` only when the current pass surfaces advisory-only findings worth noting. Do not choose `COMMENT` to avoid overturning a prior `CHANGES_REQUESTED` verdict by this bot.
+
 ## Anchoring inline comments
 
 For each finding that maps to a specific changed line, include it as an inline comment. The fields are:
