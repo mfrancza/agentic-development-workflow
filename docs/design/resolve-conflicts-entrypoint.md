@@ -154,6 +154,19 @@ distraction and adds token cost for no benefit.
 If any check produces output (or a non-zero exit), treat verification as failed
 and trigger the fallback.
 
+**Zero-diff refinement (issue #260):** An additional check runs after the
+marker and unmerged-path checks: for each conflicted file whose staged result
+is identical to the PR branch's HEAD version (`git diff --cached --quiet HEAD
+-- <file>`), the entrypoint examines Claude's resolution summary for a
+`**Kept PR side (ours):**` justification marker scoped to that file. If the
+marker is present, the file is accepted (not escalated); if it is absent, the
+file is treated as a verification failure and triggers the fallback. This
+allows genuine ours-equal resolutions (where the PR side is correctly
+preferred) to pass without escalation, while still catching silent wholesale
+discards. See
+[docs/design/resolve-conflicts-zero-diff-guard.md](resolve-conflicts-zero-diff-guard.md)
+for the full design rationale.
+
 **Alternative considered:** grep for `<<<<<<<` across modified files. Rejected:
 `git diff --check` / `git diff --cached --check` are the canonical tools for
 this and handle edge cases (e.g. markers in binary-adjacent context) better
