@@ -1,0 +1,47 @@
+name: 'Dismiss stale reviewer-bot CHANGES_REQUESTED reviews'
+description: >
+  Dismisses any prior CHANGES_REQUESTED reviews on the PR that were authored by
+  the reviewer bot itself, so that a clean re-review pass is not biased by a
+  stale blocking verdict. Paginates through all reviews (100 per page), filters
+  to those with state CHANGES_REQUESTED authored by the reviewer-app identity
+  (derived at runtime via viewer.login), and issues a dismissal for each.
+  Fail-open: individual dismissal errors are logged as warnings and do not fail
+  the workflow. See docs/design/reviewer-supersede-stale-verdict.md Decisions
+  2, 4, and 5.
+
+inputs:
+  token:
+    description: >
+      Reviewer-app installation token. Used both to derive the reviewer bot
+      login (viewer.login GraphQL query) and to issue the dismissal API calls.
+    required: true
+  repo:
+    description: 'Repository in owner/name format'
+    required: true
+  pr-number:
+    description: 'Pull request number'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ github.workspace }}/.github/scripts/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ github.workspace }}/.github/scripts
+      run: npm ci
+
+    - name: Dismiss stale reviewer-bot reviews
+      shell: bash
+      working-directory: ${{ github.workspace }}/.github/scripts
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+      run: npx --no-install tsx src/dismiss-stale-reviewer-reviews.ts
