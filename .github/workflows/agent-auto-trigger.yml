@@ -150,7 +150,16 @@ jobs:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
-      - name: Apply agent:developer label
+      - name: Check for open blockers
+        id: check-blockers
+        uses: ./.github/actions/check-blockers
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ github.event.issue.number }}
+
+      - name: Apply agent:developer label (no open blockers)
+        if: steps.check-blockers.outputs.blocked == 'false'
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -158,6 +167,16 @@ jobs:
         run: |
           set -euo pipefail
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:developer"
+
+      - name: Apply blocked label (open blockers detected)
+        if: steps.check-blockers.outputs.blocked == 'true'
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "blocked"
 
   # ── Transition 4 ─────────────────────────────────────────────────────────────
   # issues.unlabeled (draft) → agent:developer
@@ -188,7 +207,16 @@ jobs:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
-      - name: Apply agent:developer label
+      - name: Check for open blockers
+        id: check-blockers
+        uses: ./.github/actions/check-blockers
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ github.event.issue.number }}
+
+      - name: Apply agent:developer label (no open blockers)
+        if: steps.check-blockers.outputs.blocked == 'false'
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -196,6 +224,16 @@ jobs:
         run: |
           set -euo pipefail
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:developer"
+
+      - name: Apply blocked label (open blockers detected)
+        if: steps.check-blockers.outputs.blocked == 'true'
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "blocked"
 
   # ── Transition 5 ─────────────────────────────────────────────────────────────
   # pull_request.opened on an agent/… or design/… branch (same-repo) → agent:review

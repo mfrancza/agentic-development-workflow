@@ -293,6 +293,16 @@ next reviewer would have to re-derive.
 
 ## Interaction with existing designs and edge cases
 
+- **Interaction with `auto-trigger-agents.md` (Decision 6).** Transitions #3
+  and #4 in `agent-auto-trigger.yml` implement the deferral described in
+  Decision 6 of this document. The workflow-level design — how the
+  `check-blockers` composite action is wired into both jobs and how the two
+  conditional label-application steps are structured — is documented in
+  [`docs/design/auto-trigger-agents.md`](auto-trigger-agents.md) Decision 6.
+  Read both Decision 6 entries together for the complete picture: this
+  document explains *why* the pattern is required and what alternatives were
+  ruled out; `auto-trigger-agents.md` Decision 6 explains *how* it is
+  implemented in the workflow YAML.
 - **Interaction with issue #284's draft-guard fix.** Transitions #1 and
   #3 already skip when `draft` is present. This design adds no new
   `draft`-related behavior to those transitions. Transition #4
