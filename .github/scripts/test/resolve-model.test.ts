@@ -233,3 +233,185 @@ describe("resolveModel — pr subject type", () => {
     expect(mockPullGet).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Two-tier resolution (agentType provided)
+// ---------------------------------------------------------------------------
+
+describe("resolveModel — two-tier resolution with agentType", () => {
+  beforeEach(() => {
+    mockIssueGet.mockReset();
+    mockPullGet.mockReset();
+  });
+
+  it("returns the per-agent model when a model:<agentType>:* label is present", async () => {
+    mockIssueGet.mockResolvedValue(
+      issueResponse(["model:developer:haiku", "bug"]),
+    );
+
+    const result = await resolveModel(
+      octokit,
+      "issue",
+      42,
+      "owner",
+      "repo",
+      "sonnet",
+      "developer",
+    );
+
+    expect(result).toBe("haiku");
+  });
+
+  it("per-agent label takes precedence over a generic model:* label", async () => {
+    mockIssueGet.mockResolvedValue(
+      issueResponse(["model:developer:opus", "model:haiku"]),
+    );
+
+    const result = await resolveModel(
+      octokit,
+      "issue",
+      10,
+      "owner",
+      "repo",
+      "sonnet",
+      "developer",
+    );
+
+    // per-agent tier wins even though a generic label is also present
+    expect(result).toBe("opus");
+  });
+
+  it("falls back to generic model:* label when no per-agent label is present", async () => {
+    mockIssueGet.mockResolvedValue(
+      issueResponse(["model:haiku", "enhancement"]),
+    );
+
+    const result = await resolveModel(
+      octokit,
+      "issue",
+      7,
+      "owner",
+      "repo",
+      "sonnet",
+      "developer",
+    );
+
+    expect(result).toBe("haiku");
+  });
+
+  it("falls back to defaultModel when neither per-agent nor generic label is present", async () => {
+    mockIssueGet.mockResolvedValue(issueResponse(["bug", "enhancement"]));
+
+    const result = await resolveModel(
+      octokit,
+      "issue",
+      5,
+      "owner",
+      "repo",
+      "sonnet",
+      "developer",
+    );
+
+    expect(result).toBe("sonnet");
+  });
+
+  it("throws on multiple per-agent labels (tier-1 fail-loud)", async () => {
+    mockIssueGet.mockResolvedValue(
+      issueResponse(["model:developer:haiku", "model:developer:opus"]),
+    );
+
+    await expect(
+      resolveModel(octokit, "issue", 42, "owner", "repo", "sonnet", "developer"),
+    ).rejects.toThrow(/model:developer:\* labels/);
+  });
+
+  it("throws on multiple generic labels when no per-agent label is present (tier-2 fail-loud)", async () => {
+    mockIssueGet.mockResolvedValue(
+      issueResponse(["model:haiku", "model:sonnet"]),
+    );
+
+    await expect(
+      resolveModel(octokit, "issue", 42, "owner", "repo", "sonnet", "developer"),
+    ).rejects.toThrow(/Multiple model:\* labels/);
+  });
+
+  it("does not treat a per-agent label for another agent type as a generic label", async () => {
+    // model:groom:haiku has two colons — must NOT match the generic tier
+    mockIssueGet.mockResolvedValue(issueResponse(["model:groom:haiku"]));
+
+    const result = await resolveModel(
+      octokit,
+      "issue",
+      3,
+      "owner",
+      "repo",
+      "sonnet",
+      "developer", // different agent type
+    );
+
+    // per-agent prefix doesn't match, and model:groom:haiku fails ^model:[^:]+$,
+    // so falls back to default
+    expect(result).toBe("sonnet");
+  });
+
+  it("strips the per-agent prefix correctly (model:<agentType>: removed)", async () => {
+    mockIssueGet.mockResolvedValue(
+      issueResponse(["model:groom:claude-sonnet-4-5"]),
+    );
+
+    const result = await resolveModel(
+      octokit,
+      "issue",
+      1,
+      "owner",
+      "repo",
+      "default",
+      "groom",
+    );
+
+    expect(result).toBe("claude-sonnet-4-5");
+  });
+
+  it("error message for tier-1 includes per-agent prefix and issue number", async () => {
+    mockIssueGet.mockResolvedValue(
+      issueResponse(["model:design:haiku", "model:design:opus"]),
+    );
+
+    await expect(
+      resolveModel(octokit, "issue", 99, "owner", "repo", "sonnet", "design"),
+    ).rejects.toThrow(/issue #99/);
+  });
+
+  it("error message for tier-2 includes issue number and label names", async () => {
+    mockIssueGet.mockResolvedValue(
+      issueResponse(["model:haiku", "model:opus"]),
+    );
+
+    await expect(
+      resolveModel(octokit, "issue", 77, "owner", "repo", "sonnet", "design"),
+    ).rejects.toThrow(/issue #77/);
+  });
+
+  it("a per-agent label for a different agent does not count toward the generic tier", async () => {
+    // model:groom:haiku is a per-agent label for groom, not a generic label.
+    // For agent type "developer", tier 1 misses; tier 2 also misses because
+    // model:groom:haiku has two colons; result is the default.
+    mockIssueGet.mockResolvedValue(
+      issueResponse(["model:groom:haiku", "model:opus"]),
+    );
+
+    const result = await resolveModel(
+      octokit,
+      "issue",
+      20,
+      "owner",
+      "repo",
+      "sonnet",
+      "developer",
+    );
+
+    // tier 1: no model:developer:* → miss
+    // tier 2: only model:opus qualifies (model:groom:haiku excluded by regex)
+    expect(result).toBe("opus");
+  });
+});

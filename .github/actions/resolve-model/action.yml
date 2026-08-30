@@ -19,6 +19,15 @@ inputs:
   default-model:
     description: 'Model name to use when no model:* label is present'
     required: true
+  agent-type:
+    description: >
+      Optional agent type (e.g. "developer", "groom", "design"). When provided,
+      enables per-agent label resolution: model:<agent-type>:* labels are
+      checked first (tier 1), then generic model:* labels (tier 2), then the
+      default. When omitted, all model:* labels are considered together
+      (original single-tier behaviour used by PR-based workflows).
+    required: false
+    default: ''
 outputs:
   claude_model:
     description: 'Resolved Claude model name (e.g. "sonnet", "opus", "haiku")'
@@ -48,4 +57,5 @@ runs:
         INPUT_SUBJECT_NUMBER: ${{ inputs.subject-number }}
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_DEFAULT_MODEL: ${{ inputs.default-model }}
+        INPUT_AGENT_TYPE: ${{ inputs.agent-type }}
       run: npx --no-install tsx src/resolve-model.ts
