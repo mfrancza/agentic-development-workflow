@@ -153,9 +153,9 @@ async function run(): Promise<void> {
   // The composite action declares the input as "pr-number" (hyphen) and
   // bridges it to the env var INPUT_PR_NUMBER (underscore) explicitly.
   // @actions/core maps getInput(name) to process.env["INPUT_" + name with
-  // spaces→underscores]; hyphens are NOT converted, so getInput("pr-number")
-  // would look for INPUT_PR-NUMBER and miss the env var. Using "pr_number"
-  // here matches the explicit INPUT_PR_NUMBER env var set by the action.
+  // spaces→underscores]; hyphens are NOT converted by the runner, so a
+  // dashed name would look for INPUT_PR-NUMBER and miss the env var.
+  // Using "pr_number" here matches the explicit INPUT_PR_NUMBER env var.
   const prNumberStr = core.getInput("pr_number", { required: true });
   const repo = core.getInput("repo", { required: true });
 
