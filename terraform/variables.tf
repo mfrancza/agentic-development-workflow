@@ -20,6 +20,18 @@ variable "default_model" {
   default     = "sonnet"
 }
 
+variable "admin_assignees" {
+  description = "GitHub usernames to assign to issues and PRs that require human action (e.g. when the agent applies the human-required label and needs a human in the loop). Stored as a JSON-encoded repository Actions variable ADMIN_ASSIGNEES so workflows can parse and assign without hardcoding usernames in YAML."
+  type        = list(string)
+  default     = []
+}
+
+variable "code_reviewers" {
+  description = "GitHub usernames to request as PR reviewers when human code review is needed (e.g. when the agent opens a PR and wants human sign-off). Stored as a JSON-encoded repository Actions variable CODE_REVIEWERS so workflows can request reviewers without hardcoding usernames in YAML."
+  type        = list(string)
+  default     = []
+}
+
 variable "auto_trigger_agents" {
   description = "Per-agent:*-label switches that auto-advance the SDLC pipeline. Set a key to true to have agent-auto-trigger.yml automatically apply that stage's agent:* label at the natural upstream signal (issue opened → agent:groom, plan labeled → agent:design, do labeled / draft removed → agent:developer, agent-branch PR opened → agent:review). Every switch defaults to false so existing manual behavior is preserved; flipping a switch opts the whole repo into auto-triggering for that stage. Stored as a JSON-encoded repository Actions variable AUTO_TRIGGER_AGENTS."
   type = object({
