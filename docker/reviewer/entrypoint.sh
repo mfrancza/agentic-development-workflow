@@ -109,17 +109,16 @@ run_xai() {
     system_prompt="$(cat "${SCRIPTS_DIR}/prompts/${prompt_file}")"
     # Grok Build CLI has no separate --system-prompt-file flag; prepend the
     # per-action system prompt to the task prompt with the same `---` separator
-    # convention used by run_openai() and the previous Codex-based run_xai().
+    # convention used by run_openai().
     # Verified at implementation time (grok v1.0.13 via `grok --help`):
     #   --prompt-file /dev/stdin: reads the single-turn prompt from stdin
     #     (the --single / -p flag's `-` sigil does NOT read from stdin;
     #     --prompt-file /dev/stdin is the correct path for piped input)
     #   --model (-m) <MODEL>: model ID to use
-    #   --max-turns <N>: maximum number of agent turns (flag present at v1.0.13;
-    #     absent from the old Codex-based path — this is a capability improvement)
+    #   --max-turns <N>: maximum number of agent turns (flag present at v1.0.13)
     #   --always-approve: auto-approve all tool executions; avoids interactive
     #     permission prompts in headless CI runs (equivalent to Claude Code's
-    #     --dangerously-skip-permissions and Codex exec's unconditional approval)
+    #     --dangerously-skip-permissions)
     # No --sandbox flag: the Grok Build CLI v1.0.13 `workspace` sandbox profile
     # requires bubblewrap (bwrap), which is not installed in this image; no
     # equivalent no-bwrap profile is available at v1.0.13. The reviewer image's
