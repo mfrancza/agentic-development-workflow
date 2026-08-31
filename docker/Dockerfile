@@ -6,6 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     jq \
     openssl \
+    bubblewrap \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub CLI
@@ -51,6 +52,13 @@ RUN useradd -m -s /bin/bash agent
 # Verify the grok binary is a regular world-executable file reachable by the
 # agent user — fail the build rather than the first runtime use.
 RUN test -f /usr/local/bin/grok && runuser -u agent -- /usr/local/bin/grok --version
+
+# Verify bubblewrap is installed and functional — the entrypoint's run_xai()
+# passes --sandbox workspace to grok, which delegates sandboxing to bwrap at
+# startup and fails closed (refuses to run) when bwrap is absent. This check
+# catches the missing-bubblewrap class of error at build time rather than at
+# first runtime use.
+RUN bwrap --version
 
 # Copy scripts
 COPY scripts/ /opt/agent/
