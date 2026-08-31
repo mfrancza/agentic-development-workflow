@@ -1,6 +1,6 @@
 #!/bin/bash
+set -euo pipefail
 # Validation helper for E2E test of issue #338.
-# Intentionally missing set -euo pipefail — this is the seed defect
-# that triggers a CHANGES_REQUESTED from the reviewer bot.
+# Fix: add set -euo pipefail as required by Shell Script Conventions.
 
 echo "Reviewer supersede validation: OK"
