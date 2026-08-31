@@ -53,24 +53,24 @@ reasoning tokens the task triggers.
 | `model:gpt-5.6-sol` | High-demand OpenAI tasks; capability comparison against `model:opus` | Premium GPT-5.6 variant; $5.00 input / $30.00 output | ≈ `model:opus` |
 | `model:o3` | Tasks requiring structured multi-step chain-of-thought reasoning: math-heavy, algorithmic, or architecture-level decomposition | Base $2.00 input / $8.00 output, but **internal reasoning tokens are billed at output rates** — effective cost is typically 3×–10× the base depending on task complexity | ≈ `model:opus` (reasoning-specialized) |
 
-### xAI (Grok) models (manual selection; all labels currently route to grok-4.3)
+### xAI (Grok) models (manual selection)
 
-The xAI labels provisioned in this repo (`model:grok-3`, `model:grok-3-mini`,
-`model:grok-code-fast-1`) correspond to models that xAI retired on May 15, 2026. All three model
-IDs now silently redirect to `grok-4.3` and are billed at grok-4.3 rates. The labels remain
-provisioned for continuity; a follow-up issue will refresh the Terraform allowlist to the current
-active xAI model lineup.
+The xAI labels provisioned in this repo are sourced from `grok models` at Grok Build CLI v1.0.13
+(the pinned version in both Dockerfiles as of Issue [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356)).
+Grok models are executed by the Grok Build CLI (`grok --prompt-file /dev/stdin`), not by Codex;
+the CLI reads `XAI_API_KEY` directly from the process environment.
 
-| Model label | Effective model (2026-08-30) | When to reach for it | Effective cost (per 1M tokens) |
+| Model label | When to reach for it | Latency / cost (per 1M tokens, Aug 2026) | Notes |
 |---|---|---|---|
-| `model:grok-code-fast-1` | grok-4.3 (silently redirected) | Originally: fast coding tasks. Currently identical to `model:grok-3` routing — prefer `model:grok-3` to avoid ambiguity. | $1.25 input / $2.50 output |
-| `model:grok-3-mini` | grok-4.3 (silently redirected) | Originally: lightweight Grok tasks. Currently identical to `model:grok-3` routing. | $1.25 input / $2.50 output |
-| `model:grok-3` | grok-4.3 (silently redirected) | General-purpose xAI tasks; most representative Grok label given current redirect behavior. | $1.25 input / $2.50 output |
+| `model:grok-build-0.1` | Build-specialized tasks; coding-focused | $1.00 input / $2.00 output — lowest output rate of all Grok labels | Specialized for code generation and build tasks |
+| `model:grok-4.3` | General-purpose xAI tasks; stable mid-tier model | $1.25 input / $2.50 output | Stable release |
+| `model:grok-4.20-0309-non-reasoning` | Default grok model; general-purpose coding and reasoning tasks | $1.25 input / $2.50 output | Default model at CLI v1.0.13 |
+| `model:grok-4.20-0309-reasoning` | Tasks benefiting from explicit chain-of-thought reasoning | $1.25 input / $2.50 output | Reasoning variant of grok-4.20-0309 |
+| `model:grok-4.20-multi-agent-0309` | Multi-agent orchestration and complex agentic task decomposition | $1.25 input / $2.50 output | Optimized for multi-agent workflows |
+| `model:grok-4.5` | General-purpose xAI tasks; newer than grok-4.3 | $2.00 input / $6.00 output | |
+| `model:grok-4.6` | Latest general-purpose xAI model; broadest capability | $2.00 input / $6.00 output (cached input $0.50/1M — 75% discount) | Best for complex cross-cutting tasks |
 
-**Operator note.** Until the xAI allowlist is refreshed, all three `model:grok-*` labels produce
-the same result: a `grok-4.3` run at $1.25/$2.50 per 1M tokens. For new work requiring xAI
-models, prefer `model:grok-3` to be explicit about intent; the label semantics will be corrected
-in a follow-up issue.
+**Pricing note.** All figures are standard-tier rates (< 200k prompt tokens) as of August 2026. Long-context tier (≥ 200k tokens) rates are 2× input / 2× output. xAI pricing changes frequently — verify against [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning large-scale runs.
 
 ---
 
@@ -87,15 +87,23 @@ pages before provisioning large-scale runs.
 | Model label | Provider | Input ($/1M) | Output ($/1M) | Notes |
 |---|---|---|---|---|
 | `model:gpt-5.6-luna` | OpenAI | $0.20 | $1.20 | Cheapest GPT-5.6 variant; cheapest label in repo across all providers |
-| `model:grok-3` / `model:grok-3-mini` / `model:grok-code-fast-1` | xAI | $1.25 | $2.50 | All three labels route to grok-4.3 effective |
 | `model:haiku` (claude-haiku-4-5) | Anthropic | $1.00 | $5.00 | |
+| `model:grok-build-0.1`‡ | xAI | $1.00 | $2.00 | Build-specialized; lowest output rate of all Grok labels |
 | `model:gpt-5` | OpenAI | $1.25 | $10.00 | |
+| `model:grok-4.3`‡ | xAI | $1.25 | $2.50 | Stable mid-tier Grok |
+| `model:grok-4.20-0309-non-reasoning`‡ | xAI | $1.25 | $2.50 | Default model at Grok Build CLI v1.0.13 |
+| `model:grok-4.20-0309-reasoning`‡ | xAI | $1.25 | $2.50 | Reasoning variant; same rate as non-reasoning |
+| `model:grok-4.20-multi-agent-0309`‡ | xAI | $1.25 | $2.50 | Multi-agent orchestration; same rate as -non-reasoning |
 | `model:sonnet` (claude-sonnet-5) | Anthropic | $2.00 | $10.00 | Repo default |
+| `model:grok-4.5`‡ | xAI | $2.00 | $6.00 | Same input rate as sonnet; lower output rate |
+| `model:grok-4.6`‡ | xAI | $2.00 | $6.00 | Latest general-purpose Grok; cached input $0.50/1M |
 | `model:gpt-5.6-terra` | OpenAI | $2.00 | $12.00 | |
 | `model:o3` (base rate only) | OpenAI | $2.00 | $8.00 | Effective cost 3×–10× higher; see note |
 | `model:opus` (claude-opus-5) | Anthropic | $5.00 | $25.00 | |
 | `model:gpt-5.6-sol` | OpenAI | $5.00 | $30.00 | |
 | `claude-fable-5` (no repo label) | Anthropic | $10.00 | $50.00 | No label provisioned |
+
+**‡ xAI pricing note.** Prices shown are standard-tier rates (< 200k prompt tokens) as of August 2026. Long-context tier (≥ 200k tokens) rates are 2× input and 2× output. xAI pricing changes frequently — verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning large-scale runs.
 
 **o3 effective cost note.** The `o3` base rate covers user-visible input and output tokens only.
 Internal chain-of-thought (reasoning) tokens are generated before the visible output and billed at
@@ -114,15 +122,21 @@ not precise budgeting.
 | Model label | Input cost | Output cost | Total per standard task | Cross-vendor rank (cheapest first) |
 |---|---|---|---|---|
 | `model:gpt-5.6-luna` | $0.004 | $0.006 | **$0.010** | 1 — cheapest across all providers |
-| `model:grok-3` (grok-4.3 effective) | $0.025 | $0.013 | **$0.038** | 2 |
-| `model:haiku` | $0.020 | $0.025 | **$0.045** | 3 |
-| `model:gpt-5` | $0.025 | $0.050 | **$0.075** | 4 |
-| `model:o3` (base, no reasoning overhead) | $0.040 | $0.040 | **$0.080** | 4–6 (variable; see note) |
-| `model:sonnet` (repo default) | $0.040 | $0.050 | **$0.090** | 5 |
-| `model:gpt-5.6-terra` | $0.040 | $0.060 | **$0.100** | 6 |
-| `model:opus` | $0.100 | $0.125 | **$0.225** | 7 |
-| `model:gpt-5.6-sol` | $0.100 | $0.150 | **$0.250** | 8 |
-| `claude-fable-5` (no label) | $0.200 | $0.250 | **$0.450** | 9 — no label provisioned |
+| `model:grok-build-0.1`‡ | $0.020 | $0.010 | **$0.030** | 2 |
+| `model:grok-4.3`‡ | $0.025 | $0.013 | **$0.038** | 3–6 (tied with other grok-4.20 models) |
+| `model:grok-4.20-0309-non-reasoning`‡ | $0.025 | $0.013 | **$0.038** | 3–6 |
+| `model:grok-4.20-0309-reasoning`‡ | $0.025 | $0.013 | **$0.038** | 3–6 |
+| `model:grok-4.20-multi-agent-0309`‡ | $0.025 | $0.013 | **$0.038** | 3–6 |
+| `model:haiku` | $0.020 | $0.025 | **$0.045** | 7 |
+| `model:grok-4.5`‡ | $0.040 | $0.030 | **$0.070** | 8–9 (tied with grok-4.6) |
+| `model:grok-4.6`‡ | $0.040 | $0.030 | **$0.070** | 8–9 |
+| `model:gpt-5` | $0.025 | $0.050 | **$0.075** | 10 |
+| `model:o3` (base, no reasoning overhead) | $0.040 | $0.040 | **$0.080** | 10–12 (variable; see note) |
+| `model:sonnet` (repo default) | $0.040 | $0.050 | **$0.090** | 11 |
+| `model:gpt-5.6-terra` | $0.040 | $0.060 | **$0.100** | 12 |
+| `model:opus` | $0.100 | $0.125 | **$0.225** | 13 |
+| `model:gpt-5.6-sol` | $0.100 | $0.150 | **$0.250** | 14 |
+| `claude-fable-5` (no label) | $0.200 | $0.250 | **$0.450** | 15 — no label provisioned |
 
 **o3 benchmark range.** The $0.080 figure uses only base tokens (no reasoning overhead). For tasks
 that trigger moderate reasoning, effective cost is $0.24–$0.40 per standard task (3–5×); for
@@ -152,17 +166,18 @@ All three providers offer cost-reduction mechanisms layered on top of the base r
   is bounded only by `AGENT_MAX_TURNS`. Set a conservative cap and monitor token logs; a
   mis-tuned o3 run can cost more than an Opus run on the same task.
 - **xAI cached input** — grok-4.6's cached input rate ($0.50/1M) undercuts even Anthropic Haiku's
-  standard input rate ($1.00/1M) for workloads with a large, repeated context prefix. If the xAI
-  allowlist is refreshed to current models, cached-grok runs may be the cheapest option for
-  context-heavy tasks.
+  standard input rate ($1.00/1M) for workloads with a large, repeated context prefix. Use
+  `model:grok-4.6` for context-heavy tasks where the cache-eligible prefix is large and stable.
 
 ### Cross-vendor capability tiers at a glance
 
 | Capability tier | Best-value pick per tier (Aug 2026) | Alternatives |
 |---|---|---|
-| **Fast / cheap** (mechanical tasks, docs-only) | `model:gpt-5.6-luna` — $0.010/task | `model:grok-3` ($0.038/task), `model:haiku` ($0.045/task) |
-| **Balanced** (most `do` issues, typical implementation) | `model:sonnet` — $0.090/task (repo default) | `model:gpt-5` ($0.075/task), `model:gpt-5.6-terra` ($0.100/task) |
-| **High capability** (`plan` issues, cross-cutting, under-specified) | `model:opus` — $0.225/task | `model:gpt-5.6-sol` ($0.250/task), `model:o3` (variable) |
+| **Fast / cheap** (mechanical tasks, docs-only) | `model:gpt-5.6-luna` — $0.010/task | `model:grok-build-0.1` ($0.030/task‡), `model:grok-4.3` ($0.038/task‡), `model:haiku` ($0.045/task) |
+| **Balanced** (most `do` issues, typical implementation) | `model:sonnet` — $0.090/task (repo default) | `model:grok-4.20-0309-non-reasoning` ($0.038/task‡), `model:gpt-5` ($0.075/task), `model:grok-4.5` ($0.070/task‡), `model:gpt-5.6-terra` ($0.100/task) |
+| **High capability** (`plan` issues, cross-cutting, under-specified) | `model:opus` — $0.225/task | `model:grok-4.20-0309-reasoning` ($0.038/task‡), `model:grok-4.20-multi-agent-0309` ($0.038/task‡), `model:grok-4.6` ($0.070/task‡), `model:gpt-5.6-sol` ($0.250/task), `model:o3` (variable) |
+
+**‡ xAI pricing note.** Prices shown are standard-tier rates as of August 2026; xAI pricing changes frequently. Verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning. Known reference: grok-4.6 standard input $2.00/1M (cached $0.50/1M).
 
 **Apply cross-vendor picks only when there is a specific reason** — capability evaluation, provider
 redundancy testing, or a cost experiment. The grooming agent and the repo-wide default remain
@@ -184,31 +199,33 @@ driving factor is noted in the *Notes* column.
 
 **Cost/task key:** All figures use the standard 20k-input / 5k-output token benchmark. Figures
 marked † are variable; see the o3 benchmark note in the Cross-Vendor Cost Analysis section.
+Figures marked ‡ are xAI (Grok) models priced at standard-tier rates as of August 2026; xAI
+pricing changes frequently — verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning.
 Cross-vendor alternatives are listed cheapest-first within the same capability tier.
 
 | Task class | Anthropic default | Anthropic cost/task | Cross-vendor alternatives (cost/task, cheapest first) | Example issue | Notes |
 |---|---|---|---|---|---|
-| `bug` — single-file or single-component, scoped fix | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | [#284](https://github.com/mfrancza/agentic-development-workflow/issues/284), [#263](https://github.com/mfrancza/agentic-development-workflow/issues/263), [#276](https://github.com/mfrancza/agentic-development-workflow/issues/276) | The implementation path is clear; sonnet handles typical bug fixes efficiently. |
-| `bug` — single-line syntax / typo fix | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#243](https://github.com/mfrancza/agentic-development-workflow/issues/243) | Empty `${{ }}` expression in a YAML comment — purely mechanical, no design decisions. |
-| `bug` — cross-cutting, multi-component | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Respecting blocked-by dependencies across fail-loud, deferral, and cascade paths required cross-cutting design; carried both `bug` and `plan` labels. |
-| `enhancement` — docs-only | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117), [#224](https://github.com/mfrancza/agentic-development-workflow/issues/224), [#161](https://github.com/mfrancza/agentic-development-workflow/issues/161) | Pure documentation edits with no logic changes. Exception: docs that touch security-sensitive prose (auth, token handling) should use `model:sonnet`. |
-| `enhancement` — well-specified feature | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | [#302](https://github.com/mfrancza/agentic-development-workflow/issues/302), [#301](https://github.com/mfrancza/agentic-development-workflow/issues/301), [#280](https://github.com/mfrancza/agentic-development-workflow/issues/280) | New composite actions, runner support, and Terraform plumbing — implementation paths were clear from the issue description. |
-| `enhancement` — cross-cutting refactor | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component changes that span workflow, entrypoint, TypeScript activities, and Terraform. |
-| `enhancement` — new agent type | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#32](https://github.com/mfrancza/agentic-development-workflow/issues/32) | New agent types inherently require design decisions about scope, identity, and integration; always `plan`-class work. |
-| `dependency upgrade` | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | [#30](https://github.com/mfrancza/agentic-development-workflow/issues/30) | Typical version bumps are well-specified; sonnet is sufficient. If the upgrade involves a breaking-change migration across many files, consider `model:opus`. |
-| `do` — mechanical (typo, single config value, comment) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#243](https://github.com/mfrancza/agentic-development-workflow/issues/243), [#228](https://github.com/mfrancza/agentic-development-workflow/issues/228) | If `do` and clearly trivial, haiku is appropriate. When in doubt between haiku and sonnet, prefer sonnet. |
-| `do` — typical scoped implementation | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | [#304](https://github.com/mfrancza/agentic-development-workflow/issues/304), [#302](https://github.com/mfrancza/agentic-development-workflow/issues/302), [#263](https://github.com/mfrancza/agentic-development-workflow/issues/263) | The large majority of `do` issues fall here — non-trivial but well-specified. |
-| `plan` — high-level design / architecture | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#262](https://github.com/mfrancza/agentic-development-workflow/issues/262), [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Design documents require cross-cutting analysis and trade-off reasoning; opus is almost always the right pick for `plan`. |
-| `plan` — bounded validation / E2E test | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | [#139](https://github.com/mfrancza/agentic-development-workflow/issues/139), [#57](https://github.com/mfrancza/agentic-development-workflow/issues/57) | E2E validation plans are scoped and procedural; sonnet handles them well despite carrying the `plan` label. |
-| Docs-only enhancement (sub-flavor) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117), [#161](https://github.com/mfrancza/agentic-development-workflow/issues/161) | Subtype of docs-only enhancement — updating `AGENTS.md` or `README.md` for a limitation note or label description. |
-| Single-file config bump (sub-flavor) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | [#225](https://github.com/mfrancza/agentic-development-workflow/issues/225) | Adding `.editorconfig` or updating a single Terraform variable — pure mechanical change. |
-| Cross-cutting refactor (sub-flavor) | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component refactors that touch workflow, entrypoint, activities, and infrastructure simultaneously. |
-| New agent type (sub-flavor) | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Any issue that adds a new agent identity, container image, or entrypoint dispatch path. |
-| `code review` — targeted (single file, small diff) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-3` $0.038 | | Mechanical correctness scan of a single-file or small isolated change; no cross-component reasoning required. |
-| `code review` — standard (multi-file PR) | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | | Standard PR review evaluating correctness, style, AGENTS.md compliance, and test coverage across multiple files. |
-| `code review` — architectural / security-sensitive | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | | Cross-cutting reviews, security-sensitive changes (auth, secrets, tokens), or reviews that require system-wide trade-off reasoning. |
-| `design` — scoped feature design | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:gpt-5.6-terra` $0.100 | | Design for a bounded, well-specified feature where requirements are clear and scope is limited to one or two components. |
-| `design` — system / architectural design | `model:opus` | $0.225 | `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#262](https://github.com/mfrancza/agentic-development-workflow/issues/262), [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275) | Cross-cutting system design, new subsystem architecture, or design work requiring broad contextual reasoning across multiple components. Overlaps with `plan` — high-level design. |
+| `bug` — single-file or single-component, scoped fix | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:gpt-5` $0.075, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | [#284](https://github.com/mfrancza/agentic-development-workflow/issues/284), [#263](https://github.com/mfrancza/agentic-development-workflow/issues/263), [#276](https://github.com/mfrancza/agentic-development-workflow/issues/276) | The implementation path is clear; sonnet handles typical bug fixes efficiently. |
+| `bug` — single-line syntax / typo fix | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | [#243](https://github.com/mfrancza/agentic-development-workflow/issues/243) | Empty `${{ }}` expression in a YAML comment — purely mechanical, no design decisions. |
+| `bug` — cross-cutting, multi-component | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Respecting blocked-by dependencies across fail-loud, deferral, and cascade paths required cross-cutting design; carried both `bug` and `plan` labels. |
+| `enhancement` — docs-only | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117), [#224](https://github.com/mfrancza/agentic-development-workflow/issues/224), [#161](https://github.com/mfrancza/agentic-development-workflow/issues/161) | Pure documentation edits with no logic changes. Exception: docs that touch security-sensitive prose (auth, token handling) should use `model:sonnet`. |
+| `enhancement` — well-specified feature | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:gpt-5` $0.075, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | [#302](https://github.com/mfrancza/agentic-development-workflow/issues/302), [#301](https://github.com/mfrancza/agentic-development-workflow/issues/301), [#280](https://github.com/mfrancza/agentic-development-workflow/issues/280) | New composite actions, runner support, and Terraform plumbing — implementation paths were clear from the issue description. |
+| `enhancement` — cross-cutting refactor | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component changes that span workflow, entrypoint, TypeScript activities, and Terraform. |
+| `enhancement` — new agent type | `model:opus` | $0.225 | `model:grok-4.20-multi-agent-0309` $0.038‡, `model:grok-4.6` $0.070‡, `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#32](https://github.com/mfrancza/agentic-development-workflow/issues/32) | New agent types inherently require design decisions about scope, identity, and integration; always `plan`-class work. |
+| `dependency upgrade` | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:gpt-5` $0.075, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | [#30](https://github.com/mfrancza/agentic-development-workflow/issues/30) | Typical version bumps are well-specified; sonnet is sufficient. If the upgrade involves a breaking-change migration across many files, consider `model:opus`. |
+| `do` — mechanical (typo, single config value, comment) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | [#243](https://github.com/mfrancza/agentic-development-workflow/issues/243), [#228](https://github.com/mfrancza/agentic-development-workflow/issues/228) | If `do` and clearly trivial, haiku is appropriate. When in doubt between haiku and sonnet, prefer sonnet. |
+| `do` — typical scoped implementation | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:gpt-5` $0.075, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | [#304](https://github.com/mfrancza/agentic-development-workflow/issues/304), [#302](https://github.com/mfrancza/agentic-development-workflow/issues/302), [#263](https://github.com/mfrancza/agentic-development-workflow/issues/263) | The large majority of `do` issues fall here — non-trivial but well-specified. |
+| `plan` — high-level design / architecture | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#262](https://github.com/mfrancza/agentic-development-workflow/issues/262), [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Design documents require cross-cutting analysis and trade-off reasoning; opus is almost always the right pick for `plan`. |
+| `plan` — bounded validation / E2E test | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:gpt-5` $0.075, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | [#139](https://github.com/mfrancza/agentic-development-workflow/issues/139), [#57](https://github.com/mfrancza/agentic-development-workflow/issues/57) | E2E validation plans are scoped and procedural; sonnet handles them well despite carrying the `plan` label. |
+| Docs-only enhancement (sub-flavor) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117), [#161](https://github.com/mfrancza/agentic-development-workflow/issues/161) | Subtype of docs-only enhancement — updating `AGENTS.md` or `README.md` for a limitation note or label description. |
+| Single-file config bump (sub-flavor) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | [#225](https://github.com/mfrancza/agentic-development-workflow/issues/225) | Adding `.editorconfig` or updating a single Terraform variable — pure mechanical change. |
+| Cross-cutting refactor (sub-flavor) | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component refactors that touch workflow, entrypoint, activities, and infrastructure simultaneously. |
+| New agent type (sub-flavor) | `model:opus` | $0.225 | `model:grok-4.20-multi-agent-0309` $0.038‡, `model:grok-4.6` $0.070‡, `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Any issue that adds a new agent identity, container image, or entrypoint dispatch path. |
+| `code review` — targeted (single file, small diff) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | | Mechanical correctness scan of a single-file or small isolated change; no cross-component reasoning required. |
+| `code review` — standard (multi-file PR) | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:gpt-5.6-terra` $0.100, `model:grok-4.5` $0.070‡ | | Standard PR review evaluating correctness, style, AGENTS.md compliance, and test coverage across multiple files. |
+| `code review` — architectural / security-sensitive | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | | Cross-cutting reviews, security-sensitive changes (auth, secrets, tokens), or reviews that require system-wide trade-off reasoning. |
+| `design` — scoped feature design | `model:sonnet` | $0.090 | `model:gpt-5` $0.075, `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:gpt-5.6-terra` $0.100, `model:grok-4.5` $0.070‡ | | Design for a bounded, well-specified feature where requirements are clear and scope is limited to one or two components. |
+| `design` — system / architectural design | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:o3` $0.080–$0.800†, `model:gpt-5.6-sol` $0.250 | [#262](https://github.com/mfrancza/agentic-development-workflow/issues/262), [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275) | Cross-cutting system design, new subsystem architecture, or design work requiring broad contextual reasoning across multiple components. Overlaps with `plan` — high-level design. |
 
 ---
 
@@ -352,7 +369,7 @@ are **Anthropic-specific**. They resolve via the provider-inference logic in `do
 to the latest snapshot of the corresponding claude series.
 
 OpenAI and xAI (Grok) models use flat `model:*` labels (e.g. `model:o3`,
-`model:grok-code-fast-1`) with no tier-alias vocabulary. The cross-provider label system and
+`model:grok-4.6`) with no tier-alias vocabulary. The cross-provider label system and
 provider inference are documented in:
 
 - [`docs/design/multi-provider-models.md`](design/multi-provider-models.md) — how the
@@ -399,6 +416,14 @@ All eight workflows are aligned with the guidance. No disagreements were found; 
 ---
 
 ## Change Log
+
+- **2026-08-30 (rev 6)** — Updated xAI label set: replaced retired `model:grok-3` /
+  `model:grok-3-mini` / `model:grok-code-fast-1` labels (which routed to grok-4.3) with the
+  current Grok Build CLI v1.0.13 model list (`model:grok-4.3` through `model:grok-build-0.1`).
+  Removed stale grok-4.3-effective cost rows from the normalized benchmark and task-class matrix.
+  Addresses [Issue #356](https://github.com/mfrancza/agentic-development-workflow/issues/356)
+  (reviewer entrypoint Grok Build CLI migration; same label refresh as Issue #354/#355 deferred to
+  this PR by [PR #365](https://github.com/mfrancza/agentic-development-workflow/pull/365)).
 
 - **2026-08-30 (rev 5)** — Added *Repo Defaults* section auditing the repo-wide `DEFAULT_MODEL = "sonnet"` setting and all eight `agent-*.yml` per-workflow defaults against the guidance. All confirmed aligned; no follow-up issues opened. Added cross-links to this document from the `model:<name>` entry in `AGENTS.md` and from the `model:<name>` bullet in `README.md`. Addresses [issue #337](https://github.com/mfrancza/agentic-development-workflow/issues/337).
 

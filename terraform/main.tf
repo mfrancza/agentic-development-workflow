@@ -341,17 +341,34 @@ locals {
       description = "Run agents on this issue with OpenAI o3 (overrides DEFAULT_MODEL)."
     }
 
-    "model:grok-4.6" = {
+    # xAI Grok models — sourced from `grok models` at Grok Build CLI v1.0.13
+    # (the pinned version in both Dockerfiles). Image/video models are excluded;
+    # only text/coding-capable models are listed. Kept in one-to-one sync with
+    # the xai) case-arm in resolve_provider() in both entrypoints per
+    # docs/design/grok-build-cli.md Decision 5.
+    "model:grok-4.20-0309-non-reasoning" = {
       color       = "1d76db"
-      description = "Run agents on this issue with xAI grok-4.6 via Grok Build CLI (overrides DEFAULT_MODEL)."
+      description = "Run agents with xAI grok-4.20-0309-non-reasoning (overrides DEFAULT_MODEL)."
+    }
+    "model:grok-4.20-0309-reasoning" = {
+      color       = "1d76db"
+      description = "Run agents with xAI grok-4.20-0309-reasoning (overrides DEFAULT_MODEL)."
+    }
+    "model:grok-4.20-multi-agent-0309" = {
+      color       = "1d76db"
+      description = "Run agents with xAI grok-4.20-multi-agent-0309 (overrides DEFAULT_MODEL)."
+    }
+    "model:grok-4.3" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with xAI grok-4.3 via Grok Build CLI (overrides DEFAULT_MODEL)."
     }
     "model:grok-4.5" = {
       color       = "1d76db"
       description = "Run agents on this issue with xAI grok-4.5 via Grok Build CLI (overrides DEFAULT_MODEL)."
     }
-    "model:grok-4.3" = {
+    "model:grok-4.6" = {
       color       = "1d76db"
-      description = "Run agents on this issue with xAI grok-4.3 via Grok Build CLI (overrides DEFAULT_MODEL)."
+      description = "Run agents on this issue with xAI grok-4.6 via Grok Build CLI (overrides DEFAULT_MODEL)."
     }
     "model:grok-build-0.1" = {
       color       = "1d76db"
