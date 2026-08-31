@@ -110,6 +110,7 @@ jobs:
           subject-number: ${{ github.event.pull_request.number }}
           repo: ${{ github.repository }}
           default-model: ${{ vars.DEFAULT_MODEL }}
+          agent-type: review
 
       - name: Dismiss stale reviewer-bot CHANGES_REQUESTED reviews
         # Fail-open: dismissal is defence-in-depth (see Decision 2 of
