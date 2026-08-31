@@ -305,6 +305,8 @@ At minimum, before opening a PR, check whether your change alters any of the fol
 
 If you touch `agents/grooming/label-criteria.json`, also refresh the label list in the **Labels** section above.
 
+- **Generated sections**: `AGENTS.md` and `README.md` contain regions bounded by `<!-- generated:<section>:start -->` / `<!-- generated:<section>:end -->` markers. Do not hand-edit inside these markers. Run `scripts/generate-docs.sh` from the repo root and commit the result whenever a change touches a source file for a generated section (labels in `terraform/main.tf`, AGENT_ACTION vars in `docker/scripts/entrypoint.sh` or workflow YAML, or workflow trigger conditions). The CI drift check will fail if you skip this step.
+
 When in doubt, err on the side of updating the docs — a stale AGENTS.md is worse than a slightly-too-detailed one.
 
 ### Merge-friendly documentation
