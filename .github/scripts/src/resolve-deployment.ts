@@ -1,5 +1,6 @@
 import * as core from "@actions/core";
 import { getOctokit } from "./lib/octokit.js";
+import { parseClosesRef } from "./lib/close-ref.js";
 
 type Octokit = ReturnType<typeof getOctokit>;
 
@@ -68,16 +69,13 @@ export async function resolveDeployment(
     pull_number: prNumber,
   });
 
-  const body = prResponse.data.body ?? "";
-  const match = body.match(/closes\s+#(\d+)/i);
-  if (!match) {
+  const issueNumber = parseClosesRef(prResponse.data.body);
+  if (issueNumber === undefined) {
     core.info(
       `PR #${prNumber} did not reference an issue with 'Closes #N'; skipping.`
     );
     return { proceed: false };
   }
-
-  const issueNumber = parseInt(match[1], 10);
   core.info(
     `Resolved SHA ${sha} → run ${runId}, PR #${prNumber}, issue #${issueNumber}.`
   );
