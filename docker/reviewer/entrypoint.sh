@@ -254,10 +254,7 @@ case "$AGENT_PROVIDER" in
         # directly (verified at implementation time via `grok models` at v1.0.13:
         # the CLI prints "You are using XAI_API_KEY." when this variable is set).
         # No login sub-command is needed — shape (a) from Decision 4 of
-        # docs/design/grok-build-cli.md. This is the same env-var-direct path
-        # the previous Codex-based xai arm already used (via env_key in the
-        # [model_providers.xai] config block); the xAI API key variable name
-        # (XAI_API_KEY) is unchanged, so existing workflow plumbing is unaffected.
+        # docs/design/grok-build-cli.md.
         command -v grok >/dev/null 2>&1 || {
             log "ERROR: grok binary not found on PATH — image build is broken"
             exit 1

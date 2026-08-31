@@ -57,10 +57,4 @@ RUN chmod +x /opt/agent/entrypoint.sh
 USER agent
 WORKDIR /home/agent
 
-# Note: no Codex [model_providers.xai] config block here. The xai provider arm
-# previously used Codex pointed at xAI's OpenAI-compatible endpoint; it now uses
-# the Grok Build CLI (grok) instead (see docs/design/grok-build-cli.md Decision 6
-# and run_xai() in entrypoint.sh). The Codex openai arm is unchanged and still
-# authenticates via `codex login --with-api-key` in the preamble.
-
 ENTRYPOINT ["/opt/agent/entrypoint.sh"]
