@@ -39,10 +39,18 @@ RUN npm install -g "@openai/codex@${CODEX_CLI_VERSION}"
 # claude, and codex are installed). See docs/design/grok-build-cli.md Decision 2.
 ARG GROK_BUILD_CLI_VERSION=1.0.13
 RUN curl -fsSL https://x.ai/cli/install.sh | \
-    GROK_BIN_DIR=/usr/local/bin bash -s -- "${GROK_BUILD_CLI_VERSION}"
+    GROK_BIN_DIR=/usr/local/bin bash -s -- "${GROK_BUILD_CLI_VERSION}" && \
+    cp -f "$(readlink -f /usr/local/bin/grok)" /usr/local/bin/grok.real && \
+    mv -f /usr/local/bin/grok.real /usr/local/bin/grok && \
+    rm -f /usr/local/bin/agent && \
+    chmod 0755 /usr/local/bin/grok
 
 # Create non-root agent user
 RUN useradd -m -s /bin/bash agent
+
+# Verify the grok binary is a regular world-executable file reachable by the
+# agent user — fail the build rather than the first runtime use.
+RUN test -f /usr/local/bin/grok && runuser -u agent -- /usr/local/bin/grok --version
 
 # Copy scripts
 COPY scripts/ /opt/agent/
