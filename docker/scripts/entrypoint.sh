@@ -27,6 +27,10 @@ log() {
 
 resolve_provider() {
     local model="$1"
+    # NOTE: This function is duplicated in docker/reviewer/entrypoint.sh
+    # (reviewer image). Keep both in sync when adding a model. Per design
+    # decision 2 in docs/design/multi-provider-models.md, if a third image
+    # ever requires it, promote to a shared lib COPYed into both images.
     case "$model" in
         # Anthropic — top-level aliases (Claude Code CLI resolves to the latest
         # snapshot of each series) plus every model ID that begins with the
@@ -43,11 +47,15 @@ resolve_provider() {
         gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5|o3)
             echo "openai"
             ;;
-        grok-4.6|grok-4.5|grok-4.3|grok-build-0.1)
+        # xAI Grok models — ground truth is the `model:grok-*` label set in
+        # terraform/main.tf (Decision 5 of docs/design/grok-build-cli.md).
+        # Keep this list identical to the xai arm in docker/reviewer/entrypoint.sh
+        # and to the Terraform label set; add new models to all three in the same PR.
+        grok-4.20-0309-non-reasoning|grok-4.20-0309-reasoning|grok-4.20-multi-agent-0309|grok-4.3|grok-4.5|grok-4.6|grok-build-0.1)
             echo "xai"
             ;;
         *)
-            log "ERROR: Unknown model '${model}'. Anthropic models must be one of the aliases 'sonnet', 'opus', 'haiku', or a model ID beginning with 'claude-' (e.g. 'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', 'claude-3-5-haiku-latest'). Other supported values: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5, o3, grok-4.6, grok-4.5, grok-4.3, grok-build-0.1" >&2
+            log "ERROR: Unknown model '${model}'. Anthropic models must be one of the aliases 'sonnet', 'opus', 'haiku', or a model ID beginning with 'claude-' (e.g. 'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', 'claude-3-5-haiku-latest'). Other supported values: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5, o3, grok-4.20-0309-non-reasoning, grok-4.20-0309-reasoning, grok-4.20-multi-agent-0309, grok-4.3, grok-4.5, grok-4.6, grok-build-0.1" >&2
             exit 1
             ;;
     esac
