@@ -57,6 +57,27 @@ jobs:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
+      - name: Resolve linked issue from PR body
+        if: steps.filter.outputs.proceed == 'true'
+        id: linked-issue
+        uses: ./.github/actions/find-linked-issue
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
+
+      - name: Resolve Claude model from issue labels
+        if: steps.linked-issue.outputs.proceed == 'true'
+        id: model
+        uses: ./.github/actions/resolve-model
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          subject-type: issue
+          subject-number: ${{ steps.linked-issue.outputs.issue_number }}
+          repo: ${{ github.repository }}
+          default-model: ${{ vars.DEFAULT_MODEL }}
+          agent-type: developer
+
       - name: Prepare agent log directory
         run: |
           set -euo pipefail
@@ -74,7 +95,7 @@ jobs:
           repo: ${{ github.repository }}
           agent-action: fix-checks
           pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
-          model: ${{ vars.DEFAULT_MODEL }}
+          model: ${{ steps.model.outputs.claude_model || vars.DEFAULT_MODEL }}
           logs-dir: ${{ runner.temp }}/agent-logs
 
       - name: Upload agent logs
