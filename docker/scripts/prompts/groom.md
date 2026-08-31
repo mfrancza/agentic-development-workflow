@@ -37,3 +37,7 @@ If you determine that a `human-required` label must be applied to this issue, ap
   gh issue edit "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
   gh issue comment "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --body "Warning: human-required label applied but ADMIN_ASSIGNEES is not configured — no assignees added. Please assign a human reviewer manually."
   ```
+
+## Generated sections
+
+`AGENTS.md` and `README.md` contain regions bounded by `<!-- generated:<section>:start -->` / `<!-- generated:<section>:end -->` markers. Do not edit inside these markers. If your change alters a source (labels in `terraform/main.tf`, AGENT_ACTION env vars in `docker/scripts/entrypoint.sh` or the workflow YAML, or workflow trigger conditions), run `scripts/generate-docs.sh` from the repo root and commit the updated `AGENTS.md` and `README.md` alongside your other changes. The CI drift check will fail if you skip this step.

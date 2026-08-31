@@ -109,3 +109,7 @@ If you hit a point where a human needs to be in the loop — you are blocked, un
 gh issue edit "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "<github-username>"
 gh pr edit    "<pr-number>"          --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "<github-username>"
 ```
+
+## Generated sections
+
+`AGENTS.md` and `README.md` contain regions bounded by `<!-- generated:<section>:start -->` / `<!-- generated:<section>:end -->` markers. Do not edit inside these markers. If your change alters a source (labels in `terraform/main.tf`, AGENT_ACTION env vars in `docker/scripts/entrypoint.sh` or the workflow YAML, or workflow trigger conditions), run `scripts/generate-docs.sh` from the repo root and commit the updated `AGENTS.md` and `README.md` alongside your other changes. The CI drift check will fail if you skip this step.
