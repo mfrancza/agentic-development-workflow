@@ -491,3 +491,146 @@ Dependencies are recorded natively as GitHub blocked-by relationships on the iss
 - Sub-issues stay labeled `draft` until this design PR merges — the standard
   designer-agent flow. `agent-design.yml`'s `undraft-sub-issues` job will
   remove the label on merge.
+
+## Validation results (Issue [#406](https://github.com/mfrancza/agentic-development-workflow/issues/406))
+
+Implementation landed in PR [#412](https://github.com/mfrancza/agentic-development-workflow/pull/412)
+(commit `7fda29f`). The five validation paths from Issue [#406](https://github.com/mfrancza/agentic-development-workflow/issues/406)
+are described below. Paths 1–4 require live API keys (`XAI_API_KEY`,
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`) provisioned out of band and a Docker
+runtime; they are marked **pending human validation**. Path 5 is confirmed by
+static source inspection.
+
+### Path 5 — `docker build` for both images (static verification ✅)
+
+Verified by inspecting `docker/Dockerfile` and `docker/reviewer/Dockerfile`
+at commit `7fda29f`:
+
+**Developer image (`docker/Dockerfile`):**
+- `bubblewrap` is **absent** from the `apt-get install` package list.
+- No `RUN bwrap --version` build-time smoke check exists.
+- CLIs present: `@anthropic-ai/claude-code@2.1.150`, `@openai/codex@0.146.0`,
+  Grok Build CLI `1.0.13`.
+- Build-time grok verification uses `runuser -u agent -- /usr/local/bin/grok --version`
+  (no bwrap dependency).
+
+**Reviewer image (`docker/reviewer/Dockerfile`):**
+- `bubblewrap` was never installed in this image; remains absent.
+- Same CLI versions as the developer image.
+
+Both Dockerfiles are free of any `bubblewrap` / `bwrap` reference. A
+`docker build` for either image cannot fail on a missing bubblewrap
+dependency. ✅
+
+### Path 1 — Developer container, grok path (pending human validation ⏳)
+
+Expected invocation:
+```bash
+docker run --rm \
+  -e AGENT_ACTION=groom \
+  -e AGENT_MODEL=grok-4.6 \
+  -e XAI_API_KEY="$XAI_API_KEY" \
+  -e GH_TOKEN="$GH_TOKEN" \
+  -e GITHUB_REPO=mfrancza/agentic-development-workflow \
+  -e GITHUB_ISSUE_NUMBER=<fixture-issue> \
+  <developer-image>
+```
+
+Expected outcome: container exits 0; log contains `grok -p` **without**
+`--sandbox` and **without** `bwrap: No permissions to create new namespace`.
+
+Static analysis confirms `run_xai()` in `docker/scripts/entrypoint.sh`
+(lines 148–152) invokes:
+```bash
+grok -p "$combined" \
+    --model "$AGENT_MODEL" \
+    --always-approve \
+    --max-turns "$AGENT_MAX_TURNS" \
+    --no-auto-update
+```
+No `--sandbox` flag is present. The comment at lines 129–137 documents the
+Decision 1 / Decision 2 rationale. Static analysis: ✅. Live run: ⏳.
+
+### Path 2 — Developer container, OpenAI/Codex path (pending human validation ⏳)
+
+Expected invocation:
+```bash
+docker run --rm \
+  -e AGENT_ACTION=groom \
+  -e AGENT_MODEL=o3 \
+  -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+  -e GH_TOKEN="$GH_TOKEN" \
+  -e GITHUB_REPO=mfrancza/agentic-development-workflow \
+  -e GITHUB_ISSUE_NUMBER=<fixture-issue> \
+  <developer-image>
+```
+
+Expected outcome: container exits 0; log contains
+`codex exec … --sandbox danger-full-access …` and **no**
+`asked for user-namespace support` / seccomp error.
+
+Static analysis confirms `run_openai()` in `docker/scripts/entrypoint.sh`
+(lines 100–103) invokes:
+```bash
+printf '%s\n' "$combined" | codex exec \
+    --model "$AGENT_MODEL" \
+    --sandbox danger-full-access \
+    -
+```
+Static analysis: ✅. Live run: ⏳.
+
+### Path 3 — Developer container, Anthropic path regression (pending human validation ⏳)
+
+Expected invocation:
+```bash
+docker run --rm \
+  -e AGENT_ACTION=groom \
+  -e AGENT_MODEL=sonnet \
+  -e ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+  -e GH_TOKEN="$GH_TOKEN" \
+  -e GITHUB_REPO=mfrancza/agentic-development-workflow \
+  -e GITHUB_ISSUE_NUMBER=<fixture-issue> \
+  <developer-image>
+```
+
+Expected outcome: routes to `run_anthropic()`; `claude --print …` invoked;
+no sandbox-related error; behaviour identical to pre-change.
+
+Static analysis confirms `run_anthropic()` in `docker/scripts/entrypoint.sh`
+(lines 69–73) is unchanged from the pre-#404 baseline:
+```bash
+printf '%s\n' "$user_prompt" | claude --print \
+    --dangerously-skip-permissions \
+    --model "$AGENT_MODEL" \
+    --max-turns "$AGENT_MAX_TURNS" \
+    --system-prompt-file "${SCRIPTS_DIR}/prompts/${prompt_file}"
+```
+No `--sandbox` flag (Claude Code CLI does not use one). Static analysis: ✅.
+Live run: ⏳.
+
+### Path 4 — Reviewer container, OpenAI/Codex path (pending human validation ⏳)
+
+Expected invocation:
+```bash
+docker run --rm \
+  -e AGENT_MODEL=o3 \
+  -e OPENAI_API_KEY="$OPENAI_API_KEY" \
+  -e GH_TOKEN="$GH_TOKEN" \
+  -e GITHUB_REPO=mfrancza/agentic-development-workflow \
+  -e GITHUB_PR_NUMBER=<live-pr> \
+  <reviewer-image>
+```
+
+Expected outcome: container exits 0; log contains
+`codex exec … --sandbox danger-full-access …`; a review is posted against
+the PR; no push / commit occurs (token-layer no-write guarantee).
+
+Static analysis confirms `run_openai()` in `docker/reviewer/entrypoint.sh`
+(lines 105–108) invokes:
+```bash
+} | codex exec \
+    --model "$AGENT_MODEL" \
+    --sandbox danger-full-access \
+    -
+```
+Static analysis: ✅. Live run: ⏳.
