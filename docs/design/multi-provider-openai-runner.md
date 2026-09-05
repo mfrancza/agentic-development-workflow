@@ -1,5 +1,7 @@
 # Design: Multi-provider OpenAI Codex runner and CLI installation
 
+**Amended (Issue [#396](https://github.com/mfrancza/agentic-development-workflow/issues/396)):** `run_openai()` passes `--sandbox danger-full-access` instead of `--sandbox workspace-write` on both images. See [`inner-sandbox-posture.md`](inner-sandbox-posture.md) for the ratified inner-sandbox posture.
+
 **Issue:** [#81](https://github.com/mfrancza/agentic-development-workflow/issues/81)
 
 **Parent design:** [`multi-provider-models.md`](multi-provider-models.md) (Issue #75)
