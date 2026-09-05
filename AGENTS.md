@@ -196,29 +196,42 @@ Complex workflow logic is extracted from inline `run:` blocks into **TypeScript 
 
 ### Working-directory portability
 
-Every composite action step that references the shared npm package **must** use `${{ github.action_path }}/../../scripts` as its `working-directory` and `cache-dependency-path` — **not** `.github/scripts` or `${{ github.workspace }}/.github/scripts`. The `github.action_path` context resolves to the action's own location at runtime:
+Every composite action step that references the shared npm package **must** use `${{ github.action_path }}/../../scripts` as its `working-directory` — **not** `.github/scripts` or `${{ github.workspace }}/.github/scripts`. The `github.action_path` context resolves to the action's own location at runtime:
 
 - For a local reference (`uses: ./.github/actions/<activity>`), it expands to `<workspace>/.github/actions/<activity>`, so `../../scripts` lands at `<workspace>/.github/scripts`.
 - For a remote reference (`uses: owner/repo/.github/actions/<activity>@ref`), it expands to the runner's `_actions` cache path for the downloaded action source, so `../../scripts` lands on the sibling `.github/scripts/` in the action's own tree — not in the caller's workspace.
 
+**Important:** `setup-node`'s `cache-dependency-path` is a glob resolved by `@actions/glob`, which rejects `.` / `..` path segments. The action-relative path `${{ github.action_path }}/../../scripts` must therefore be normalized to an absolute path before it can be used in `cache-dependency-path`. Use a dedicated "Resolve scripts directory" step whose output is then referenced by all subsequent steps.
+
 The required form for every `setup-node` block and run step in a composite action wrapper:
 
 ```yaml
+# setup-node's cache-dependency-path is resolved via @actions/glob,
+# which rejects '.' / '..' segments, so normalize first.
+- name: Resolve scripts directory
+  id: scripts-dir
+  shell: bash
+  env:
+    ACTION_PATH: ${{ github.action_path }}
+  run: |
+    set -euo pipefail
+    echo "dir=$(cd "$ACTION_PATH/../../scripts" && pwd)" >> "$GITHUB_OUTPUT"
+
 - name: Set up Node.js
   uses: actions/setup-node@<sha>  # v7.0.0
   with:
     node-version: '22'
     cache: npm
-    cache-dependency-path: ${{ github.action_path }}/../../scripts/package-lock.json
+    cache-dependency-path: ${{ steps.scripts-dir.outputs.dir }}/package-lock.json
 
 - name: Install dependencies
   shell: bash
-  working-directory: ${{ github.action_path }}/../../scripts
+  working-directory: ${{ steps.scripts-dir.outputs.dir }}
   run: npm ci
 
 - name: Run <activity>
   shell: bash
-  working-directory: ${{ github.action_path }}/../../scripts
+  working-directory: ${{ steps.scripts-dir.outputs.dir }}
   run: npx --no-install tsx src/<activity>.ts
 ```
 
