@@ -1,0 +1,125 @@
+name: release
+
+# Creates an annotated git tag (v<M>.<m>.<p>) and a moving major tag (v<M>),
+# pushes both, and publishes a GitHub Release with auto-generated notes.
+#
+# The release-images workflow (.github/workflows/release-images.yml) picks up
+# automatically on the push: tags: 'v*' event generated when the tags are
+# pushed, so this workflow only needs to create the tags and the release —
+# it does not invoke the image build itself.
+#
+# Runs as the workflow's own GITHUB_TOKEN with contents: write only.
+# No agent App identity is involved.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: >
+          Release version, e.g. v1.2.3. Must match v<major>.<minor>.<patch>
+          exactly; the workflow fails loudly on any other form.
+        required: true
+      ref:
+        description: >
+          Git ref to tag (branch name, tag, or full SHA). Defaults to main.
+          Pass an explicit SHA to tag a specific commit that is not yet at
+          the tip of main.
+        required: false
+        default: 'main'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      # Step 1: Validate the input version format before doing any git work.
+      # Fail loudly on any form that does not match v<major>.<minor>.<patch>.
+      - name: Validate version format
+        env:
+          _VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${_VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Version '${_VERSION}' does not match the required format v<major>.<minor>.<patch> (e.g. v1.2.3). Aborting."
+            exit 1
+          fi
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ inputs.ref }}
+          # Credentials are not persisted in the checkout; we configure the
+          # remote URL explicitly with GITHUB_TOKEN when we need to push.
+          persist-credentials: false
+
+      # Step 2: Ensure the exact version tag does not already exist.
+      # Checking the remote avoids a race if another run created the tag
+      # between dispatch and checkout.
+      - name: Ensure tag does not already exist
+        env:
+          _VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --tags origin "refs/tags/${_VERSION}" | grep -q .; then
+            echo "::error::Tag '${_VERSION}' already exists on the remote. Choose a different version or delete the existing tag first."
+            exit 1
+          fi
+
+      # Steps 3–5: Create the annotated tag, force-update the moving major
+      # tag to the same SHA, and push both to the remote.
+      - name: Create and push tags
+        env:
+          _VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          _REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          SHA="$(git rev-parse HEAD)"
+          # Strip CR/LF from SHA per repo output-injection policy.
+          SHA="$(printf '%s' "${SHA}" | tr -d '\r\n')"
+
+          # Extract the moving major tag: v1 from v1.2.3.
+          # %%.* strips everything from the first dot onwards.
+          MAJOR_TAG="${_VERSION%%.*}"
+
+          # Configure a git identity for the annotated tag object.
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+
+          # Step 3: Create the annotated tag at the checked-out SHA.
+          git tag -a "${_VERSION}" -m "Release ${_VERSION}" "${SHA}"
+
+          # Step 4: Force-update the moving major tag to the same SHA.
+          # -f is required when the tag already exists (e.g. v1 existed as
+          # v1.0.0 and is now being advanced to v1.1.0).
+          git tag -f "${MAJOR_TAG}" "${SHA}"
+
+          # Step 5: Push both tags. Use -f on the major tag push for the
+          # same reason — the remote may already have a v<M> from a prior
+          # release. Authenticate via an inlined token in the remote URL so
+          # persist-credentials: false does not block the push.
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${_REPO}.git"
+          git push origin "${_VERSION}"
+          git push origin -f "${MAJOR_TAG}"
+
+      # Step 6: Create the GitHub Release using generate-notes for the
+      # changelog body and mark it as the latest release.
+      - name: Create GitHub Release
+        env:
+          _VERSION: ${{ inputs.version }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          _REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh api \
+            --method POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "/repos/${_REPO}/releases" \
+            -f "tag_name=${_VERSION}" \
+            -f "name=${_VERSION}" \
+            -F "generate_release_notes=true" \
+            -f "make_latest=true"
