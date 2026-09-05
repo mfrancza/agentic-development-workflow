@@ -1,21 +1,31 @@
 name: 'Run agent container'
 description: >
-  Builds the agent Docker image and runs the container with the standard set
-  of environment variables (GH_TOKEN, ANTHROPIC_API_KEY, OPENAI_API_KEY,
-  GITHUB_REPO, AGENT_MODEL) and any optional per-workflow identifiers
-  (AGENT_ACTION, GITHUB_ISSUE_NUMBER, GITHUB_PR_NUMBER, GITHUB_RUN_ID,
-  ESCALATION_ASSIGNEE, RESOLVE_THREADS_FILE, ADMIN_ASSIGNEES,
+  Pulls or builds the agent Docker image and runs the container with the
+  standard set of environment variables (GH_TOKEN, ANTHROPIC_API_KEY,
+  OPENAI_API_KEY, GITHUB_REPO, AGENT_MODEL) and any optional per-workflow
+  identifiers (AGENT_ACTION, GITHUB_ISSUE_NUMBER, GITHUB_PR_NUMBER,
+  GITHUB_RUN_ID, ESCALATION_ASSIGNEE, RESOLVE_THREADS_FILE, ADMIN_ASSIGNEES,
   CODE_REVIEWERS). Also creates and mounts an output directory when
   output-dir and output-mount are supplied (used by agent-review for the
   RESOLVE_THREADS_FILE hand-off).
+  Pull mode (image non-empty): pulls the specified image and skips the build.
+  Build mode (image empty, default): builds from build-context.
 
 inputs:
+  image:
+    description: >
+      Pre-built image reference to pull and run (e.g.
+      ghcr.io/mfrancza/agentic-development-workflow/developer:v1). When
+      non-empty the build step is skipped and this image is pulled and run
+      directly. Leave empty (default) to build from build-context instead.
+    required: false
+    default: ''
   build-context:
-    description: 'Docker build context directory (e.g. ./docker or ./docker/reviewer)'
+    description: 'Docker build context directory (e.g. ./docker or ./docker/reviewer). Ignored when image is set.'
     required: false
     default: './docker'
   image-tag:
-    description: 'Docker image tag to build and run (e.g. agent-developer:ci)'
+    description: 'Docker image tag used when building from build-context (e.g. agent-developer:ci). Ignored when image is set.'
     required: false
     default: 'agent-developer:ci'
   gh-token:
@@ -98,7 +108,18 @@ inputs:
 runs:
   using: composite
   steps:
+    # Pull mode: an external image reference was supplied — skip the build and
+    # pull the pre-built image from the registry instead.
+    - name: Pull agent image
+      if: ${{ inputs.image != '' }}
+      shell: bash
+      env:
+        _IMAGE: ${{ inputs.image }}
+      run: docker pull "${_IMAGE}"
+
+    # Build mode: no pre-built image — build from the local source tree.
     - name: Build agent image
+      if: ${{ inputs.image == '' }}
       shell: bash
       env:
         _BUILD_CONTEXT: ${{ inputs.build-context }}
@@ -114,6 +135,7 @@ runs:
         XAI_API_KEY: ${{ inputs.xai-api-key }}
         GITHUB_REPO: ${{ inputs.repo }}
         AGENT_MODEL: ${{ inputs.model }}
+        _IMAGE: ${{ inputs.image }}
         _AGENT_ACTION: ${{ inputs.agent-action }}
         _GITHUB_ISSUE_NUMBER: ${{ inputs.issue-number }}
         _GITHUB_PR_NUMBER: ${{ inputs.pr-number }}
@@ -126,6 +148,10 @@ runs:
         _IMAGE_TAG: ${{ inputs.image-tag }}
       run: |
         set -euo pipefail
+
+        # Determine effective image: use the pre-built image when supplied (pull
+        # mode), otherwise use the locally-built tag (build mode).
+        _EFFECTIVE_IMAGE="${_IMAGE:-${_IMAGE_TAG}}"
 
         # Build optional -e flags for per-workflow identifiers that are only
         # present on some workflows. Each is included only when non-empty so
@@ -166,4 +192,4 @@ runs:
           -e AGENT_MODEL \
           "${_opt_env[@]}" \
           "${_vol_args[@]}" \
-          "${_IMAGE_TAG}"
+          "${_EFFECTIVE_IMAGE}"

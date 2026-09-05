@@ -1,0 +1,100 @@
+name: release-images
+
+# Builds the developer and reviewer agent images and pushes them to GHCR.
+# Triggered automatically when a v* tag is pushed; also available as a manual
+# dispatch to re-push an existing tag (e.g. to update the moving major tag
+# after a registry incident).
+#
+# Published image paths:
+#   ghcr.io/<owner>/<repo>/developer:<full-tag>  (e.g. v1.2.3)
+#   ghcr.io/<owner>/<repo>/developer:v<major>    (moving tag, e.g. v1)
+#   ghcr.io/<owner>/<repo>/reviewer:<full-tag>
+#   ghcr.io/<owner>/<repo>/reviewer:v<major>
+#
+# The major tag is a moving pointer (it is overwritten on each release within
+# the same major version) so callers who want automatic patch/minor updates can
+# pin to vN.  Callers who need reproducibility should pin to the full tag.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to build and push (e.g. v1.2.3). Defaults to the git ref name when dispatched against a v* tag; must be supplied explicitly when dispatched from a branch.'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  release-images:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Resolve image tag
+        id: tag
+        env:
+          _INPUT_TAG: ${{ inputs.tag }}
+          _REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          FULL_TAG="${_INPUT_TAG:-${_REF_NAME}}"
+          if [[ ! "${FULL_TAG}" =~ ^v[0-9] ]]; then
+            echo "::error::Image tag '${FULL_TAG}' does not start with 'v' followed by a digit. Run against a v* tag or supply the 'tag' workflow_dispatch input."
+            exit 1
+          fi
+          # Strip CR/LF per repo output-injection policy.
+          # The ^v[0-9] regex anchors only at the start, so a value like
+          # v1.2.3\ninjected=evil would pass validation but write two lines
+          # into GITHUB_OUTPUT.  Strip before any writes to close the gap.
+          FULL_TAG="$(printf '%s' "${FULL_TAG}" | tr -d '\r\n')"
+          # Extract major version: v1 from v1.2.3, v1.2.3-rc.1, etc.
+          # %%.* strips everything from the first '.' onwards.
+          MAJOR_TAG="${FULL_TAG%%.*}"
+          echo "full=${FULL_TAG}" >> "$GITHUB_OUTPUT"
+          echo "major=${MAJOR_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          _ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${_ACTOR}" --password-stdin
+
+      - name: Build and push developer image
+        env:
+          _FULL_TAG: ${{ steps.tag.outputs.full }}
+          _MAJOR_TAG: ${{ steps.tag.outputs.major }}
+          _REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          DEVELOPER_BASE="ghcr.io/${_REPO}/developer"
+          docker build ./docker \
+            -t "${DEVELOPER_BASE}:${_FULL_TAG}" \
+            -t "${DEVELOPER_BASE}:${_MAJOR_TAG}"
+          docker push "${DEVELOPER_BASE}:${_FULL_TAG}"
+          docker push "${DEVELOPER_BASE}:${_MAJOR_TAG}"
+
+      - name: Build and push reviewer image
+        env:
+          _FULL_TAG: ${{ steps.tag.outputs.full }}
+          _MAJOR_TAG: ${{ steps.tag.outputs.major }}
+          _REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          REVIEWER_BASE="ghcr.io/${_REPO}/reviewer"
+          docker build ./docker/reviewer \
+            -t "${REVIEWER_BASE}:${_FULL_TAG}" \
+            -t "${REVIEWER_BASE}:${_MAJOR_TAG}"
+          docker push "${REVIEWER_BASE}:${_FULL_TAG}"
+          docker push "${REVIEWER_BASE}:${_MAJOR_TAG}"
