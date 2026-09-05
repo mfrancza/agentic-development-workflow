@@ -40,7 +40,7 @@ See [`requirements.md`](requirements.md) for the full project specification and 
     │   ├── tsconfig.json             # strict: true
     │   ├── src/                      # One entry file per activity; lib/ for shared helpers
     │   └── test/                     # Vitest unit tests (one file per activity)
-    └── workflows/                    # One workflow per AGENT_ACTION, plus ci.yml
+    └── workflows/                    # One workflow per AGENT_ACTION, plus ci.yml and release-images.yml
 ```
 
 ## MVP Workflow
@@ -72,6 +72,14 @@ See [`requirements.md`](requirements.md) for the full project specification and 
 7. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
 
 The developer workflows build the container from [`docker/`](docker/) and mint a short-lived installation token from the `developer-agent` GitHub App. The **reviewer image** is built from [`docker/reviewer/`](docker/reviewer/) and uses the `reviewer-agent` App identity (see the reviewer image section below). The `agent-review` workflow triggers it when the `agent:review` label is applied to a PR.
+
+Both images are published to GHCR on every `v*` tag push by [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml):
+- `ghcr.io/mfrancza/agentic-development-workflow/developer:<full-tag>` and `:v<major>` (moving major tag)
+- `ghcr.io/mfrancza/agentic-development-workflow/reviewer:<full-tag>` and `:v<major>`
+
+The [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composite action supports two modes:
+- **Pull mode** (`image` input is non-empty): pulls the specified image from a registry and skips the Docker build. Use this in external caller repos that reference these workflows remotely and do not have `docker/` in their workspace.
+- **Build mode** (`image` input is empty, default): builds from the `build-context` directory. This repo's own workflows use build mode so that in-progress changes take effect immediately without a release.
 
 - `.github/workflows/agent-auto-trigger.yml` — applies the next-stage `agent:*` label at each SDLC transition (issue opened, classification label applied, design PR merged, agent PR opened) using a minted developer-agent token. No agent container runs; downstream workflows do the actual work. Each gate is controlled by a key in `vars.AUTO_TRIGGER_AGENTS` (see **Auto-trigger gates** under **Labels**).
 
@@ -147,6 +155,7 @@ The Terraform-managed `AUTO_TRIGGER_AGENTS` Actions variable (a JSON object) con
 - **Developer agent container** — implemented at [`docker/`](docker/).
 - **Terraform** for repo settings, branch protection, and per-workflow config — implemented at [`terraform/`](terraform/). Agent App identities are configured out of band (see README).
 - **GitHub Actions workflows** for each agent action — implemented at [`.github/workflows/`](.github/workflows/).
+- **GHCR image release workflow** — [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml) publishes the developer and reviewer images on every `v*` tag push.
 - **Local development guide** for running the developer and reviewer agents locally — see the [Reproduce this yourself](README.md#reproduce-this-yourself) section of [README.md](README.md).
 
 ## Claude Code Identity

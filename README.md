@@ -264,11 +264,41 @@ To mint a reviewer-agent installation token that matches the CI identity exactly
 
 The entrypoint clones the repo read-only, gathers the diff against the merge-base, fetches open review threads and CI check status, invokes Claude, then verifies that a review by the authenticated GitHub identity was posted against the PR head SHA — exiting non-zero if the agent did not complete the review.
 
+### Published container images
+
+The developer and reviewer images are published to GHCR on every `v*` tag push by [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml). Two tags are published per release:
+
+- **Full tag** (e.g. `v1.2.3`) — immutable; pin to this for reproducible runs.
+- **Major tag** (e.g. `v1`) — a moving pointer updated on every release within the same major version; use this to receive automatic patch and minor updates.
+
+```
+ghcr.io/mfrancza/agentic-development-workflow/developer:v1.2.3
+ghcr.io/mfrancza/agentic-development-workflow/developer:v1
+ghcr.io/mfrancza/agentic-development-workflow/reviewer:v1.2.3
+ghcr.io/mfrancza/agentic-development-workflow/reviewer:v1
+```
+
+**Pull mode vs build mode in the `run-agent` composite action**
+
+The [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composite action supports two modes, controlled by the `image` input:
+
+- **Pull mode** (`image` is set): pulls the specified image from a registry and runs it — no local Docker build required. Use this when calling the workflows from an external repo that does not have the `docker/` source tree in its workspace.
+- **Build mode** (`image` is empty, default): builds the image from the `build-context` directory before running. This repo's own workflows use build mode so that uncommitted changes in `docker/` take effect immediately without waiting for a release.
+
+To manually re-run the release workflow against an existing tag (e.g. to update the GHCR package after a registry incident):
+
+```bash
+gh workflow run release-images.yml \
+  --repo mfrancza/agentic-development-workflow \
+  --ref v1.2.3 \
+  -f tag=v1.2.3
+```
+
 ## What's included
 
 - Developer agent container with seven actions: `implement`, `groom`, `design`, `fix-checks`, `resolve-conflicts`, `respond-review`, `fix-deployment`.
 - Grooming agent with label criteria in [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json).
-- GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/), plus a `CI` workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) that runs `tsc --noEmit` and `vitest run` on every PR.
+- GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/), plus a `CI` workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) that runs `tsc --noEmit` and `vitest run` on every PR, and a `release-images` workflow ([`.github/workflows/release-images.yml`](.github/workflows/release-images.yml)) that publishes both agent images to GHCR on each `v*` tag.
 - Shared TypeScript package at [`.github/scripts/`](.github/scripts/) for workflow activities (complex logic extracted from inline `run:` blocks); see [AGENTS.md](AGENTS.md#workflow-activity-conventions) for conventions.
 - Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_MODEL` / `AUTO_TRIGGER_AGENTS` Actions variables.
 - Claude model override via `model:<name>` labels on issues (developer/grooming/fix-deployment runs) and PRs (reviewer agent runs).
