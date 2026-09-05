@@ -194,6 +194,36 @@ Complex workflow logic is extracted from inline `run:` blocks into **TypeScript 
 - Read action inputs as environment variables via `core.getInput()`; publish results with `core.setOutput()`. Skip/proceed decisions use string outputs (`skip=true|false`, `proceed=true|false`) to keep `if:` conditions in consuming workflows unchanged in form.
 - The output-injection security rule still applies inside activities: values flow action-input → `process.env` → `core.setOutput()` with no shell interpolation. `@actions/core` writes `GITHUB_OUTPUT` with delimiter-safe encoding, so manual CR/LF stripping is unnecessary within activities. Shell steps that still write user-controlled values to `GITHUB_OUTPUT` keep the `tr -d '\r\n'` stripping (see **Repo-specific security defaults**).
 
+### Working-directory portability
+
+Every composite action step that references the shared npm package **must** use `${{ github.action_path }}/../../scripts` as its `working-directory` and `cache-dependency-path` — **not** `.github/scripts` or `${{ github.workspace }}/.github/scripts`. The `github.action_path` context resolves to the action's own location at runtime:
+
+- For a local reference (`uses: ./.github/actions/<activity>`), it expands to `<workspace>/.github/actions/<activity>`, so `../../scripts` lands at `<workspace>/.github/scripts`.
+- For a remote reference (`uses: owner/repo/.github/actions/<activity>@ref`), it expands to the runner's `_actions` cache path for the downloaded action source, so `../../scripts` lands on the sibling `.github/scripts/` in the action's own tree — not in the caller's workspace.
+
+The required form for every `setup-node` block and run step in a composite action wrapper:
+
+```yaml
+- name: Set up Node.js
+  uses: actions/setup-node@<sha>  # v7.0.0
+  with:
+    node-version: '22'
+    cache: npm
+    cache-dependency-path: ${{ github.action_path }}/../../scripts/package-lock.json
+
+- name: Install dependencies
+  shell: bash
+  working-directory: ${{ github.action_path }}/../../scripts
+  run: npm ci
+
+- name: Run <activity>
+  shell: bash
+  working-directory: ${{ github.action_path }}/../../scripts
+  run: npx --no-install tsx src/<activity>.ts
+```
+
+Using `.github/scripts` (a bare relative path, resolved against `$GITHUB_WORKSPACE`) or `${{ github.workspace }}/.github/scripts` (workspace-absolute) both break when the action is invoked from a caller repo whose workspace does not contain `.github/scripts/`.
+
 ### Shell-vs-TypeScript threshold
 
 A `run:` block moves to a TypeScript activity when it contains **any** of: API-response parsing (`--jq`), conditional branching, pagination, or an error-handling policy (fail-open/fail-closed distinctions). A `run:` block stays shell when it is a single command or a linear sequence of commands with no parsing or branching (e.g. `docker build`, `docker run`). Repetition alone does not force TypeScript — repeated but individually trivial steps become a composite action in plain YAML + shell.

@@ -1,0 +1,98 @@
+name: Test action portability
+
+# Verifies that the working-directory pattern used in composite actions
+# (${{ github.action_path }}/../../scripts) resolves correctly when the action
+# is invoked from a workspace that does not contain .github/scripts/.
+#
+# This simulates the remote-caller scenario: when a consumer repo references
+#   uses: mfrancza/agentic-development-workflow/.github/actions/<activity>@ref
+# the runner downloads the action source to an _actions cache path outside the
+# caller's workspace and sets GITHUB_ACTION_PATH to that cache path.  The
+# working-directory therefore resolves to the action's own .github/scripts/,
+# not to anything in the caller's workspace.
+
+on:
+  pull_request:
+    paths:
+      - '.github/actions/*/action.yml'
+      - '.github/scripts/**'
+      - '.github/workflows/test-action-portability.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  portability-test:
+    name: Verify action_path-based scripts resolution
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      # Build a simulated _actions cache outside $GITHUB_WORKSPACE to reproduce
+      # the runner layout for a remote action reference:
+      #   _actions/mfrancza/agentic-development-workflow/<ref>/
+      #     .github/
+      #       actions/resolve-model/   ← GITHUB_ACTION_PATH points here
+      #       scripts/                 ← ../../scripts from the action path
+      - name: Build simulated _actions cache layout
+        run: |
+          set -euo pipefail
+          ACTION_CACHE="/tmp/simulated-action-cache/mfrancza/agentic-development-workflow/main"
+          mkdir -p "$ACTION_CACHE/.github/actions/resolve-model"
+          cp -r .github/actions/resolve-model/. "$ACTION_CACHE/.github/actions/resolve-model/"
+          cp -r .github/scripts/. "$ACTION_CACHE/.github/scripts/"
+          echo "ACTION_CACHE=$ACTION_CACHE" >> "$GITHUB_ENV"
+
+      # Simulate a caller workspace: a fresh directory with no .github/scripts/.
+      # Run npm ci from the action-path-relative scripts directory while
+      # working inside the caller workspace — the old pattern (.github/scripts
+      # or $GITHUB_WORKSPACE/.github/scripts) would fail here; the new pattern
+      # ($GITHUB_ACTION_PATH/../../scripts) must succeed.
+      - name: Verify path resolution from a workspace without .github/scripts
+        run: |
+          set -euo pipefail
+
+          # Caller workspace has no .github/scripts/
+          mkdir -p /tmp/caller-workspace
+          if [ -d "/tmp/caller-workspace/.github/scripts" ]; then
+            echo "ERROR: test setup incorrect — caller workspace must not have .github/scripts/"
+            exit 1
+          fi
+          echo "Confirmed: caller workspace has no .github/scripts/"
+
+          # Simulate GITHUB_ACTION_PATH as GitHub sets it for a remote reference
+          GITHUB_ACTION_PATH="$ACTION_CACHE/.github/actions/resolve-model"
+
+          # Resolve the scripts directory the same way the fixed composite
+          # actions do: ${{ github.action_path }}/../../scripts
+          SCRIPTS_DIR="$(realpath "$GITHUB_ACTION_PATH/../../scripts")"
+
+          echo "Simulated GITHUB_ACTION_PATH : $GITHUB_ACTION_PATH"
+          echo "Resolved scripts directory   : $SCRIPTS_DIR"
+
+          # Verify key package files exist at the resolved path
+          test -f "$SCRIPTS_DIR/package.json"      || { echo "ERROR: package.json missing";      exit 1; }
+          test -f "$SCRIPTS_DIR/package-lock.json" || { echo "ERROR: package-lock.json missing"; exit 1; }
+
+          # Switch into the caller workspace (no .github/scripts/ here) and
+          # install from the action-path-relative directory.
+          cd /tmp/caller-workspace
+          echo "Working directory: $(pwd)"
+          npm ci --prefix "$SCRIPTS_DIR"
+
+          # Smoke-run one activity entry-point from the action-path-relative
+          # scripts directory to confirm tsx module resolution works.
+          OUT="$(cd "$SCRIPTS_DIR" && npx --no-install tsx src/resolve-model.ts 2>&1 || true)"
+          if printf '%s' "$OUT" | grep -qE \
+            'ERR_PACKAGE_PATH_NOT_EXPORTED|ERR_MODULE_NOT_FOUND|ERR_REQUIRE_ESM|Cannot find module'; then
+            echo "ERROR: resolve-model.ts failed module loading:"
+            printf '%s\n' "$OUT"
+            exit 1
+          fi
+          echo "resolve-model.ts: module loading OK (output: $(printf '%s' "$OUT" | head -1))"
+
+          echo ""
+          echo "SUCCESS: npm ci and tsx ran via \$GITHUB_ACTION_PATH/../../scripts"
+          echo "         even though the caller workspace has no .github/scripts/"
