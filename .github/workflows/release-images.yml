@@ -52,6 +52,11 @@ jobs:
             echo "::error::Image tag '${FULL_TAG}' does not start with 'v' followed by a digit. Run against a v* tag or supply the 'tag' workflow_dispatch input."
             exit 1
           fi
+          # Strip CR/LF per repo output-injection policy.
+          # The ^v[0-9] regex anchors only at the start, so a value like
+          # v1.2.3\ninjected=evil would pass validation but write two lines
+          # into GITHUB_OUTPUT.  Strip before any writes to close the gap.
+          FULL_TAG="$(printf '%s' "${FULL_TAG}" | tr -d '\r\n')"
           # Extract major version: v1 from v1.2.3, v1.2.3-rc.1, etc.
           # %%.* strips everything from the first '.' onwards.
           MAJOR_TAG="${FULL_TAG%%.*}"
