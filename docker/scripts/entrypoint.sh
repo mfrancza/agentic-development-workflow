@@ -88,9 +88,18 @@ run_openai() {
 
 ${user_prompt}"
 
+    # --sandbox danger-full-access: the outer agent container is the trust
+    # boundary (Decision 1 of docs/design/inner-sandbox-posture.md). Codex's
+    # workspace-write sandbox enforces confinement via Linux user namespaces
+    # (clone(CLONE_NEWUSER)/unshare), which the outer docker run seccomp
+    # default blocks; the run therefore fails closed before doing any work.
+    # danger-full-access is Codex v0.146.0's documented no-sandbox mode.
+    # The alarming name is intentional: a future maintainer who encounters it
+    # will search for why, find Decision 3 of docs/design/inner-sandbox-posture.md,
+    # and understand the trade-off. See that document for the full rationale.
     printf '%s\n' "$combined" | codex exec \
         --model "$AGENT_MODEL" \
-        --sandbox workspace-write \
+        --sandbox danger-full-access \
         -
 }
 
@@ -117,8 +126,15 @@ ${user_prompt}"
     # against `grok --help` at CLI v1.0.13 — see PR description for the
     # exact help excerpt).
     # --model selects the specific Grok model (short form -m also accepted).
-    # --sandbox workspace confines agent writes to the workspace directory
-    # (the profile closest to Codex's --sandbox workspace-write).
+    # No --sandbox flag: the outer agent container is the trust boundary
+    # (Decision 1 of docs/design/inner-sandbox-posture.md). The grok
+    # --sandbox workspace profile delegates to bubblewrap (bwrap), which
+    # requires unprivileged user-namespace creation — a syscall class blocked
+    # by the outer docker run seccomp default. Omitting the flag leaves grok
+    # in its default no-sandbox posture (verified: no --sandbox equivalent of
+    # "none" exists in grok v1.0.13's flag surface). See Decision 2 of
+    # docs/design/inner-sandbox-posture.md. The reviewer image's run_xai()
+    # applies the same omission and is the mirroring reference.
     # --always-approve auto-approves tool executions (equivalent to Claude
     # Code's --dangerously-skip-permissions); required for unattended CI runs.
     # --max-turns passes AGENT_MAX_TURNS through to the CLI's built-in turn
@@ -131,7 +147,6 @@ ${user_prompt}"
     # PR description for the verified authentication details).
     grok -p "$combined" \
         --model "$AGENT_MODEL" \
-        --sandbox workspace \
         --always-approve \
         --max-turns "$AGENT_MAX_TURNS" \
         --no-auto-update

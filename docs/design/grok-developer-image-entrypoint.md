@@ -2,6 +2,8 @@
 
 **Amended (Issue [#353](https://github.com/mfrancza/agentic-development-workflow/issues/353)):** The runner described in this document (OpenAI Codex CLI with a `[model_providers.xai]` config block) has been superseded. Grok models will be executed by the Grok Build CLI (`grok -p`) once Issues [#355](https://github.com/mfrancza/agentic-development-workflow/issues/355) and [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356) land; see [`grok-build-cli.md`](grok-build-cli.md) for the target runtime design.
 
+**Amended (Issue [#396](https://github.com/mfrancza/agentic-development-workflow/issues/396)):** the developer image's `run_xai()` no longer passes `--sandbox workspace`. See [`inner-sandbox-posture.md`](inner-sandbox-posture.md) for the ratified inner-sandbox posture.
+
 **Issue:** [#279](https://github.com/mfrancza/agentic-development-workflow/issues/279)
 
 **Parent design:** [`docs/design/grok-models.md`](grok-models.md) (Issue [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275))

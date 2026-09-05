@@ -89,15 +89,22 @@ run_openai() {
     system_prompt="$(cat "${SCRIPTS_DIR}/prompts/${prompt_file}")"
     # Codex exec has no --system-prompt flag; prepend the per-action system
     # prompt to the task prompt with a clear separator.
-    # Sandbox is workspace-write: confines any file writes to the workspace,
-    # preserving the structural no-write guarantee (no git-askpass.sh, no
-    # push credentials in the image, Contents-read-only reviewer token).
+    # --sandbox danger-full-access: the outer agent container is the trust
+    # boundary (Decision 1 of docs/design/inner-sandbox-posture.md). Codex's
+    # workspace-write sandbox enforces confinement via Linux user namespaces,
+    # which the outer docker run seccomp default blocks. danger-full-access is
+    # Codex v0.146.0's documented no-sandbox mode. The reviewer image's
+    # structural no-write guarantee is preserved by the token layer
+    # (Contents:read reviewer App token) and the image's lack of
+    # git-askpass.sh / push credentials — the sandbox flag was defence in
+    # depth, not the primary guarantee. See Decision 3 of
+    # docs/design/inner-sandbox-posture.md for the full rationale.
     {
         printf '%s\n\n---\n\n' "$system_prompt"
         cat "$user_prompt_file"
     } | codex exec \
         --model "$AGENT_MODEL" \
-        --sandbox workspace-write \
+        --sandbox danger-full-access \
         -
 }
 

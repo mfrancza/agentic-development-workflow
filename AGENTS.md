@@ -161,6 +161,7 @@ When running the container locally, pass your own `GH_TOKEN` (see [README.md](RE
 - Agent containers must be isolated from user credentials — the entrypoint sets `GIT_ASKPASS`/`GIT_TERMINAL_PROMPT=0` and only sees the injected `GH_TOKEN`.
 - All agent-human and agent-agent interaction happens via GitHub issue/PR comments.
 - Branch protection must require independent PR approval and prevent agents (and admins) from pushing directly to `main`. Enforced by the `main-protection` ruleset in [`terraform/modules/branch-protection/main.tf`](terraform/modules/branch-protection/main.tf).
+- The outer agent container is the trust boundary. In-container CLI sandboxes (`bwrap`, Codex's namespace-backed sandbox) are not relied on for confinement; the developer and reviewer entrypoints deliberately do not enable them. See [`docs/design/inner-sandbox-posture.md`](docs/design/inner-sandbox-posture.md) (Issue [#396](https://github.com/mfrancza/agentic-development-workflow/issues/396)) for the ratified decision.
 
 ## Shell Script Conventions
 
