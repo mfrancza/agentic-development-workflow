@@ -19,6 +19,12 @@ gh pr    edit "<pr-number>"          --repo "$GITHUB_REPO" --add-label "human-re
 gh issue edit "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "<github-username>"
 ```
 
-## Volatile documentation
+## Volatile facts live at their sources
 
-Label definitions, AGENT_ACTION env vars, and workflow trigger conditions each live in a single authoritative source — `terraform/modules/labels/main.tf`, `docker/scripts/entrypoint.sh`, and `.github/workflows/agent-*.yml` respectively. When your change touches any of these subsystems, consult the source file directly — do not update or rely on copies reproduced elsewhere.
+`AGENTS.md` points to authoritative source files rather than copying their content. Before adding, removing, or reasoning about labels, `AGENT_ACTION` values, or workflow triggers, read the source directly:
+
+- **Labels** → [`terraform/modules/labels/main.tf`](terraform/modules/labels/main.tf) (`automation_labels` local)
+- **`AGENT_ACTION` values and required env vars** → [`docker/scripts/entrypoint.sh`](docker/scripts/entrypoint.sh) (the `case "$AGENT_ACTION"` dispatcher and `action_*()` preambles)
+- **Workflow triggers and gates** → `.github/workflows/agent-*.yml` (`on:` blocks and job `if:` conditions)
+
+Do not update any copy of this information in `AGENTS.md` or `README.md` — update the source file.
