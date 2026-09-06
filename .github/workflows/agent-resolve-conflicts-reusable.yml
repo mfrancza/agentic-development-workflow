@@ -42,12 +42,17 @@ on:
         required: true
       DEVELOPER_APP_PRIVATE_KEY:
         required: true
+      # LLM API keys are declared required: false so that callers who use only
+      # one provider (e.g. Anthropic only) do not need to set placeholder secrets
+      # for the other two. The container entrypoint validates at runtime that the
+      # key matching the resolved model is present, so an absent key causes a
+      # clear runtime error rather than a silent no-op.
       ANTHROPIC_API_KEY:
-        required: true
+        required: false
       OPENAI_API_KEY:
-        required: true
+        required: false
       XAI_API_KEY:
-        required: true
+        required: false
 
 permissions:
   contents: read
