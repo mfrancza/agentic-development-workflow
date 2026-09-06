@@ -157,14 +157,13 @@ new App identity. Three options were considered:
   workflow uses the token asymmetrically:
     - On the **plan job** (fired from `pull_request_target` — see
       the threat-model discussion below for why not `pull_request`),
-      the token is used **read-only from a GitHub API perspective** —
-      the `integrations/github` provider performs a state refresh
-      (reads current resource attributes to compute the plan), and
-      the plan-comment activity posts a PR comment via `Issues: R/W`
+      the token's `Administration: R/W` scope is not exercised — the
+      `integrations/github` provider performs a state refresh (reads
+      current resource attributes to compute the plan), and the
+      plan-comment activity posts a PR comment via `Issues: R/W`
       (`pulls/{n}/comments` is served by the issues API for PR
-      conversation comments). Neither call exercises the
-      `Administration: R/W` scope, and the workflow does **not** run
-      `terraform apply` on this trigger.
+      conversation comments). No admin-scope write occurs, and the
+      workflow does **not** run `terraform apply` on this trigger.
     - On the **apply job** (`push` to `main`), admin writes can
       occur — but this trigger only fires post-merge, and branch
       protection requires one approving human review before any
