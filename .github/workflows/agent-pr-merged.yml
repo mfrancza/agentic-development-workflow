@@ -17,13 +17,29 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  remove-developer-label:
+  # SECURITY EXCEPTION (Decision 8 of docs/design/refactor-github-actions.md):
+  # Neither job below performs a workspace checkout. On pull_request.closed
+  # events, a merged PR that modifies .github/actions/agent-token would execute
+  # the modified composite action while DEVELOPER_APP_PRIVATE_KEY is in scope if
+  # a checkout were present. By omitting the checkout entirely, there is no
+  # local code-execution path that a merged PR can influence.
+  #
+  # The PR body must be extracted here (in the caller) rather than in the
+  # reusable because github.event.pull_request.body is only accessible from the
+  # calling workflow — reusable workflows receive the workflow_call event, not
+  # the original pull_request event. The extracted issue number is then passed
+  # to the reusable workflow as a typed input.
+
+  extract-issue-number:
     # Only act on PRs authored by the developer-agent bot.  Both merged and
     # abandoned PRs are handled — in either case the developer agent's
     # iterative loop is definitively over.
     if: github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
+    outputs:
+      proceed: ${{ steps.lookup.outputs.proceed }}
+      issue_number: ${{ steps.lookup.outputs.issue_number }}
 
     steps:
       - name: Extract linked issue number from PR body
@@ -49,56 +65,10 @@ jobs:
             echo "issue_number=${ISSUE_NUM}" >> "$GITHUB_OUTPUT"
           fi
 
-      # No checkout step: we call actions/create-github-app-token directly
-      # instead of going through the local ./.github/actions/agent-token
-      # composite action.  Using a local action requires a workspace checkout,
-      # and on pull_request.closed events github.event.pull_request.base.sha
-      # may point at the post-merge HEAD (which already includes the merged PR).
-      # This means a PR that modifies .github/actions/agent-token could still
-      # get its modified local action executed here with DEVELOPER_APP_PRIVATE_KEY
-      # available — defeating the intended secret-exfiltration mitigation.
-      # Calling actions/create-github-app-token directly (with a pinned SHA)
-      # avoids the workspace entirely, so there is no local code-execution path
-      # that a merged PR can influence.
-      - name: Mint installation token for developer-agent
-        if: steps.lookup.outputs.proceed == 'true'
-        id: setup
-        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
-        with:
-          client-id: ${{ secrets.DEVELOPER_APP_ID }}
-          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-
-      - name: Remove agent:developer label from linked issue
-        if: steps.lookup.outputs.proceed == 'true'
-        env:
-          GH_TOKEN: ${{ steps.setup.outputs.token }}
-          GITHUB_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ steps.lookup.outputs.issue_number }}
-        run: |
-          set -euo pipefail
-          echo "Removing agent:developer label from issue #${ISSUE_NUMBER}."
-          if ! gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPO}" --remove-label "agent:developer"; then
-            # Distinguish between a benign no-op (label was already absent) and a
-            # real failure (permissions, rate-limit, transient API error).  A real
-            # failure must surface loudly — leaving the label in place could give the
-            # impression that the developer agent is still active on a closed PR.
-            # If the label is already absent the `gh issue edit` command may exit
-            # non-zero, which is a warning-level no-op we treat as success.
-            #
-            # Capture the re-check exit code and output separately — do NOT pipe
-            # because set -e is suppressed in `if` conditions and a pipe exit status
-            # reflects only the last command, masking a failed `gh api` call.
-            _recheck_status=0
-            _recheck_output="$(gh api "repos/${GITHUB_REPO}/issues/${ISSUE_NUMBER}" \
-                --jq 'any(.labels[]; .name == "agent:developer")')" || _recheck_status=$?
-            if [ "${_recheck_status}" -ne 0 ]; then
-              echo "::error::Failed to remove agent:developer label from issue #${ISSUE_NUMBER}, and the re-check API call also failed (check token permissions and API rate limits)."
-              exit 1
-            elif [ "${_recheck_output}" = "true" ]; then
-              echo "::error::Failed to remove agent:developer label from issue #${ISSUE_NUMBER} and the label is still present. Check token permissions and API rate limits."
-              exit 1
-            else
-              echo "::warning::Could not remove agent:developer label from issue #${ISSUE_NUMBER} — the label was already absent (non-fatal)."
-            fi
-          fi
-          echo "Done removing agent:developer label from issue #${ISSUE_NUMBER}."
+  remove-developer-label:
+    needs: extract-issue-number
+    if: needs.extract-issue-number.outputs.proceed == 'true'
+    uses: ./.github/workflows/agent-pr-merged-reusable.yml
+    with:
+      issue-number: ${{ needs.extract-issue-number.outputs.issue_number }}
+    secrets: inherit
