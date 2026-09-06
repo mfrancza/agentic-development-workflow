@@ -560,3 +560,74 @@ delete it (adding a fresh entry to the `.gitignore` block for
 All four foundation tasks (state backend, App identity, actions-policy, plan-comment activity) are independent and can proceed in parallel — the workflow sub-issue is the join point that consumes all of them. The e2e validation sub-issue depends on the workflow being live end-to-end.
 
 Dependencies are recorded natively as GitHub blocked-by relationships on the issues after they are created.
+
+## State backend bootstrap (one-time, human-required)
+
+The steps below are performed once by the maintainer after the `cloud {}` block
+lands on `main`. They are **not** automated — HCP Terraform requires a browser-based
+account signup that no Terraform resource or GitHub Action can bootstrap.
+
+### 1. Create the HCP Terraform organization and workspace
+
+1. Sign in (or sign up) at <https://app.terraform.io>.
+2. Create or reuse an organization. The `cloud {}` block in `terraform/main.tf`
+   names this organization as `mfrancza`; if your HCP org name differs, update
+   the block before running `terraform init`.
+3. Create a new workspace named `agentic-development-workflow`.
+4. In the workspace settings, set **Execution Mode = Local**. This is the key
+   setting: HCP stores the state file and holds the state lock, but every
+   `plan` and `apply` still runs on the local machine (or in a GitHub Actions
+   runner) — HCP is never asked to execute Terraform itself.
+
+### 2. Generate a team or user API token
+
+1. In the HCP Terraform UI, go to **User Settings → Tokens** (or create a
+   **Team token** under the organization's team settings for a less
+   user-specific credential).
+2. Create a new token and copy it immediately — it is shown only once.
+
+### 3. Set the `TF_API_TOKEN` GHA secret
+
+```bash
+gh secret set TF_API_TOKEN --body "<token-from-step-2>"
+```
+
+This secret is read by the `cloud {}` backend block during `terraform init`.
+The CI pipeline (`terraform-ci.yml`, landing in issue [#427](https://github.com/mfrancza/agentic-development-workflow/issues/427))
+will also read it to authenticate against the HCP state backend before each
+plan and apply.
+
+### 4. Migrate existing local state into HCP
+
+If local state (`terraform/terraform.tfstate`) already exists from previous
+`terraform apply` runs, migrate it into the new HCP workspace:
+
+```bash
+cd terraform
+export GITHUB_TOKEN=$(gh auth token)
+export TF_API_TOKEN="<token-from-step-2>"
+
+terraform init -migrate-state
+# Terraform prompts: "Do you want to copy existing state to the new backend?"
+# Answer: yes
+```
+
+After a successful migration the local `terraform.tfstate` is no longer
+authoritative — the HCP workspace holds the canonical copy. The local file is
+left on disk but is not committed (it is in `.gitignore`); you may delete it
+once you confirm the workspace state looks correct via `terraform show`.
+
+### 5. Verify the migrated state
+
+```bash
+terraform show   # should list all managed resources without error
+```
+
+### After migration: ongoing applies run in CI
+
+Once the state is in HCP, `terraform apply` should no longer be run locally
+for routine changes — that is the job of the `apply` stage in
+`terraform-ci.yml` ([#427](https://github.com/mfrancza/agentic-development-workflow/issues/427)),
+which fires automatically on every merge to `main` that touches `terraform/**`.
+Local `terraform apply` is reserved for bootstrapping (before CI is wired up)
+and for emergency break-glass situations where CI is unavailable.

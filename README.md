@@ -170,6 +170,11 @@ cp terraform.tfvars.example terraform.tfvars
 
 export GITHUB_TOKEN=$(gh auth token)  # or any token with `repo` scope
 
+# TF_API_TOKEN authenticates to the HCP Terraform remote state backend.
+# Generate a token in the HCP Terraform UI under User Settings → Tokens,
+# then export it before running terraform init:
+export TF_API_TOKEN="<hcp-terraform-api-token>"
+
 terraform init
 
 # Import the repo. The ID is the plain repo name — whatever you set for
@@ -177,8 +182,25 @@ terraform init
 terraform import github_repository.this "$(terraform console <<<'var.repo_name' | tr -d '"')"
 
 terraform plan
-terraform apply
+terraform apply  # first-time bootstrap only; subsequent applies run via the CI pipeline
 ```
+
+**If you already have local state from a previous `terraform apply` run** (i.e.
+a `terraform.tfstate` file exists in `terraform/`), run `terraform init
+-migrate-state` instead of `terraform init` to copy the existing state into the
+HCP workspace before the first CI-driven apply:
+
+```bash
+terraform init -migrate-state
+# Terraform prompts: "Do you want to copy existing state to the new backend? yes"
+```
+
+After migration the HCP workspace holds the canonical state. Local
+`terraform apply` is reserved for the initial bootstrap (before CI is live)
+and break-glass situations — ongoing applies run automatically via CI on every
+merge to `main` that touches `terraform/**`. See
+[`docs/design/terraform-ci.md`](docs/design/terraform-ci.md) Decision 7 and
+the State backend bootstrap section for the full sequence.
 
 Terraform will:
 - Codify repo settings (squash-merge only, delete branch on merge, etc.).
@@ -211,6 +233,9 @@ gh secret set XAI_API_KEY             --body "<xai api key>"         # optional 
 # Required for the reviewer agent (used by agent-review.yml)
 gh secret set REVIEWER_APP_ID          --body "<reviewer App Client ID>"   # the Iv23.xxx Client ID, not the numeric App ID
 gh secret set REVIEWER_APP_PRIVATE_KEY < ~/.config/agentic-agents/reviewer-agent.pem
+
+# Required for HCP Terraform remote state backend (used by terraform-ci.yml and local terraform init)
+gh secret set TF_API_TOKEN             --body "<hcp-terraform-api-token>"  # generate in HCP UI: User Settings → Tokens
 ```
 
 Workflows use `DEVELOPER_APP_ID` / `DEVELOPER_APP_PRIVATE_KEY` to mint short-lived installation tokens for developer-agent runs, and `REVIEWER_APP_ID` / `REVIEWER_APP_PRIVATE_KEY` for reviewer-agent runs (`agent-review.yml`). All workflows pass `ANTHROPIC_API_KEY` through to the container. **Important:** despite the `_APP_ID` suffix, these secrets must hold the GitHub App **Client ID** (the `Iv23.xxx` string visible in the App's General settings), which is the value forwarded as `client-id` to `actions/create-github-app-token`. The separate numeric "App ID" shown on the same page is not used here.
