@@ -30,3 +30,5 @@ Direct pushes to `main` are blocked for everyone, including admins.
 ## Agent contributions
 
 AI agents (developer, reviewer) follow the same PR workflow above. Their identities, permissions, and interaction conventions are described in [AGENTS.md](AGENTS.md).
+
+Agent-authored pull requests are reviewed by the automated AI reviewer and must also receive a human approval before merge.
