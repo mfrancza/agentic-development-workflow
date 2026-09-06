@@ -9,8 +9,43 @@ settings and the reusable GitHub Actions workflows that drive the agent SDLC.
 
 ---
 
+## Quick-start checklist
+
+Complete these steps in order before wiring up any reusable workflows.
+
+1. **Verify a release exists.** Check that at least one `v*` tag exists on the
+   source repo (`gh api repos/mfrancza/agentic-development-workflow/tags --jq '.[].name'`).
+   The published container images (`developer:v1`, `reviewer:v1`) and the
+   reusable workflow refs (`@v1`) only resolve once a release tag has been
+   pushed and the release-images workflow has published the images to GHCR.
+2. **Create your repository** (public recommended — the security module requires
+   Dependabot, and secret scanning/push protection from the `security_and_analysis`
+   block require a public repo or a GitHub Advanced Security licence).
+3. **Create the GitHub Apps.** Follow the [Manual GitHub App setup](#github-app-identities)
+   steps below.  Note the **Client ID** (e.g. `Iv23.xxx`) for each App — this is
+   distinct from the numeric App ID on the same settings page.
+4. **Find your bot identities.** Each App's bot login is the App's name in
+   lowercase with spaces replaced by hyphens, followed by `[bot]` — e.g. an App
+   named `my-developer-agent` gets the login `my-developer-agent[bot]`. You must
+   add these to `AGENT_ALLOWLIST` so agents can apply `agent:*` labels. The exact
+   slug is shown in the first comment posted by the bot after installation.
+5. **Install each App on your repository** (App settings → Install App).
+6. **Set repository secrets** — see [Secrets](#secrets). You only need to set the
+   LLM API keys for the providers you actually use; the agent container validates
+   at runtime that the key for the selected model is present.
+7. **Run Terraform.** Initialize and apply the modules you need. On a fresh
+   repo, import the three GitHub-default labels first (see [Importing
+   pre-existing labels](#importing-pre-existing-labels)).
+8. **Add caller-stub workflow files** — copy the relevant stubs from
+   [Reusable workflows](#reusable-workflows) below into `.github/workflows/`.
+9. **Apply manual settings** — see [Manual repository settings](#manual-repository-settings)
+   (fork-PR approval policy and interaction limit). Apply these after the repo is public.
+
+---
+
 ## Table of contents
 
+- [Quick-start checklist](#quick-start-checklist)
 - [Choosing which components to adopt](#choosing-which-components-to-adopt)
 - [Common prerequisites](#common-prerequisites)
 - [Version pinning](#version-pinning)
@@ -34,6 +69,7 @@ settings and the reusable GitHub Actions workflows that drive the agent SDLC.
   - [ci](#ci-reusable-workflow)
   - [secret-scan](#secret-scan-reusable-workflow)
 - [Manual repository settings](#manual-repository-settings)
+- [Adoption gotchas and troubleshooting](#adoption-gotchas-and-troubleshooting)
 
 ---
 
@@ -155,11 +191,20 @@ gh secret set DEVELOPER_APP_PRIVATE_KEY < developer-agent.pem
 gh secret set REVIEWER_APP_ID           --body "<reviewer Client ID>"
 gh secret set REVIEWER_APP_PRIVATE_KEY  < reviewer-agent.pem
 
-# LLM provider keys (pass only the ones you use)
-gh secret set ANTHROPIC_API_KEY         --body "<key>"
-gh secret set OPENAI_API_KEY            --body "<key>"   # optional
-gh secret set XAI_API_KEY              --body "<key>"   # optional
+# LLM provider keys — set only the ones you use.
+# The agent container validates at runtime that the key for the selected model
+# is present, so unused providers do not need placeholder values.
+gh secret set ANTHROPIC_API_KEY         --body "<key>"   # required for Anthropic models (Claude)
+gh secret set OPENAI_API_KEY            --body "<key>"   # required for OpenAI models (e.g. o3, gpt-5)
+gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok models
 ```
+
+> **Which keys do I need?** If your `DEFAULT_MODEL` is `sonnet`, `opus`, or `haiku`
+> (or any `claude-*` model), set `ANTHROPIC_API_KEY` only. Set `OPENAI_API_KEY`
+> only if you plan to use OpenAI models via `model:o3` labels, and `XAI_API_KEY`
+> only for Grok models. The reusable workflows use `secrets: inherit`, so any
+> secret not set in your repository is simply absent — the validation happens
+> inside the container, not at workflow-dispatch time.
 
 ### Terraform provider config
 
@@ -253,13 +298,15 @@ module "labels" {
 **Variables and outputs.** See [`terraform/modules/labels/README.md`](../terraform/modules/labels/README.md).
 
 **Importing pre-existing labels.** GitHub creates `bug`, `enhancement`, and
-`question` on new repos. If `terraform apply` fails with 422 "already_exists"
-for any of those, import them first:
+`question` on new repos. The `labels` module manages those labels too, so **on
+a fresh repository always import the three defaults before the first apply** to
+avoid a 422 "already_exists" error:
 
 ```bash
-terraform import 'module.labels.github_issue_label.automation["bug"]'         "<repo-name>:bug"
-terraform import 'module.labels.github_issue_label.automation["enhancement"]' "<repo-name>:enhancement"
-terraform import 'module.labels.github_issue_label.automation["question"]'    "<repo-name>:question"
+REPO="your-repo-name"
+terraform import 'module.labels.github_issue_label.automation["bug"]'         "${REPO}:bug"
+terraform import 'module.labels.github_issue_label.automation["enhancement"]' "${REPO}:enhancement"
+terraform import 'module.labels.github_issue_label.automation["question"]'    "${REPO}:question"
 ```
 
 ---
@@ -1292,3 +1339,149 @@ set a calendar reminder or create a similar automation.
 > environment, and (b) applying them prematurely on a private repo can cause
 > errors or no-ops. Apply them at or after the time you make the repository
 > public.
+
+---
+
+## Adoption gotchas and troubleshooting
+
+Issues discovered during end-to-end adoption testing. Each entry describes
+a symptom, the root cause, and the fix.
+
+### Images and workflow refs not found
+
+**Symptom:** `docker pull` fails with "manifest unknown" or `uses:
+mfrancza/agentic-development-workflow/...@v1` fails with "ref not found".
+
+**Cause:** The `v1` and `v1.x.x` tags on the source repo have not been created
+yet, or the container images have not been published to GHCR for that tag.
+The `release` workflow (triggered manually by the maintainer via
+`workflow_dispatch`) creates the tags; the `release-images` workflow publishes
+the container images automatically when a `v*` tag is pushed.
+
+**Fix:** Check whether a release tag exists:
+```bash
+gh api repos/mfrancza/agentic-development-workflow/tags --jq '.[].name'
+```
+If no tags are listed, a release has not been created yet. Contact the source
+repo maintainer or pin to a commit SHA instead.
+
+---
+
+### Agent:groom / agent:developer workflow skips silently
+
+**Symptom:** You apply the `agent:groom` or `agent:developer` label but no
+workflow run appears (or runs appear as skipped with no error message).
+
+**Cause A — Sender not in allowlist.** The workflow gates on
+`contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)`. If the
+label was applied by a user whose login is not in `AGENT_ALLOWLIST`, the job
+skips silently.
+
+**Fix A:** Add the labeler's GitHub login to `agent_allowlist` in Terraform and
+re-apply.
+
+**Cause B — Bot identity missing from allowlist.** If you enable
+`auto_trigger_agents.groom = true`, the auto-trigger workflow applies the label
+using the developer-agent bot identity (e.g.
+`my-developer-agent[bot]`). If that bot identity is not in `AGENT_ALLOWLIST`,
+the downstream groom workflow silently skips.
+
+**Fix B:** Add the bot identity to `agent_allowlist`. Finding the exact slug:
+look at the first comment posted by the bot after App installation — the login
+shown there (e.g. `my-developer-agent[bot]`) is what to add.
+
+---
+
+### Terraform apply fails with 422 "already_exists" on labels
+
+**Symptom:** `terraform apply` errors with a 422 response for `bug`,
+`enhancement`, or `question` labels.
+
+**Cause:** GitHub pre-creates these three labels on every new repository. The
+Terraform `labels` module tries to create them again and fails.
+
+**Fix:** Import the pre-existing labels before the first apply:
+```bash
+REPO="your-repo-name"
+terraform import 'module.labels.github_issue_label.automation["bug"]'         "${REPO}:bug"
+terraform import 'module.labels.github_issue_label.automation["enhancement"]' "${REPO}:enhancement"
+terraform import 'module.labels.github_issue_label.automation["question"]'    "${REPO}:question"
+```
+Then re-run `terraform apply`.
+
+---
+
+### App Client ID vs. App ID confusion
+
+**Symptom:** `actions/create-github-app-token` fails with "could not parse
+private key" or "client_id is invalid".
+
+**Cause:** The `DEVELOPER_APP_ID` and `REVIEWER_APP_ID` secrets must contain
+the **Client ID** (the `Iv23.xxx` string shown in the App's General settings
+page), not the numeric **App ID** shown just above it. These are two different
+identifiers on the same settings page.
+
+**Fix:** In your GitHub App settings (Settings → Developer settings → GitHub
+Apps → your app → General), copy the value labeled **Client ID** (format:
+`Iv23.XXXXXXXXXXXXXXXX`) into the secret — not the six-to-eight-digit numeric
+App ID.
+
+---
+
+### Secret scanning / push protection Terraform errors on private repos
+
+**Symptom:** `terraform apply` fails with a 422 error when setting
+`secret_scanning.status = "enabled"` or
+`secret_scanning_push_protection.status = "enabled"`.
+
+**Cause:** GitHub rejects these settings for private repositories that do not
+have GitHub Advanced Security (GHAS). Both features are free only on public
+repos.
+
+**Fix:** Either make the repository public before running Terraform, or omit the
+`security_and_analysis` block from your `github_repository` resource until the
+repo is public. The `security` Terraform module (Dependabot alerts) is safe to
+apply on private repos.
+
+---
+
+### GHCR image pull fails in workflow
+
+**Symptom:** `docker pull ghcr.io/mfrancza/agentic-development-workflow/developer:v1`
+fails with a 401 or 403 error in the workflow runner.
+
+**Cause:** The image may not be publicly visible. Container images pushed from
+a public GitHub repository are public by default, but they can be set to private
+via the Packages settings page.
+
+**Fix:** Verify the image is public: navigate to
+`https://github.com/mfrancza/agentic-development-workflow/pkgs/container/agentic-development-workflow%2Fdeveloper`
+and check the visibility setting. If the source repo is public and the image was
+published by the `release-images` workflow, no authentication is needed to pull it.
+
+---
+
+### `agent-respond-review` stub placeholders
+
+**Symptom:** The `agent-respond-review` caller stub in this guide contains
+`<developer-agent-slug>[bot]` and `<reviewer-agent-slug>[bot]` as literal
+placeholder text.
+
+**Cause:** These must be replaced with your actual App slugs before the workflow
+functions. They cannot be read from Actions variables because they gate the
+workflow itself (before any variable lookup).
+
+**Fix:** Replace `<developer-agent-slug>[bot]` and `<reviewer-agent-slug>[bot]`
+with the actual bot logins for your Apps (e.g. `my-developer-agent[bot]` and
+`my-reviewer-agent[bot]`). The bot login appears in the first comment a bot posts
+after installation, or can be confirmed by checking the App's page on GitHub.
+
+---
+
+### `agent-fix-checks` stub placeholder
+
+**Symptom:** The `agent-fix-checks` caller stub contains `<developer-agent-slug>[bot]`
+as a literal placeholder.
+
+**Fix:** Replace with your developer-agent App's bot login, the same value used
+in the `agent-respond-review` stub.
