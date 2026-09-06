@@ -40,7 +40,7 @@ See [`requirements.md`](requirements.md) for the full project specification and 
     │   ├── tsconfig.json             # strict: true
     │   ├── src/                      # One entry file per activity; lib/ for shared helpers
     │   └── test/                     # Vitest unit tests (one file per activity)
-    └── workflows/                    # One workflow per AGENT_ACTION, plus ci.yml and release-images.yml
+    └── workflows/                    # Event-triggered caller stubs (one per AGENT_ACTION trigger), reusable `*-reusable.yml` counterparts for groom/design/implement/review, plus ci.yml and release-images.yml
 ```
 
 ## MVP Workflow
@@ -346,7 +346,7 @@ Download an artifact with:
 gh run download <run-id> --name <artifact-name>
 ```
 
-The bind-mount and upload steps are present in all eight agent-container workflows: `agent-implement.yml`, `agent-groom.yml`, `agent-design.yml`, `agent-fix-checks.yml`, `agent-fix-deployment.yml`, `agent-resolve-conflicts.yml`, `agent-respond-review.yml`, and `agent-review.yml`.
+The bind-mount and upload steps are present in all eight agent-container workflows. For the four refactored workflows (`agent-groom`, `agent-design`, `agent-implement`, `agent-review`), these steps live in the corresponding `*-reusable.yml` file (e.g. `agent-implement-reusable.yml`), not the caller stub. For the remaining four (`agent-fix-checks.yml`, `agent-fix-deployment.yml`, `agent-resolve-conflicts.yml`, `agent-respond-review.yml`), they are inline in the workflow file itself. Artifact upload runs for all eight whenever those workflows execute.
 
 **Redaction:** the entrypoint runs a `sed` pass over every file in `/home/agent/logs/` before the workflow reads the mount, replacing the literal values of `GH_TOKEN`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, and `XAI_API_KEY` with `***REDACTED-GH_TOKEN***`, `***REDACTED-ANTHROPIC_API_KEY***`, `***REDACTED-OPENAI_API_KEY***`, and `***REDACTED-XAI_API_KEY***` respectively.
 The substitution runs inside the container; the token values never appear in a workflow-side shell command, and the redacted directory is what `actions/upload-artifact` stores and retains.
