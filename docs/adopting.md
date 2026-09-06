@@ -14,7 +14,7 @@ settings and the reusable GitHub Actions workflows that drive the agent SDLC.
 Complete these steps in order before wiring up any reusable workflows.
 
 1. **Verify a release exists.** Check that at least one `v*` tag exists on the
-   source repo (`gh tag list --repo mfrancza/agentic-development-workflow`).
+   source repo (`gh api repos/mfrancza/agentic-development-workflow/tags --jq '.[].name'`).
    The published container images (`developer:v1`, `reviewer:v1`) and the
    reusable workflow refs (`@v1`) only resolve once a release tag has been
    pushed and the release-images workflow has published the images to GHCR.
