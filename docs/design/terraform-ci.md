@@ -58,8 +58,13 @@ From the grooming Q&A on issue [#255](https://github.com/mfrancza/agentic-develo
   a strong convention (see AGENTS.md **Repo-specific security
   defaults**, *Least-privilege tokens*) that automation uses
   short-lived tokens minted from GitHub Apps, not PATs. This design
-  extends that convention by adding a dedicated `terraform-agent`
-  App identity — Decision 2.
+  extends that convention by adding a dedicated `terraform-ci`
+  App identity — Decision 2. The App is named `terraform-ci` (not
+  `terraform-agent`) because the `-agent` suffix in this repo is
+  reserved for AI-agent-backed automation (developer-agent,
+  reviewer-agent); the terraform-ci App runs a deterministic
+  Terraform pipeline, not an LLM, so a different name makes the
+  automation type immediately readable.
 - **Which remote state backend.** The issue leaves this open. This
   design proposes HCP Terraform (Terraform Cloud) as a
   state-only backend — Decision 1. S3+DynamoDB was considered and
@@ -105,7 +110,7 @@ the trust surface of HCP is narrow. The workspace is configured with
 lock; every plan and apply runs in the GitHub Actions runner where
 the workflow's short-lived App token and provider environment live.
 
-### Decision 2: CI identity — a new `terraform-agent` GitHub App
+### Decision 2: CI identity — a new `terraform-ci` GitHub App
 
 The current local flow uses `GITHUB_TOKEN=$(gh auth token)` — the
 operator's personal token, with whatever scopes their PAT has. In CI,
@@ -129,7 +134,7 @@ new App identity. Three options were considered:
   developer-agent run from being able to weaken branch protection
   or the actions policy — the exact attack the reviewer-agent /
   developer-agent split was designed to contain.
-- **(c) New `terraform-agent` App with only the scopes Terraform
+- **(c) New `terraform-ci` App with only the scopes Terraform
   needs** *(chosen)*. Scopes: `Administration: R/W` (repo settings,
   branch protection, security_and_analysis, actions permissions);
   `Metadata: R`; `Contents: R` (nothing else in this App needs to
@@ -148,17 +153,18 @@ new App identity. Three options were considered:
   principle exists to prevent a compromised workflow run on
   unreviewed code from weakening branch protection or the actions
   policy. The exception is acceptable here because the
-  terraform-agent App is only used by `terraform-ci.yml`, and that
+  terraform-ci App is only used by `terraform-ci.yml`, and that
   workflow uses the token asymmetrically:
-    - On the **plan job** (`pull_request`, i.e. unreviewed PR-branch
-      code), the token is used **read-only from a GitHub API
-      perspective** — the `integrations/github` provider performs a
-      state refresh (reads current resource attributes to compute
-      the plan), and the plan-comment activity posts a PR comment
-      via `Issues: R/W` (`pulls/{n}/comments` is served by the
-      issues API for PR conversation comments). Neither call
-      exercises the `Administration: R/W` scope, and the workflow
-      does **not** run `terraform apply` on this trigger.
+    - On the **plan job** (fired from `pull_request_target` — see
+      the threat-model discussion below for why not `pull_request`),
+      the token is used **read-only from a GitHub API perspective** —
+      the `integrations/github` provider performs a state refresh
+      (reads current resource attributes to compute the plan), and
+      the plan-comment activity posts a PR comment via `Issues: R/W`
+      (`pulls/{n}/comments` is served by the issues API for PR
+      conversation comments). Neither call exercises the
+      `Administration: R/W` scope, and the workflow does **not** run
+      `terraform apply` on this trigger.
     - On the **apply job** (`push` to `main`), admin writes can
       occur — but this trigger only fires post-merge, and branch
       protection requires one approving human review before any
@@ -172,6 +178,96 @@ new App identity. Three options were considered:
   therefore also go through PR review under branch protection —
   would have admin-level access to the repository.
 
+  **Threat model: token exfiltration via workflow modification on a
+  PR head.** A minted App installation token is a short-lived bearer
+  credential exposed as `GITHUB_TOKEN` inside the runner. Any code
+  the runner executes on the plan job — inline `run:` steps, called
+  actions, TypeScript activities, Terraform providers loaded during
+  `init` — has read access to that token's value in the process
+  environment. GitHub's Actions runtime does not sandbox secrets
+  away from user steps; the runner's log-masking only prevents the
+  literal token string from appearing in logs, not exfiltration via
+  outbound HTTP, base64-mangled logs, or writes to the artifact
+  store. The relevant question is therefore not "can workflow code
+  see the token?" (yes, always) but "whose workflow code runs, and
+  under what review gate?"
+
+  The concrete attack path this design guards against is: a PR head
+  modifies `.github/workflows/terraform-ci.yml`, `.github/scripts/src/terraform-plan-comment.ts`,
+  or an inline `run:` step to send the minted token to an attacker
+  endpoint before the PR is reviewed and merged. Mitigations, from
+  strongest to weakest:
+
+    1. **Plan job trigger = `pull_request_target`, not `pull_request`.**
+       This is the single most important mitigation and the reason
+       Decision 4's table lists `pull_request_target` for the plan
+       job. Under `pull_request_target`, GitHub always resolves the
+       workflow YAML (and any local composite actions the workflow
+       references by path, i.e. `.github/actions/**`) from the
+       **base branch tip**, not from the PR head. A PR that modifies
+       `terraform-ci.yml` or `.github/scripts/**` cannot cause the
+       modified copy to run on the plan job — the modification only
+       takes effect once the PR is merged and the change becomes
+       part of the base branch (which is exactly the human-review
+       gate the AGENTS.md principle wants). This is the same idiom
+       [`agent-review.yml`](../../.github/workflows/agent-review.yml)
+       uses for exactly the same reason (see the header comment on
+       that file). The plan job explicitly checks out the PR head
+       with `ref: ${{ github.event.pull_request.head.sha }}` and
+       `persist-credentials: false` so the base-branch workflow
+       runs `terraform plan` against the PR-head Terraform code
+       without giving that code access to the workflow's own
+       credentials via checkout persistence.
+    2. **Fork-headed PRs are excluded on the plan job.** Under
+       `pull_request_target`, secrets are available to same-repo
+       PRs by default; fork PRs go through the fork-PR approval
+       policy (`all_external_contributors`, see AGENTS.md
+       *Manual repository settings*). The plan job's `if:` guard
+       additionally requires
+       `github.event.pull_request.head.repo.full_name == github.repository`
+       so a fork PR whose Terraform diff would trigger the plan
+       cannot run against the terraform-ci token even if a
+       maintainer approves the workflow — this matches the belt-and-braces
+       pattern already used by `agent-review.yml`. Collaborators
+       who need to plan a fork's Terraform changes must cherry-pick
+       the diff onto a same-repo branch first (also the reviewer's
+       pattern).
+    3. **`patterns_allowed` remains restrictive.** The actions
+       allowlist (`hashicorp/setup-terraform` per Decision 6, plus
+       whatever the pipeline already needs) constrains which
+       external actions the workflow can call. A modified inline
+       `run:` step cannot introduce a new `uses:` for
+       `evil-user/exfil-action` without also expanding
+       `patterns_allowed` in `terraform/main.tf`, which is
+       Terraform code that goes through the same PR review gate.
+    4. **Terraform provider surface is pinned via `.terraform.lock.hcl`.**
+       Terraform providers are the second source of arbitrary code
+       execution the plan job runs against PR-head content. The
+       provider lockfile is version-controlled and any PR that
+       adds a new provider (e.g. `hashicorp/external`, which can
+       shell out) shows up as a lockfile change in the diff and
+       must be justified in review. The initial provider set is
+       narrow (`integrations/github` for the GitHub resources
+       Terraform manages here) — reviewers must flag any PR that
+       adds a provider capable of arbitrary code execution
+       during `plan`.
+    5. **Trusted-collaborator boundary.** Same-repo push access is
+       already required to open a PR that bypasses fork-PR
+       approval. Anyone with push access is trusted at the same
+       level as anyone who could merge to `main` — this is the
+       repo's existing threat model for the developer-agent and
+       reviewer-agent tokens as well.
+
+  Residual risk this design **does not** eliminate: a trusted
+  collaborator with push access could still deliberately exfiltrate
+  the token by opening a PR that combines a Terraform change (to
+  trip the paths filter) with a provider addition to
+  `.terraform.lock.hcl` that runs exfil code during `plan`. Detecting
+  this requires the same PR review that already gates lockfile
+  changes — reviewers must treat provider additions as
+  security-relevant. This is a strict subset of the trust the repo
+  already places in same-repo collaborators.
+
 Chosen: (c). Creating a third App is a one-time manual bootstrap
 step — the same pattern the repo already documents for the developer
 and reviewer Apps (README §1). The bootstrap steps are listed in the
@@ -179,12 +275,22 @@ sub-issue for identity setup and mirrored into README §1.
 
 The `TERRAFORM_APP_ID` / `TERRAFORM_APP_PRIVATE_KEY` secrets are used
 by both the plan and apply jobs — the plan job could in principle
-use a narrower read-only identity, but Terraform state refresh needs
-the same scopes as apply (the provider reads current resource state
-to compute the plan), so splitting the identity does not actually
-narrow the scope surface. A single App identity for both jobs is
-the simpler design; noted as a future refinement if that stops
-being true.
+use a narrower read-only identity (a second App with the write
+scopes downgraded to read), which would further narrow the exfil
+blast radius even if the base-branch trust guarantee above failed.
+This was not chosen because (i) Terraform state refresh on the plan
+job needs `Administration: R` to read current branch-protection
+attributes, and every other scope drops similarly to R-only, so the
+narrower App is not trivially a subset of the full App's non-write
+scopes — it's a second bootstrap surface; and (ii) the
+`pull_request_target` trust guarantee already prevents PR-authored
+code from running on the plan job, so the additional identity is
+belt-and-braces for a threat the trigger choice already blocks. A
+single App identity for both jobs is the simpler design; splitting
+into `terraform-ci-plan` (read-only) and `terraform-ci-apply`
+(admin) is a follow-up refinement if the trust guarantee ever needs
+strengthening (e.g. if a future change forces the plan job back
+onto `pull_request`).
 
 ### Decision 3: apply gating — rely on branch protection, no extra approval gate
 
@@ -261,10 +367,10 @@ carries only the trigger configuration.
 
 Job matrix:
 
-| Job     | Trigger                                                | Steps                                                                                        | Token identity  |
-|---------|--------------------------------------------------------|----------------------------------------------------------------------------------------------|-----------------|
-| `plan`  | `pull_request` with `paths: ['terraform/**', '.github/workflows/terraform-ci.yml']` | checkout → mint app token → setup-terraform → init → fmt -check -recursive → validate → plan → post plan comment | terraform-agent |
-| `apply` | `push` to `main` with same paths filter                | checkout → mint app token → setup-terraform → init → plan → apply -auto-approve              | terraform-agent |
+| Job     | Trigger                                                                                                                                                                                                          | Steps                                                                                                                                                                                            | Token identity |
+|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------|
+| `plan`  | `pull_request_target` (base-branch YAML runs, PR head checked out explicitly) with `paths: ['terraform/**', '.github/workflows/terraform-ci.yml']` and `if: head.repo.full_name == github.repository` — see Decision 2 threat-model discussion | checkout PR head with `ref: github.event.pull_request.head.sha` and `persist-credentials: false` → mint app token → setup-terraform → init → fmt -check -recursive → validate → plan → post plan comment | terraform-ci   |
+| `apply` | `push` to `main` with same paths filter                                                                                                                                                                          | checkout → mint app token → setup-terraform → init → plan → apply -auto-approve                                                                                                                  | terraform-ci   |
 
 ### Decision 5: plan output visibility — TypeScript activity, not a third-party action
 
@@ -277,7 +383,7 @@ reviewers to see what will change. Three options:
   `terraform show -no-color <plan-file>`), truncates to 60 KB
   (GitHub's PR-comment size limit is 65 536 characters — leaving
   headroom for the fenced-code wrapper and a "truncated"
-  footer), finds any existing comment authored by the terraform-agent
+  footer), finds any existing comment authored by the terraform-ci
   App identity and updates it in place (falling back to a new
   comment on the first PR run). Matches the repo's Workflow
   Activity Conventions (AGENTS.md).
@@ -298,7 +404,7 @@ reviewers to see what will change. Three options:
 The comment is deliberately updated-in-place (single evergreen
 comment per PR) rather than appended-per-push, to avoid a wall of
 stale plans obscuring the current one. The activity uses the
-terraform-agent App identity's `github.event.repository.owner.login`
+terraform-ci App identity's `github.event.repository.owner.login`
 + `${TERRAFORM_APP_SLUG}[bot]` login pattern to find its own
 previous comment — the same idiom the reviewer agent uses to find
 its own review.
@@ -395,10 +501,10 @@ delete it (adding a fresh entry to the `.gitignore` block for
 | Issue | Task | Depends on |
 |-------|------|-----------|
 | [#423](https://github.com/mfrancza/agentic-development-workflow/issues/423) | HCP Terraform state backend: create workspace (manual, human-required); add `cloud {}` block to `terraform/main.tf`; document `terraform init -migrate-state` bootstrap; add `TF_API_TOKEN` secret; update README §2. | — |
-| [#424](https://github.com/mfrancza/agentic-development-workflow/issues/424) | `terraform-agent` GitHub App identity: create App (manual, human-required) with `Administration: R/W`, `Metadata: R`, `Contents: R`, `Issues: R/W`, `Actions: R/W`; install on repo; add `TERRAFORM_APP_ID` and `TERRAFORM_APP_PRIVATE_KEY` GHA secrets; update README §1 and §3. | — |
+| [#424](https://github.com/mfrancza/agentic-development-workflow/issues/424) | `terraform-ci` GitHub App identity: create App (manual, human-required) with `Administration: R/W`, `Metadata: R`, `Contents: R`, `Issues: R/W`, `Actions: R/W`; install on repo; add `TERRAFORM_APP_ID` and `TERRAFORM_APP_PRIVATE_KEY` GHA secrets; update README §1 and §3. | — |
 | [#425](https://github.com/mfrancza/agentic-development-workflow/issues/425) | Extend `actions-policy` allowlist: add `hashicorp/setup-terraform` to the `patterns_allowed` argument of `module "actions_policy"` in `terraform/main.tf`. | — |
-| [#426](https://github.com/mfrancza/agentic-development-workflow/issues/426) | Terraform plan-comment activity: new `.github/scripts/src/terraform-plan-comment.ts` (upsert-single-comment logic keyed on the terraform-agent App bot login, 60 KB truncation) + `.github/actions/terraform-plan-comment/action.yml` composite wrapper + Vitest tests. | — |
-| [#427](https://github.com/mfrancza/agentic-development-workflow/issues/427) | `terraform-ci.yml` + `terraform-ci-reusable.yml` workflow: `plan` job on PR (fmt -check → validate → plan → post comment) and `apply` job on push to `main` (init → plan → apply -auto-approve); paths filter on `terraform/**`; concurrency guard `terraform-apply`; `hashicorp/setup-terraform` pinned to a full SHA. Update AGENTS.md and README to describe the pipeline, secrets, and manual bootstrap. | #423, #424, #425, #426 |
+| [#426](https://github.com/mfrancza/agentic-development-workflow/issues/426) | Terraform plan-comment activity: new `.github/scripts/src/terraform-plan-comment.ts` (upsert-single-comment logic keyed on the terraform-ci App bot login, 60 KB truncation) + `.github/actions/terraform-plan-comment/action.yml` composite wrapper + Vitest tests. | — |
+| [#427](https://github.com/mfrancza/agentic-development-workflow/issues/427) | `terraform-ci.yml` + `terraform-ci-reusable.yml` workflow: `plan` job on `pull_request_target` (base-branch YAML runs, PR head checked out with `ref: github.event.pull_request.head.sha` and `persist-credentials: false`, `if:` guard requires `head.repo.full_name == github.repository` — see Decision 2 threat-model discussion) running fmt -check → validate → plan → post comment; `apply` job on `push` to `main` (init → plan → apply -auto-approve); paths filter on `terraform/**` + `.github/workflows/terraform-ci.yml`; concurrency guard `terraform-apply`; `hashicorp/setup-terraform` pinned to a full SHA. Update AGENTS.md and README to describe the pipeline, secrets, manual bootstrap, and the trigger/trust rationale. | #423, #424, #425, #426 |
 | [#428](https://github.com/mfrancza/agentic-development-workflow/issues/428) | End-to-end validation: open a small terraform-only PR (e.g. tweak a label description), verify fmt / validate / plan run and the plan comment appears; merge; verify apply runs and updates the label; confirm the plan on the following PR matches the expected drift-free state. | #423, #424, #425, #426, #427 |
 
 All four foundation tasks (state backend, App identity, actions-policy, plan-comment activity) are independent and can proceed in parallel — the workflow sub-issue is the join point that consumes all of them. The e2e validation sub-issue depends on the workflow being live end-to-end.
