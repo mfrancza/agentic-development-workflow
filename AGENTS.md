@@ -87,22 +87,11 @@ The [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composit
 
 The developer container is a single image dispatched by `AGENT_ACTION`. Required environment variables:
 
-<!-- generated:agent-actions:start — do not edit; run scripts/generate-docs.sh to regenerate -->
-| Action            | Required vars (in addition to the provider API key, `GH_TOKEN`, `GITHUB_REPO`) |
-|-------------------|--------------------------------------------------------------------------------|
-| `implement`       | `GITHUB_ISSUE_NUMBER`                                                          |
-| `groom`           | `GITHUB_ISSUE_NUMBER`                                                          |
-| `design`          | `GITHUB_ISSUE_NUMBER`                                                          |
-| `fix-checks`        | `GITHUB_PR_NUMBER`                                                           |
-| `resolve-conflicts` | `GITHUB_PR_NUMBER`                                                           |
-| `respond-review`    | `GITHUB_PR_NUMBER`                                                           |
-| `fix-deployment`    | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                       |
-<!-- generated:agent-actions:end -->
+AGENT_ACTION values and their required environment variables are defined in the `case "$AGENT_ACTION"` dispatcher and `action_*()` preambles in `docker/scripts/entrypoint.sh`. Read that file before adding, removing, or reasoning about an action's required env vars — do not rely on any action/env-var list reproduced elsewhere.
 
 ### Workflow Triggers
 
-<!-- generated:workflow-triggers:start — do not edit; run scripts/generate-docs.sh to regenerate -->
-<!-- generated:workflow-triggers:end -->
+Workflow triggers and gating conditions are defined in the `on:` blocks and job `if:` conditions in `.github/workflows/agent-*.yml`. Read those files before adding, removing, or reasoning about workflow trigger behavior — do not rely on any trigger list reproduced elsewhere.
 
 Provider/key mapping: `ANTHROPIC_API_KEY` for Anthropic models — the tier aliases `model:sonnet`/`model:opus`/`model:haiku` (unqualified — resolve to the latest snapshot of each series, kept as-is for backwards compatibility), any generic series tag beginning with `claude-` (e.g. `model:claude-sonnet-4-5`, `model:claude-3-5-haiku-latest`), and any pinned snapshot ID (e.g. `model:claude-sonnet-4-5-20250929`); `OPENAI_API_KEY` for OpenAI models (e.g. `model:o3`); `XAI_API_KEY` for xAI Grok models run via the Grok Build CLI (`model:grok-4.20-0309-non-reasoning`, `model:grok-4.20-0309-reasoning`, `model:grok-4.20-multi-agent-0309`, `model:grok-4.3`, `model:grok-4.5`, `model:grok-4.6`, `model:grok-build-0.1`) — Grok models are executed by the Grok Build CLI (`grok --prompt-file /dev/stdin`), not by Codex; the CLI reads `XAI_API_KEY` directly from the process environment with no login sub-command required. The entrypoint infers the provider from the resolved model name — any name starting with `claude-`, plus the three tier aliases, routes to Anthropic — and validates that the corresponding key is set.
 
@@ -112,8 +101,7 @@ The **reviewer image** at [`docker/reviewer/`](docker/reviewer/) does not use `A
 
 ## Labels
 
-<!-- generated:labels:start — do not edit; run scripts/generate-docs.sh to regenerate -->
-<!-- generated:labels:end -->
+Labels are defined in `terraform/modules/labels/main.tf` (`automation_labels` local). Read that file before adding, removing, or reasoning about label behavior — do not rely on any label list reproduced elsewhere.
 
 - `agent:groom` — triggers the grooming agent on the issue. On success, the label is automatically removed from the issue so the grooming run is not repeated; to re-groom an issue, re-apply the label. If the run fails the label is intentionally left in place so the issue can be re-triggered without manual re-labeling.
 - `agent:design` — triggers the designer agent (`AGENT_ACTION=design`) to write a design document on a `design/issue-{N}` branch, open a PR, and create sub-issues labeled `draft` with dependency tracking. Intended for issues the groomer classifies as `plan`. When a `design/issue-{N}` PR merges, `agent-design.yml` automatically removes the `draft` label from all sub-issues of the parent issue (unblocking the developer agent for each one) and removes the `agent:design` label from the parent issue to signal that design is complete. If the design PR is closed without merging, the label stays on the parent issue, signaling the design is incomplete.
@@ -372,7 +360,7 @@ At minimum, before opening a PR, check whether your change alters any of the fol
 
 If you touch `agents/grooming/label-criteria.json`, also refresh the label list in the **Labels** section above.
 
-- **Generated sections**: `AGENTS.md` and `README.md` contain regions bounded by `<!-- generated:<section>:start -->` / `<!-- generated:<section>:end -->` markers. Do not hand-edit inside these markers. Run `scripts/generate-docs.sh` from the repo root and commit the result whenever a change touches a source file for a generated section (labels in `terraform/modules/labels/main.tf`, AGENT_ACTION vars in `docker/scripts/entrypoint.sh` or workflow YAML, or workflow trigger conditions). The CI drift check will fail if you skip this step.
+- Volatile facts (label definitions, action env vars, workflow triggers) live at their canonical source files; this doc points to them rather than copying them.
 
 When in doubt, err on the side of updating the docs — a stale AGENTS.md is worse than a slightly-too-detailed one.
 

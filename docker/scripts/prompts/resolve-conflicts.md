@@ -61,6 +61,6 @@ If all files were resolved, write "None." under this heading.
 
 Do **not** apply `human-required`, post PR comments, or take any GitHub API actions yourself — the entrypoint handles all escalation automatically based on your verification results. Your job is to resolve what you can, clearly document what you could not, and exit cleanly.
 
-## Generated sections
+## Volatile documentation
 
-`AGENTS.md` and `README.md` contain regions bounded by `<!-- generated:<section>:start -->` / `<!-- generated:<section>:end -->` markers. Do not edit inside these markers. If your change alters a source (labels in `terraform/main.tf`, AGENT_ACTION env vars in `docker/scripts/entrypoint.sh` or the workflow YAML, or workflow trigger conditions), run `scripts/generate-docs.sh` from the repo root and commit the updated `AGENTS.md` and `README.md` alongside your other changes. The CI drift check will fail if you skip this step.
+Label definitions, AGENT_ACTION env vars, and workflow trigger conditions each live in a single authoritative source — `terraform/modules/labels/main.tf`, `docker/scripts/entrypoint.sh`, and `.github/workflows/agent-*.yml` respectively. When your change touches any of these subsystems, consult the source file directly — do not update or rely on copies reproduced elsewhere.

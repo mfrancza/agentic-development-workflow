@@ -1,5 +1,7 @@
 # Design: Generate Volatile AGENTS.md/README Sections from Their Sources of Truth
 
+**Amended (Issue [#431](https://github.com/mfrancza/agentic-development-workflow/issues/431)):** The generator-script approach described in this document was rescoped before the script shipped. The volatile AGENTS.md sections (labels, AGENT_ACTION env vars, workflow triggers) now use imperative source pointers rather than generated content; the `scripts/generate-docs.sh` script, the CI drift check (Issue [#345](https://github.com/mfrancza/agentic-development-workflow/issues/345)), and the end-to-end validation task (Issue [#347](https://github.com/mfrancza/agentic-development-workflow/issues/347)) are dropped as unnecessary. See the [rescope decision comment on Issue #343](https://github.com/mfrancza/agentic-development-workflow/issues/343#issuecomment-5560708916) for the full rationale.
+
 **Issue:** [#90](https://github.com/mfrancza/agentic-development-workflow/issues/90)
 
 ## Summary
