@@ -143,6 +143,35 @@ new App identity. Three options were considered:
   composite action and exports it as `GITHUB_TOKEN` for the
   `integrations/github` provider.
 
+  **This is a conscious, narrow exception to the AGENTS.md principle
+  "No identity holds `administration:write` in Actions."** The
+  principle exists to prevent a compromised workflow run on
+  unreviewed code from weakening branch protection or the actions
+  policy. The exception is acceptable here because the
+  terraform-agent App is only used by `terraform-ci.yml`, and that
+  workflow uses the token asymmetrically:
+    - On the **plan job** (`pull_request`, i.e. unreviewed PR-branch
+      code), the token is used **read-only from a GitHub API
+      perspective** — the `integrations/github` provider performs a
+      state refresh (reads current resource attributes to compute
+      the plan), and the plan-comment activity posts a PR comment
+      via `Issues: R/W` (`pulls/{n}/comments` is served by the
+      issues API for PR conversation comments). Neither call
+      exercises the `Administration: R/W` scope, and the workflow
+      does **not** run `terraform apply` on this trigger.
+    - On the **apply job** (`push` to `main`), admin writes can
+      occur — but this trigger only fires post-merge, and branch
+      protection requires one approving human review before any
+      merge (Decision 3). So every admin-scope write in this
+      pipeline corresponds to a human-approved plan.
+
+  The safeguard is that admin writes only occur after a
+  human-approved merge to `main`; the trade-off (accepted by this
+  design) is that any bug or compromise in the apply-job path of
+  `terraform-ci.yml` itself — which is workflow code and must
+  therefore also go through PR review under branch protection —
+  would have admin-level access to the repository.
+
 Chosen: (c). Creating a third App is a one-time manual bootstrap
 step — the same pattern the repo already documents for the developer
 and reviewer Apps (README §1). The bootstrap steps are listed in the
@@ -187,6 +216,24 @@ touch Terraform does not trigger an apply. This keeps state-refresh
 noise low and avoids applying a plan that is stale relative to some
 manual change (drift is detected by the next PR's plan step or by
 a manual `workflow_dispatch`).
+
+**Known limitation — stale-plan window.** The apply job runs its
+own fresh `init → plan → apply -auto-approve` sequence rather than
+persisting the plan artifact from the PR run and re-using it after
+merge. This means the plan the apply job executes may differ from
+the plan the PR reviewer saw if state drift occurred between the
+PR's plan step and the post-merge apply (e.g. an out-of-band change
+via a local `terraform apply`, or a rapid second merge that landed
+first and shifted state). This is a standard Terraform CI trade-off:
+the alternative — saving the PR's plan file as an artifact and
+consuming it in the apply job — requires cross-workflow artifact
+plumbing, tighter concurrency guarantees on the plan file's
+freshness, and handling of the "plan artifact expired" edge case,
+which is disproportionate for a single-environment repo whose only
+expected drift source is the migration-period local apply. Apply
+job logs must be inspected on any run whose diff looks unfamiliar
+relative to the merged PR; the e2e validation sub-issue ([#428](https://github.com/mfrancza/agentic-development-workflow/issues/428))
+covers checking this on the initial rollout.
 
 ### Decision 4: workflow shape — one `terraform-ci.yml` file with two jobs
 
@@ -255,6 +302,13 @@ terraform-agent App identity's `github.event.repository.owner.login`
 + `${TERRAFORM_APP_SLUG}[bot]` login pattern to find its own
 previous comment — the same idiom the reviewer agent uses to find
 its own review.
+
+The concrete source of `TERRAFORM_APP_SLUG` at workflow runtime
+(hardcoded workflow env var vs. Actions variable vs. derived from
+the minted installation token's `GET /app` response) is left to
+the plan-comment activity implementation sub-issue ([#426](https://github.com/mfrancza/agentic-development-workflow/issues/426))
+to resolve. The reviewer-agent's existing "find my own comment"
+idiom is the reference implementation the sub-issue should follow.
 
 ### Decision 6: pin `hashicorp/setup-terraform` and add it to `patterns_allowed`
 
