@@ -76,6 +76,9 @@ module "labels" {
 module "actions_policy" {
   source     = "./modules/actions-policy"
   repository = github_repository.this.name
+  patterns_allowed = [
+    "hashicorp/setup-terraform",
+  ]
 }
 
 # ── State migration ───────────────────────────────────────────────────────────
