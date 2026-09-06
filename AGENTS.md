@@ -255,7 +255,7 @@ A `run:` block moves to a TypeScript activity when it contains **any** of: API-r
 **Permanent security exceptions** — the following `run:` blocks deliberately perform no workspace code execution and must **never** be migrated to `.github/scripts/`:
 
 - `undraft-sub-issues` job in `agent-design.yml` — runs on `pull_request.closed`; executing workspace code here would allow a merged PR to route script changes past `DEVELOPER_APP_PRIVATE_KEY`.
-- All steps in `agent-pr-merged.yml` — also runs on `pull_request: closed` and performs no checkout at all; migrating its logic would require introducing a checkout and reopening the same path.
+- All jobs in `agent-pr-merged.yml` and `agent-pr-merged-reusable.yml` — triggered on `pull_request: closed`; neither file performs a workspace checkout. The reusable uses `actions/create-github-app-token` at a pinned SHA instead of the local `./.github/actions/agent-token` composite action (which would require a checkout). Migrating any of this logic to `.github/scripts/` or introducing a checkout would reopen the secret-exfiltration path.
 
 ### CI
 
