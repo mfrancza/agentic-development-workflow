@@ -39,6 +39,7 @@ _die() { echo "ERROR: $*" >&2; exit 1; }
 [ -f "$ENTRYPOINT"    ] || _die "required file not found: $ENTRYPOINT"
 [ -d "$WORKFLOWS_DIR" ] || _die "workflows directory not found: $WORKFLOWS_DIR"
 command -v python3 >/dev/null 2>&1 || _die "python3 is required but not found in PATH"
+[[ "${BASH_VERSINFO[0]}" -ge 4 ]] || _die "bash 4+ required (found ${BASH_VERSION})"
 
 # -----------------------------------------------------------------------------
 # Helper: replace a generated section in AGENTS.md in-place
@@ -65,6 +66,7 @@ replace_section() {
     local cf tf
     cf=$(mktemp)
     tf=$(mktemp)
+    trap 'rm -f "${cf:-}" "${tf:-}"' EXIT
     printf '%s' "$content" > "$cf"
 
     awk \
@@ -106,7 +108,6 @@ replace_section() {
     ' "$file" > "$tf"
 
     mv "$tf" "$file"
-    rm -f "$cf"
 }
 
 # =============================================================================
@@ -433,7 +434,7 @@ files = sorted(
 rows = []
 for fp in files:
     name = os.path.basename(fp)
-    with open(fp) as fh:
+    with open(fp, encoding='utf-8') as fh:
         content = fh.read()
     lines = content.splitlines()
 
