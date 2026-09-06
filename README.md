@@ -304,6 +304,12 @@ gh workflow run release-images.yml \
 - Claude model override via `model:<name>` labels on issues (developer/grooming/fix-deployment runs) and PRs (reviewer agent runs).
 - Local run guides for the developer agent ([Build the developer agent container](#4-build-the-developer-agent-container)) and the reviewer agent ([Build and run the reviewer agent container](#5-build-and-run-the-reviewer-agent-container)).
 
+## Releasing
+
+Releases follow semantic versioning: bump the **patch** version (`v1.2.3 → v1.2.4`) for bug fixes, documentation corrections, and internal refactors that do not change any consumer-facing contract; bump the **minor** version (`v1.2.3 → v1.3.0`) for backwards-compatible additions (new reusable workflow inputs with defaults, new optional Terraform variables, new composite action inputs that are not required); bump the **major** version (`v1.2.3 → v2.0.0`) for any breaking change to a reusable workflow's `inputs:` / `secrets:` surface, a Terraform module's required variables, or a composite action's inputs. The rationale for this contract is in [Decision 6 of the design doc](docs/design/publish-reusable-workflows-and-modules.md#decision-6--versioning-semver-tags-with-a-moving-major-tag).
+
+To cut a release, dispatch the [`release` workflow](.github/workflows/release.yml) from the Actions UI (or via `gh workflow run release.yml -f version=v1.2.3`). The workflow validates the version format, creates an annotated git tag and a moving major tag (e.g. `v1`), pushes both, and publishes a GitHub Release with auto-generated notes. The [`release-images` workflow](.github/workflows/release-images.yml) then fires automatically on the tag push to build and publish the updated container images to GHCR.
+
 ## Debugging
 
 Agent container logs and Claude session transcripts are captured as GitHub Actions workflow artifacts after each run. **Agent log artifacts are retained for 30 days.** Download artifacts before they expire using:
