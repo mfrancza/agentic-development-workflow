@@ -240,17 +240,44 @@ new App identity. Three options were considered:
        `evil-user/exfil-action` without also expanding
        `patterns_allowed` in `terraform/main.tf`, which is
        Terraform code that goes through the same PR review gate.
-    4. **Terraform provider surface is pinned via `.terraform.lock.hcl`.**
+    4. **Base-branch-enforced Terraform provider allowlist gate.**
        Terraform providers are the second source of arbitrary code
-       execution the plan job runs against PR-head content. The
-       provider lockfile is version-controlled and any PR that
-       adds a new provider (e.g. `hashicorp/external`, which can
-       shell out) shows up as a lockfile change in the diff and
-       must be justified in review. The initial provider set is
-       narrow (`integrations/github` for the GitHub resources
-       Terraform manages here) — reviewers must flag any PR that
-       adds a provider capable of arbitrary code execution
-       during `plan`.
+       execution the plan job runs against PR-head content
+       (`hashicorp/external`, or a fresh provider whose plugin
+       shells out during `plan`, are the obvious escape hatches).
+       Before `terraform init` runs, the plan job executes a
+       "provider-allowlist" step that parses the PR head's
+       `.terraform.lock.hcl` and every `required_providers` block
+       under `terraform/**` and fails the job unless every provider
+       source appears on a hardcoded allowlist. The allowlist is
+       initially just `registry.terraform.io/integrations/github`
+       and lives in the plan job's YAML (or in a small script the
+       plan job calls); because the plan job's workflow file and
+       any local composite actions it references are resolved from
+       the base branch under `pull_request_target`, the PR under
+       inspection cannot modify the gate that inspects it. Adding
+       a provider therefore requires a **base-branch** change to
+       the allowlist — workflow code that goes through the same PR
+       review gate as `patterns_allowed` in mitigation #3. This
+       converts "reviewers must flag provider additions as
+       security-relevant" from a standing vigilance obligation
+       into a red X on the PR check, matching this repo's
+       fail-loud-machine-gate posture elsewhere with review as the
+       second layer.
+
+       *Optional hardening (deferred, considered):* the runner
+       could be pre-seeded with only allowlisted provider binaries
+       and `terraform init -plugin-dir=<dir>` used to disable
+       registry downloads entirely, making the constraint
+       structural (Terraform simply cannot load a provider that
+       isn't on disk) rather than grep-based. Not chosen for the
+       initial implementation because the grep-based allowlist
+       gate above is sufficient given the `pull_request_target`
+       base-branch trust guarantee and involves no provider-binary
+       caching or mirror infrastructure; the switch to
+       `-plugin-dir` is a follow-up if the trust calculus changes
+       or if the allowlist grows large enough that a manifest
+       becomes easier to maintain than a grep list.
     5. **Trusted-collaborator boundary.** Same-repo push access is
        already required to open a PR that bypasses fork-PR
        approval. Anyone with push access is trusted at the same
@@ -258,15 +285,20 @@ new App identity. Three options were considered:
        repo's existing threat model for the developer-agent and
        reviewer-agent tokens as well.
 
-  Residual risk this design **does not** eliminate: a trusted
-  collaborator with push access could still deliberately exfiltrate
-  the token by opening a PR that combines a Terraform change (to
-  trip the paths filter) with a provider addition to
-  `.terraform.lock.hcl` that runs exfil code during `plan`. Detecting
-  this requires the same PR review that already gates lockfile
-  changes — reviewers must treat provider additions as
-  security-relevant. This is a strict subset of the trust the repo
-  already places in same-repo collaborators.
+  Residual risk this design **does not** eliminate: with the
+  base-branch provider allowlist gate above, exfiltrating the
+  token via a provider addition to `.terraform.lock.hcl` now
+  requires a **base-branch** change to expand the allowlist
+  (i.e. a reviewed workflow or gate-script change), not just a
+  reviewed lockfile change on the PR head — so the residual
+  shrinks to "a trusted collaborator with push access lands a
+  reviewed change to the plan job's workflow YAML, the
+  allowlist, or the gate script itself that opens the exfil
+  surface (e.g. widens the allowlist to a code-executing
+  provider, or removes/weakens the gate step)." Detecting that
+  is the same PR review that gates every workflow-touching
+  change under branch protection, and is a strict subset of the
+  trust the repo already places in same-repo collaborators.
 
 Chosen: (c). Creating a third App is a one-time manual bootstrap
 step — the same pattern the repo already documents for the developer
@@ -291,6 +323,25 @@ into `terraform-ci-plan` (read-only) and `terraform-ci-apply`
 (admin) is a follow-up refinement if the trust guarantee ever needs
 strengthening (e.g. if a future change forces the plan job back
 onto `pull_request`).
+
+**Documented fallback of last resort — credential-less PR plans.**
+Recorded here alongside the split-App follow-up so it is available
+if the trust calculus changes (e.g. a forced move back to
+`pull_request`, or a class of Terraform provider vulnerability that
+the allowlist gate cannot distinguish): the plan job could mint no
+App installation token at all and run `terraform plan -refresh=false`
+against the HCP state backend using only the `TF_API_TOKEN`.
+Because the GitHub provider would be given no credential and the
+plan would skip the state-refresh call, the plan output is
+drift-blind (any out-of-band change to a managed resource since
+the last state refresh is invisible) but there is no App token
+in the runner's process environment for a hostile provider or
+`run:` step to exfiltrate. This is contingent on the Terraform
+configuration having no plan-time data sources that call GitHub
+(currently true — the config uses only `resource` blocks, no
+`data "github_..."` blocks). Not adopted in v1 because the value
+the plan comment provides to reviewers depends on the refresh
+being live; documented as the escape hatch of last resort.
 
 ### Decision 3: apply gating — rely on branch protection, no extra approval gate
 
@@ -504,7 +555,7 @@ delete it (adding a fresh entry to the `.gitignore` block for
 | [#424](https://github.com/mfrancza/agentic-development-workflow/issues/424) | `terraform-ci` GitHub App identity: create App (manual, human-required) with `Administration: R/W`, `Metadata: R`, `Contents: R`, `Issues: R/W`, `Actions: R/W`; install on repo; add `TERRAFORM_APP_ID` and `TERRAFORM_APP_PRIVATE_KEY` GHA secrets; update README §1 and §3. | — |
 | [#425](https://github.com/mfrancza/agentic-development-workflow/issues/425) | Extend `actions-policy` allowlist: add `hashicorp/setup-terraform` to the `patterns_allowed` argument of `module "actions_policy"` in `terraform/main.tf`. | — |
 | [#426](https://github.com/mfrancza/agentic-development-workflow/issues/426) | Terraform plan-comment activity: new `.github/scripts/src/terraform-plan-comment.ts` (upsert-single-comment logic keyed on the terraform-ci App bot login, 60 KB truncation) + `.github/actions/terraform-plan-comment/action.yml` composite wrapper + Vitest tests. | — |
-| [#427](https://github.com/mfrancza/agentic-development-workflow/issues/427) | `terraform-ci.yml` + `terraform-ci-reusable.yml` workflow: `plan` job on `pull_request_target` (base-branch YAML runs, PR head checked out with `ref: github.event.pull_request.head.sha` and `persist-credentials: false`, `if:` guard requires `head.repo.full_name == github.repository` — see Decision 2 threat-model discussion) running fmt -check → validate → plan → post comment; `apply` job on `push` to `main` (init → plan → apply -auto-approve); paths filter on `terraform/**` + `.github/workflows/terraform-ci.yml`; concurrency guard `terraform-apply`; `hashicorp/setup-terraform` pinned to a full SHA. Update AGENTS.md and README to describe the pipeline, secrets, manual bootstrap, and the trigger/trust rationale. | #423, #424, #425, #426 |
+| [#427](https://github.com/mfrancza/agentic-development-workflow/issues/427) | `terraform-ci.yml` + `terraform-ci-reusable.yml` workflow: `plan` job on `pull_request_target` (base-branch YAML runs, PR head checked out with `ref: github.event.pull_request.head.sha` and `persist-credentials: false`, `if:` guard requires `head.repo.full_name == github.repository` — see Decision 2 threat-model discussion) running **base-branch-enforced Terraform provider allowlist gate** (before `terraform init`; parses the PR head's `.terraform.lock.hcl` and every `required_providers` block under `terraform/**`, fails the job unless every provider source is on a hardcoded allowlist — initially just `registry.terraform.io/integrations/github` — with the allowlist living in the base-branch workflow YAML or a base-branch gate script so a PR cannot modify the gate that inspects it) → fmt -check → validate → plan → post comment; `apply` job on `push` to `main` (init → plan → apply -auto-approve); paths filter on `terraform/**` + `.github/workflows/terraform-ci.yml`; concurrency guard `terraform-apply`; `hashicorp/setup-terraform` pinned to a full SHA. Update AGENTS.md and README to describe the pipeline, secrets, manual bootstrap, and the trigger/trust rationale. | #423, #424, #425, #426 |
 | [#428](https://github.com/mfrancza/agentic-development-workflow/issues/428) | End-to-end validation: open a small terraform-only PR (e.g. tweak a label description), verify fmt / validate / plan run and the plan comment appears; merge; verify apply runs and updates the label; confirm the plan on the following PR matches the expected drift-free state. | #423, #424, #425, #426, #427 |
 
 All four foundation tasks (state backend, App identity, actions-policy, plan-comment activity) are independent and can proceed in parallel — the workflow sub-issue is the join point that consumes all of them. The e2e validation sub-issue depends on the workflow being live end-to-end.
