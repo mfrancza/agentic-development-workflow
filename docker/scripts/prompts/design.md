@@ -110,6 +110,12 @@ gh issue edit "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "human-re
 gh pr edit    "<pr-number>"          --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "<github-username>"
 ```
 
-## Generated sections
+## Volatile facts live at their sources
 
-`AGENTS.md` and `README.md` contain regions bounded by `<!-- generated:<section>:start -->` / `<!-- generated:<section>:end -->` markers. Do not edit inside these markers. If your change alters a source (labels in `terraform/main.tf`, AGENT_ACTION env vars in `docker/scripts/entrypoint.sh` or the workflow YAML, or workflow trigger conditions), run `scripts/generate-docs.sh` from the repo root and commit the updated `AGENTS.md` and `README.md` alongside your other changes. The CI drift check will fail if you skip this step.
+`AGENTS.md` points to authoritative source files rather than copying their content. Before adding, removing, or reasoning about labels, `AGENT_ACTION` values, or workflow triggers, read the source directly:
+
+- **Labels** → [`terraform/modules/labels/main.tf`](terraform/modules/labels/main.tf) (`automation_labels` local)
+- **`AGENT_ACTION` values and required env vars** → [`docker/scripts/entrypoint.sh`](docker/scripts/entrypoint.sh) (the `case "$AGENT_ACTION"` dispatcher and `action_*()` preambles)
+- **Workflow triggers and gates** → `.github/workflows/agent-*.yml` (`on:` blocks and job `if:` conditions)
+
+Do not update any copy of this information in `AGENTS.md` or `README.md` — update the source file.
