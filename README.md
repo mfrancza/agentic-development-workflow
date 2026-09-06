@@ -109,6 +109,21 @@ Notes on the diagram:
 - **System checks** (yellow) are automated (GitHub Actions workflow checks, deployment status events) and drive the feedback loops back into the agent. The CI failure feedback loop (`fix-checks`) triggers when the `CI` workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) fails — it runs type-checking and unit tests on every PR.
 - `fix-deployment` re-enters the flow at the CI/checks stage because it opens a new PR that goes through the same CI → review → merge lifecycle as any other change (including the `fix-checks` feedback loop if checks fail).
 
+## Reuse in another repo
+
+The Terraform modules and GitHub Actions reusable workflows in this repo are
+published as versioned artifacts — any repository can adopt them one component
+at a time, from a single label set to the full agent pipeline.
+
+See **[docs/adopting.md](docs/adopting.md)** for the complete consumer
+adoption guide, including:
+
+- Adoption profiles (labels-only, grooming only, review only, full pipeline)
+- Common prerequisites (GitHub Apps, secrets, Terraform provider config)
+- Version pinning strategy (`@v1` vs. `@v1.2.3` vs. `@<sha>`)
+- Per-module and per-workflow sections with copy-paste wiring snippets
+- Manual repository settings (fork-PR approval policy, interaction limit)
+
 ## Reproduce this yourself
 
 The steps below describe how to wire up the same workflow in your own GitHub repository. Most repo-side configuration (Terraform settings, GitHub Actions workflows, and agent images) is in this repo — fork it and follow the steps; a few one-time manual steps outside version control (creating GitHub Apps, adding secrets) are also required and are covered in the steps below.
