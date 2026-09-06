@@ -1,0 +1,318 @@
+name: agent-design (reusable)
+
+# Reusable workflow — call this from agent-design.yml (or any external caller)
+# to run either the designer agent or the undraft-sub-issues cleanup, depending
+# on which boolean flag is set.
+#
+# The original agent-design.yml has two distinct event paths in one workflow;
+# this reusable exposes both as independently-callable jobs controlled by the
+# run-design and run-undraft inputs.  The caller stub sets exactly one of those
+# to true per invocation.
+#
+# Security: allowlist gating is the caller's responsibility; this reusable
+# performs no sender check.  The preflight checks in the design job
+# (skip-if-PR-exists, block-on-open-blockers) are operational checks, not
+# security gates, so they live in the reusable.
+#
+# The undraft-sub-issues job deliberately has NO checkout step (see inline
+# comment) — this is a preserved security decision (Decision 8 in
+# docs/design/refactor-github-actions.md); the reusable-workflow shape does
+# not change the run: body or checkout posture.
+#
+# External consumers: pass `image` to use a published developer image and
+# skip the Docker build, e.g.:
+#   image: ghcr.io/mfrancza/agentic-development-workflow/developer:v1
+# Leave image empty (the default) to build from the local source tree —
+# this repo's own caller stub relies on the default.
+
+on:
+  workflow_call:
+    inputs:
+      run-design:
+        description: >
+          Set to true to run the designer-agent job (issues.labeled event
+          path).  Requires issue-number to be set.
+        required: false
+        type: boolean
+        default: false
+      run-undraft:
+        description: >
+          Set to true to run the undraft-sub-issues job (pull_request.closed
+          event path).  Requires pr-head-ref to be set.
+        required: false
+        type: boolean
+        default: false
+      issue-number:
+        description: 'Issue number to design (required when run-design is true)'
+        required: false
+        type: string
+        default: ''
+      pr-head-ref:
+        description: >
+          PR head branch ref (required when run-undraft is true, e.g.
+          design/issue-72).  Used to extract the parent issue number.
+        required: false
+        type: string
+        default: ''
+      repo:
+        description: 'GitHub repository (owner/name), e.g. octocat/my-repo'
+        required: true
+        type: string
+      image:
+        description: >
+          Pre-built developer image reference to pull and run (e.g.
+          ghcr.io/mfrancza/agentic-development-workflow/developer:v1).
+          Leave empty (the default) to build the developer image from the
+          local source tree — this repo uses this mode.
+          Only used by the design job; undraft-sub-issues does not run a
+          container.
+        required: false
+        type: string
+        default: ''
+      default-model:
+        description: >
+          Default Claude model when no model label is present on the issue
+          (design job only).
+        required: false
+        type: string
+        default: ''
+      logs-retention-days:
+        description: 'Days to retain uploaded log artifacts (design job only)'
+        required: false
+        type: number
+        default: 30
+    secrets:
+      DEVELOPER_APP_ID:
+        required: true
+      DEVELOPER_APP_PRIVATE_KEY:
+        required: true
+      # LLM API keys are only consumed by the design job (run-design: true).
+      # They are declared required: false so that callers invoking only the
+      # undraft-sub-issues job (run-undraft: true) do not need to supply them.
+      # The design job itself will fail clearly at the container run step if
+      # these are absent when run-design is true.
+      ANTHROPIC_API_KEY:
+        required: false
+      OPENAI_API_KEY:
+        required: false
+      XAI_API_KEY:
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  design:
+    if: inputs.run-design
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      # Checkout must precede the local agent-token action: the runner resolves
+      # ./.github/actions/* references from the workspace.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: "Preflight: skip if design PR already exists"
+        id: preflight
+        uses: ./.github/actions/find-existing-pr
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ inputs.repo }}
+          branch: design/issue-${{ inputs.issue-number }}
+          owner: ${{ github.repository_owner }}
+
+      - name: "Preflight: check for open blockers"
+        id: blockers-check
+        if: steps.preflight.outputs.skip != 'true'
+        uses: ./.github/actions/check-blockers
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ inputs.repo }}
+          issue-number: ${{ inputs.issue-number }}
+
+      - name: "Preflight: fail if blockers are open"
+        if: steps.preflight.outputs.skip != 'true' && steps.blockers-check.outputs.blocked == 'true'
+        env:
+          OPEN_BLOCKERS: ${{ steps.blockers-check.outputs.open-blockers }}
+        run: |
+          set -euo pipefail
+          msg=$(jq -r '[.[] | "#\(.number): \(.title)"] | join(", ")' <<< "${OPEN_BLOCKERS}")
+          echo "::error::Issue #${{ inputs.issue-number }} is blocked by open issues: ${msg}"
+          exit 1
+
+      - name: Resolve Claude model from issue labels
+        if: steps.preflight.outputs.skip != 'true'
+        id: model
+        uses: ./.github/actions/resolve-model
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          subject-type: issue
+          subject-number: ${{ inputs.issue-number }}
+          repo: ${{ inputs.repo }}
+          default-model: ${{ inputs.default-model }}
+          agent-type: design
+
+      - name: Prepare agent log directory
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/agent-logs"
+          chmod 0777 "${RUNNER_TEMP}/agent-logs"
+
+      - name: Run designer agent
+        if: steps.preflight.outputs.skip != 'true'
+        uses: ./.github/actions/run-agent
+        with:
+          image: ${{ inputs.image }}
+          gh-token: ${{ steps.setup.outputs.token }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          xai-api-key: ${{ secrets.XAI_API_KEY }}
+          repo: ${{ inputs.repo }}
+          agent-action: design
+          issue-number: ${{ inputs.issue-number }}
+          model: ${{ steps.model.outputs.claude_model }}
+          logs-dir: ${{ runner.temp }}/agent-logs
+
+      - name: Upload agent logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: agent-logs-design-issue-${{ inputs.issue-number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-logs
+          retention-days: ${{ inputs.logs-retention-days }}
+          if-no-files-found: warn
+
+  undraft-sub-issues:
+    if: inputs.run-undraft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      # No checkout step: we call actions/create-github-app-token directly
+      # instead of going through the local ./.github/actions/agent-token
+      # composite action.  Using a local action requires a workspace checkout,
+      # and on pull_request.closed events github.event.pull_request.base.sha
+      # may point at the post-merge HEAD (which already includes the merged PR).
+      # This means a PR that modifies .github/actions/agent-token could still
+      # get its modified local action executed here with DEVELOPER_APP_PRIVATE_KEY
+      # available — defeating the intended secret-exfiltration mitigation.
+      # Calling actions/create-github-app-token directly (with a pinned SHA)
+      # avoids the workspace entirely, so there is no local code-execution path
+      # that a merged PR can influence.
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Remove draft label from sub-issues on design-PR merge
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          GITHUB_REPO: ${{ inputs.repo }}
+          HEAD_REF: ${{ inputs.pr-head-ref }}
+        run: |
+          set -euo pipefail
+
+          # Extract parent issue number from branch name design/issue-{N}.
+          # Strict validation: the branch must match exactly design/issue-<digits>.
+          # Variants like design/issue-72/foo or design/issue-72-extra pass the
+          # startsWith() guard in the job `if` but would produce a non-numeric
+          # PARENT_ISSUE and an invalid API path — fail loudly instead.
+          if [[ ! "${HEAD_REF}" =~ ^design/issue-([0-9]+)$ ]]; then
+            echo "::error::HEAD_REF '${HEAD_REF}' does not match the expected pattern 'design/issue-<N>'. Aborting to avoid an invalid API call."
+            exit 1
+          fi
+          PARENT_ISSUE="${BASH_REMATCH[1]}"
+          echo "Design PR merged for branch ${HEAD_REF}; removing draft label from sub-issues of issue #${PARENT_ISSUE}."
+
+          # Enumerate sub-issues via the GitHub sub-issues API.
+          # Capture output to a temp file so a non-zero exit from `gh api` is
+          # not silently swallowed by the process substitution — `set -e` is
+          # unreliable inside <(...) and would treat API failures as "no
+          # sub-issues" and exit 0.
+          _sub_issues_tmp="$(mktemp)"
+          if ! gh api "repos/${GITHUB_REPO}/issues/${PARENT_ISSUE}/sub_issues" \
+               --paginate --jq '.[].number' > "${_sub_issues_tmp}"; then
+            echo "::error::Failed to list sub-issues for issue #${PARENT_ISSUE}. Check token permissions and API rate limits."
+            rm -f "${_sub_issues_tmp}"
+            exit 1
+          fi
+          mapfile -t SUB_ISSUE_NUMBERS < "${_sub_issues_tmp}"
+          rm -f "${_sub_issues_tmp}"
+
+          echo "Found ${#SUB_ISSUE_NUMBERS[@]} sub-issue(s)."
+
+          if [ "${#SUB_ISSUE_NUMBERS[@]}" -eq 0 ]; then
+            echo "No sub-issues found for issue #${PARENT_ISSUE}; nothing to un-draft."
+          else
+            for ISSUE_NUM in "${SUB_ISSUE_NUMBERS[@]}"; do
+              echo "Removing draft label from issue #${ISSUE_NUM}."
+              if ! gh issue edit "$ISSUE_NUM" --repo "${GITHUB_REPO}" --remove-label "draft"; then
+                # Distinguish benign from operational failure: if the label is still
+                # present after the failed removal, it's an operational error
+                # (permissions, rate-limit, transient API error) and we must fail
+                # loudly — leaving the issue labeled `draft` silently blocks the
+                # developer agent.  If the label is already absent the edit command
+                # may have exited non-zero simply because the label wasn't there,
+                # which is a no-op that we treat as a warning and continue.
+                #
+                # Capture the re-check output and exit code explicitly — do NOT use
+                # a pipe (`gh api ... | grep`) because set -e is suppressed in `if`
+                # conditions and the pipe exit status is the *last* command's, which
+                # would treat a failed `gh api` call as "label absent" and exit 0
+                # even though the draft label may still be present.
+                _recheck_status=0
+                _recheck_output="$(gh api "repos/${GITHUB_REPO}/issues/${ISSUE_NUM}" \
+                    --jq 'any(.labels[]; .name == "draft")')" || _recheck_status=$?
+                if [ "${_recheck_status}" -ne 0 ]; then
+                  echo "::error::Failed to remove draft label from issue #${ISSUE_NUM}, and the re-check API call also failed (check token permissions and API rate limits)."
+                  exit 1
+                elif [ "${_recheck_output}" = "true" ]; then
+                  echo "::error::Failed to remove draft label from issue #${ISSUE_NUM} and the label is still present. Check token permissions and API rate limits."
+                  exit 1
+                else
+                  echo "::warning::Could not remove draft label from issue #${ISSUE_NUM} — the label was already absent (non-fatal)."
+                fi
+              fi
+            done
+
+            echo "Done un-drafting ${#SUB_ISSUE_NUMBERS[@]} sub-issue(s)."
+          fi
+
+          echo "Removing agent:design label from parent issue #${PARENT_ISSUE}."
+          if ! gh issue edit "${PARENT_ISSUE}" --repo "${GITHUB_REPO}" --remove-label "agent:design"; then
+            # Distinguish benign from operational failure: if the label is still
+            # present after the failed removal, it's an operational error
+            # (permissions, rate-limit, transient API error) and we must fail
+            # loudly.  If the label is already absent the edit command may have
+            # exited non-zero simply because the label wasn't there, which is a
+            # no-op that we treat as a warning and continue.
+            #
+            # Capture the re-check output and exit code explicitly — do NOT use
+            # a pipe (`gh api ... | grep`) because set -e is suppressed in `if`
+            # conditions and the pipe exit status is the *last* command's, which
+            # would treat a failed `gh api` call as "label absent" and exit 0
+            # even though the label may still be present.
+            _recheck_status=0
+            _recheck_output="$(gh api "repos/${GITHUB_REPO}/issues/${PARENT_ISSUE}" \
+                --jq 'any(.labels[]; .name == "agent:design")')" || _recheck_status=$?
+            if [ "${_recheck_status}" -ne 0 ]; then
+              echo "::error::Failed to remove agent:design label from issue #${PARENT_ISSUE}, and the re-check API call also failed (check token permissions and API rate limits)."
+              exit 1
+            elif [ "${_recheck_output}" = "true" ]; then
+              echo "::error::Failed to remove agent:design label from issue #${PARENT_ISSUE} and the label is still present. Check token permissions and API rate limits."
+              exit 1
+            else
+              echo "::warning::Could not remove agent:design label from issue #${PARENT_ISSUE} — the label was already absent (non-fatal)."
+            fi
+          fi

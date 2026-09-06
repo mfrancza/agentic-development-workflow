@@ -11,8 +11,8 @@ on:
     types: [labeled, synchronize]
 
 # Deny-all at the workflow level; the write scopes the resolve step needs are
-# granted on the review job itself so any future job added to this workflow
-# starts with no permissions.
+# granted on the calling job so any future job added to this workflow starts
+# with no permissions.
 permissions: {}
 
 concurrency:
@@ -49,6 +49,9 @@ jobs:
     #   re-review for same-repo pushes. Fork-headed PRs are rejected here to
     #   prevent an attacker-controlled push from triggering the reviewer with
     #   secrets in scope on every push. See docs/design/re-review-loop.md § 1.
+    #
+    # Security: these trust-model checks live here in the caller stub, not in
+    # the reusable, so external callers cannot accidentally skip them.
     if: >
       github.event.pull_request.state == 'open' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
@@ -59,117 +62,17 @@ jobs:
         (github.event.action == 'synchronize' &&
          contains(github.event.pull_request.labels.*.name, 'agent:review'))
       )
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    # contents: write + pull-requests: write are for the "Resolve addressed
-    # review threads" step only. The resolveReviewThread GraphQL mutation
-    # requires a token with Contents: write
-    # (github.com/orgs/community/discussions/44650), and the reviewer app token
-    # is deliberately Contents: read-only — the no-push guarantee in
-    # docs/design/reviewer-container.md decision 3 — so the container records
-    # addressed thread IDs to a mounted file and this job's GITHUB_TOKEN
-    # resolves them afterwards. GITHUB_TOKEN never enters the container; only
-    # trusted base-branch workflow code runs in job steps (pull_request_target
-    # + default checkout of GITHUB_SHA (current base tip) with
-    # persist-credentials: false), so
-    # the write scope is not exposed to PR-authored code.
+    # contents: write + pull-requests: write are forwarded to the reusable so
+    # the resolve-review-threads step can call the resolveReviewThread GraphQL
+    # mutation with the workflow GITHUB_TOKEN (see agent-review-reusable.yml).
     permissions:
       contents: write
       pull-requests: write
-
-    steps:
-      # Checkout must precede the local agent-token action: the runner resolves
-      # ./.github/actions/* references from the workspace.
-      # No explicit ref: on pull_request_target the default checkout is
-      # GITHUB_SHA = the latest commit on the base branch, so the local
-      # actions, .github/scripts activities, and the docker/reviewer build
-      # context are always loaded from trusted, *current* base-branch code —
-      # never from the PR head. Do NOT pin to
-      # github.event.pull_request.base.sha instead: GitHub freezes that value
-      # at the base tip as of the PR's last head push, so after any merge to
-      # main every review of an un-rebased PR would execute stale workspace
-      # code (hit live when the #253 composite-action fix merged and
-      # re-reviews of open PRs kept running the broken pre-fix resolve-model).
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Mint installation token for reviewer-agent
-        id: setup
-        uses: ./.github/actions/agent-token
-        with:
-          client-id: ${{ secrets.REVIEWER_APP_ID }}
-          private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
-
-      - name: Resolve Claude model from PR labels
-        id: model
-        uses: ./.github/actions/resolve-model
-        with:
-          token: ${{ steps.setup.outputs.token }}
-          subject-type: pr
-          subject-number: ${{ github.event.pull_request.number }}
-          repo: ${{ github.repository }}
-          default-model: ${{ vars.DEFAULT_MODEL }}
-          agent-type: review
-
-      - name: Dismiss stale reviewer-bot CHANGES_REQUESTED reviews
-        # Fail-open: dismissal is defence-in-depth (see Decision 2 of
-        # docs/design/reviewer-supersede-stale-verdict.md). If this step
-        # errors the review pass still runs; continue-on-error ensures a step
-        # failure does not cancel the job. The activity itself also uses
-        # core.warning() rather than core.setFailed() for individual API
-        # errors, so the common case is a clean zero exit.
-        continue-on-error: true
-        uses: ./.github/actions/dismiss-stale-reviewer-reviews
-        with:
-          token: ${{ steps.setup.outputs.token }}
-          repo: ${{ github.repository }}
-          pr-number: ${{ github.event.pull_request.number }}
-
-      - name: Prepare agent log directory
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/agent-logs"
-          chmod 0777 "${RUNNER_TEMP}/agent-logs"
-
-      - name: Run reviewer agent
-        # The container records the GraphQL IDs of addressed review threads
-        # into the mounted output directory; the resolve step below reads them.
-        uses: ./.github/actions/run-agent
-        with:
-          build-context: ./docker/reviewer
-          image-tag: agent-reviewer:ci
-          gh-token: ${{ steps.setup.outputs.token }}
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          xai-api-key: ${{ secrets.XAI_API_KEY }}
-          repo: ${{ github.repository }}
-          pr-number: ${{ github.event.pull_request.number }}
-          model: ${{ steps.model.outputs.claude_model }}
-          output-dir: ${{ runner.temp }}/reviewer-output
-          output-mount: /agent-output
-          resolve-threads-file: /agent-output/resolve-threads.txt
-          logs-dir: ${{ runner.temp }}/agent-logs
-
-      - name: Upload agent logs
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: agent-logs-review-pr-${{ github.event.pull_request.number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/agent-logs
-          retention-days: 30
-          if-no-files-found: warn
-
-      - name: Resolve addressed review threads
-        # Runs with the workflow GITHUB_TOKEN (see the permissions comment at
-        # the top of this file), not the reviewer app token — so threads show
-        # as resolved by github-actions[bot]. The recorded IDs are
-        # agent-generated output derived from PR content, so they are treated
-        # as untrusted: each ID is format-checked and intersected against the
-        # PR's actual open threads before the mutation is issued.
-        uses: ./.github/actions/resolve-review-threads
-        with:
-          token: ${{ github.token }}
-          pr-number: ${{ github.event.pull_request.number }}
-          repo: ${{ github.repository }}
-          resolve-file: ${{ runner.temp }}/reviewer-output/resolve-threads.txt
+    uses: ./.github/workflows/agent-review-reusable.yml
+    with:
+      pr-number: ${{ github.event.pull_request.number }}
+      repo: ${{ github.repository }}
+      image: ${{ vars.REVIEWER_IMAGE }}
+      default-model: ${{ vars.DEFAULT_MODEL }}
+      logs-retention-days: 30
+    secrets: inherit

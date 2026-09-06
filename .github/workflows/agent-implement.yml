@@ -18,103 +18,20 @@ jobs:
     # usernames are not hardcoded in YAML — run `terraform apply` to update it.
     # GitHub has no per-label permission model and `repository_owner` doesn't
     # work in org repos (it's the org login, not a user).
+    #
+    # Security: the allowlist check lives here in the caller stub, not in the
+    # reusable, so external callers cannot accidentally skip it by calling the
+    # reusable directly without gating.
     if: >
       github.event.label.name == 'agent:developer' &&
       github.event.issue.state == 'open' &&
       contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-
-    steps:
-      # Checkout must precede the local agent-token action: the runner resolves
-      # ./.github/actions/* references from the workspace.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Mint installation token for developer-agent
-        id: setup
-        uses: ./.github/actions/agent-token
-        with:
-          client-id: ${{ secrets.DEVELOPER_APP_ID }}
-          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-
-      - name: "Preflight: skip if PR already exists"
-        id: preflight
-        uses: ./.github/actions/find-existing-pr
-        with:
-          token: ${{ steps.setup.outputs.token }}
-          repo: ${{ github.repository }}
-          branch: agent/issue-${{ github.event.issue.number }}
-          owner: ${{ github.repository_owner }}
-
-      - name: "Preflight: skip if issue is labeled draft"
-        id: draft-check
-        if: steps.preflight.outputs.skip != 'true'
-        uses: ./.github/actions/check-draft-label
-        with:
-          token: ${{ steps.setup.outputs.token }}
-          repo: ${{ github.repository }}
-          issue-number: ${{ github.event.issue.number }}
-
-      - name: "Preflight: check for open blockers"
-        id: blockers-check
-        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
-        uses: ./.github/actions/check-blockers
-        with:
-          token: ${{ steps.setup.outputs.token }}
-          repo: ${{ github.repository }}
-          issue-number: ${{ github.event.issue.number }}
-
-      - name: "Preflight: fail if blockers are open"
-        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true' && steps.blockers-check.outputs.blocked == 'true'
-        env:
-          OPEN_BLOCKERS: ${{ steps.blockers-check.outputs.open-blockers }}
-        run: |
-          set -euo pipefail
-          msg=$(jq -r '[.[] | "#\(.number): \(.title)"] | join(", ")' <<< "${OPEN_BLOCKERS}")
-          echo "::error::Issue #${{ github.event.issue.number }} is blocked by open issues: ${msg}"
-          exit 1
-
-      - name: Resolve Claude model from issue labels
-        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
-        id: model
-        uses: ./.github/actions/resolve-model
-        with:
-          token: ${{ steps.setup.outputs.token }}
-          subject-type: issue
-          subject-number: ${{ github.event.issue.number }}
-          repo: ${{ github.repository }}
-          default-model: ${{ vars.DEFAULT_MODEL }}
-          agent-type: developer
-
-      - name: Prepare agent log directory
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/agent-logs"
-          chmod 0777 "${RUNNER_TEMP}/agent-logs"
-
-      - name: Run agent
-        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
-        uses: ./.github/actions/run-agent
-        env:
-          CODE_REVIEWERS: ${{ vars.CODE_REVIEWERS }}
-        with:
-          gh-token: ${{ steps.setup.outputs.token }}
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          xai-api-key: ${{ secrets.XAI_API_KEY }}
-          repo: ${{ github.repository }}
-          agent-action: implement
-          issue-number: ${{ github.event.issue.number }}
-          model: ${{ steps.model.outputs.claude_model }}
-          logs-dir: ${{ runner.temp }}/agent-logs
-
-      - name: Upload agent logs
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: agent-logs-implement-issue-${{ github.event.issue.number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/agent-logs
-          retention-days: 30
-          if-no-files-found: warn
+    uses: ./.github/workflows/agent-implement-reusable.yml
+    with:
+      issue-number: ${{ github.event.issue.number }}
+      repo: ${{ github.repository }}
+      image: ${{ vars.DEVELOPER_IMAGE }}
+      default-model: ${{ vars.DEFAULT_MODEL }}
+      code-reviewers: ${{ vars.CODE_REVIEWERS }}
+      logs-retention-days: 30
+    secrets: inherit
