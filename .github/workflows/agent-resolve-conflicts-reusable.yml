@@ -1,0 +1,140 @@
+name: agent-resolve-conflicts (reusable)
+
+# Reusable workflow extracted from agent-resolve-conflicts.yml.
+# Callers supply the push/workflow_dispatch triggers; this workflow
+# finds conflicted agent-authored PRs and resolves them via a matrix run.
+#
+# Consumer note: the composite actions referenced below
+# (./.github/actions/*) are resolved from the CALLER's workspace checkout.
+# Consumers who fork this repository have the actions available locally
+# and can call this reusable workflow as-is.
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        description: >
+          PR number to resolve directly (skips the conflict-filter
+          enumeration and runs the agent on this PR only). Pass the empty
+          string (default) to enumerate all conflicted agent-authored PRs.
+          Corresponds to the workflow_dispatch input in the caller.
+        type: string
+        required: false
+        default: ''
+      escalation-assignee:
+        description: >
+          GitHub login to assign escalation issues to (e.g.
+          github.repository_owner). Injected as ESCALATION_ASSIGNEE in the
+          agent container.
+        type: string
+        required: true
+      image:
+        description: >
+          Pre-built agent image reference to pull (e.g.
+          ghcr.io/owner/repo/developer:v1). Leave empty (default) to build
+          from the local Docker build context instead — the mode used by
+          this repository's self-hosted runs.
+        type: string
+        required: false
+        default: ''
+    secrets:
+      DEVELOPER_APP_ID:
+        required: true
+      DEVELOPER_APP_PRIVATE_KEY:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: true
+      OPENAI_API_KEY:
+        required: true
+      XAI_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read  # for PR enumeration and mergeability polling in find-conflicted-prs
+
+jobs:
+  find-conflicted-prs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      conflicted_prs: ${{ steps.find.outputs.conflicted_prs }}
+
+    steps:
+      # Checkout must precede the local find-conflicted-prs action: the runner
+      # resolves ./.github/actions/* references from the workspace, and the
+      # action itself runs npx tsx from .github/scripts/.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      # When a PR number is provided via workflow_dispatch, use it directly
+      # (poll for mergeability state to let GitHub's async computation settle,
+      # then include regardless of result — this is a manual backstop).
+      # Otherwise enumerate open developer-agent PRs and filter to those that
+      # are CONFLICTING (mergeability is computed asynchronously by GitHub after
+      # a push; retry with exponential backoff until it settles).
+      - name: Find conflicted agent-authored PRs
+        id: find
+        uses: ./.github/actions/find-conflicted-prs
+        with:
+          token: ${{ github.token }}
+          repo: ${{ github.repository }}
+          pr-number: ${{ inputs.pr-number }}
+
+  resolve:
+    needs: find-conflicted-prs
+    if: needs.find-conflicted-prs.outputs.conflicted_prs != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      matrix:
+        pr_number: ${{ fromJSON(needs.find-conflicted-prs.outputs.conflicted_prs) }}
+      fail-fast: false
+    concurrency:
+      group: agent-resolve-conflicts-pr-${{ matrix.pr_number }}
+      cancel-in-progress: false
+
+    steps:
+      # Checkout must precede the local agent-token action: the runner resolves
+      # ./.github/actions/* references from the workspace.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Prepare agent log directory
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/agent-logs"
+          chmod 0777 "${RUNNER_TEMP}/agent-logs"
+
+      - name: Run agent
+        uses: ./.github/actions/run-agent
+        with:
+          image: ${{ inputs.image }}
+          gh-token: ${{ steps.setup.outputs.token }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          xai-api-key: ${{ secrets.XAI_API_KEY }}
+          repo: ${{ github.repository }}
+          agent-action: resolve-conflicts
+          pr-number: ${{ matrix.pr_number }}
+          model: ${{ vars.DEFAULT_MODEL }}
+          escalation-assignee: ${{ inputs.escalation-assignee }}
+          logs-dir: ${{ runner.temp }}/agent-logs
+
+      - name: Upload agent logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: agent-logs-resolve-conflicts-pr-${{ matrix.pr_number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-logs
+          retention-days: 30
+          if-no-files-found: warn

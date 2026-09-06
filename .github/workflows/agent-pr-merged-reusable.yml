@@ -1,0 +1,93 @@
+name: agent-pr-merged (reusable)
+
+# Reusable workflow extracted from agent-pr-merged.yml.
+#
+# SECURITY EXCEPTION (Decision 8 of docs/design/refactor-github-actions.md):
+# This workflow deliberately performs NO workspace checkout. On
+# pull_request.closed events, a PR that modifies .github/actions/agent-token
+# would execute the modified composite action while DEVELOPER_APP_PRIVATE_KEY
+# is in scope if a checkout were present. By omitting the checkout entirely,
+# there is no local code-execution path that a merged PR can influence. All
+# steps use either inline shell or actions/create-github-app-token at a
+# pinned SHA (an external published action, not a local one). This is a
+# permanent exception.
+#
+# NOTE on github.event in reusable workflows: within a reusable workflow
+# github.event is the workflow_call event payload, not the calling workflow's
+# original event. The PR body parsing (which requires github.event.pull_request.body)
+# is therefore performed in the caller's extract-issue-number job and the
+# resulting issue number is passed here as the issue-number input.
+#
+# Callers supply:
+#   - The pull_request.closed trigger and the PR-author gate (if: condition)
+#   - The extract-issue-number job that parses the PR body via env var
+#   - The issue-number input (output from extract-issue-number)
+
+on:
+  workflow_call:
+    inputs:
+      issue-number:
+        description: >
+          The issue number extracted from the PR body "Closes #N" reference.
+          Passed from the caller's extract-issue-number job.
+        type: string
+        required: true
+    secrets:
+      DEVELOPER_APP_ID:
+        required: true
+      DEVELOPER_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  remove-developer-label:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      # No checkout step (security exception, see file header).
+      # actions/create-github-app-token is called directly at a pinned SHA
+      # instead of the local ./.github/actions/agent-token composite action,
+      # which would require a workspace checkout.
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Remove agent:developer label from linked issue
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          GITHUB_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+        run: |
+          set -euo pipefail
+          echo "Removing agent:developer label from issue #${ISSUE_NUMBER}."
+          if ! gh issue edit "${ISSUE_NUMBER}" --repo "${GITHUB_REPO}" --remove-label "agent:developer"; then
+            # Distinguish between a benign no-op (label was already absent) and a
+            # real failure (permissions, rate-limit, transient API error).  A real
+            # failure must surface loudly — leaving the label in place could give the
+            # impression that the developer agent is still active on a closed PR.
+            # If the label is already absent the `gh issue edit` command may exit
+            # non-zero, which is a warning-level no-op we treat as success.
+            #
+            # Capture the re-check exit code and output separately — do NOT pipe
+            # because set -e is suppressed in `if` conditions and a pipe exit status
+            # reflects only the last command, masking a failed `gh api` call.
+            _recheck_status=0
+            _recheck_output="$(gh api "repos/${GITHUB_REPO}/issues/${ISSUE_NUMBER}" \
+                --jq 'any(.labels[]; .name == "agent:developer")')" || _recheck_status=$?
+            if [ "${_recheck_status}" -ne 0 ]; then
+              echo "::error::Failed to remove agent:developer label from issue #${ISSUE_NUMBER}, and the re-check API call also failed (check token permissions and API rate limits)."
+              exit 1
+            elif [ "${_recheck_output}" = "true" ]; then
+              echo "::error::Failed to remove agent:developer label from issue #${ISSUE_NUMBER} and the label is still present. Check token permissions and API rate limits."
+              exit 1
+            else
+              echo "::warning::Could not remove agent:developer label from issue #${ISSUE_NUMBER} — the label was already absent (non-fatal)."
+            fi
+          fi
+          echo "Done removing agent:developer label from issue #${ISSUE_NUMBER}."

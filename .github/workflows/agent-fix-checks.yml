@@ -25,84 +25,9 @@ jobs:
     if: >
       github.event.workflow_run.conclusion == 'failure' &&
       github.event.workflow_run.pull_requests[0] != null
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-
-    steps:
-      # Checkout must precede the local agent-token action: the runner resolves
-      # ./.github/actions/* references from the workspace.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          persist-credentials: false
-
-      # The workflow_run event payload doesn't include the PR author, so look it
-      # up and only proceed if the PR was authored by the developer agent.
-      # This is the trust gate: we only react to checks failing on the
-      # agent's own PRs, never on PRs from other authors.
-      - name: Filter to agent-authored PRs
-        id: filter
-        uses: ./.github/actions/filter-agent-pr
-        with:
-          token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
-          agent-login: mfrancza-developer-agent[bot]
-
-      # Mint only after the trust gate — no installation token for runs we skip.
-      - name: Mint installation token for developer-agent
-        if: steps.filter.outputs.proceed == 'true'
-        id: setup
-        uses: ./.github/actions/agent-token
-        with:
-          client-id: ${{ secrets.DEVELOPER_APP_ID }}
-          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-
-      - name: Resolve linked issue from PR body
-        if: steps.filter.outputs.proceed == 'true'
-        id: linked-issue
-        uses: ./.github/actions/find-linked-issue
-        with:
-          token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
-
-      - name: Resolve Claude model from issue labels
-        if: steps.linked-issue.outputs.proceed == 'true'
-        id: model
-        uses: ./.github/actions/resolve-model
-        with:
-          token: ${{ steps.setup.outputs.token }}
-          subject-type: issue
-          subject-number: ${{ steps.linked-issue.outputs.issue_number }}
-          repo: ${{ github.repository }}
-          default-model: ${{ vars.DEFAULT_MODEL }}
-          agent-type: developer
-
-      - name: Prepare agent log directory
-        run: |
-          set -euo pipefail
-          mkdir -p "${RUNNER_TEMP}/agent-logs"
-          chmod 0777 "${RUNNER_TEMP}/agent-logs"
-
-      - name: Run agent
-        if: steps.filter.outputs.proceed == 'true'
-        uses: ./.github/actions/run-agent
-        with:
-          gh-token: ${{ steps.setup.outputs.token }}
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
-          xai-api-key: ${{ secrets.XAI_API_KEY }}
-          repo: ${{ github.repository }}
-          agent-action: fix-checks
-          pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
-          model: ${{ steps.model.outputs.claude_model || vars.DEFAULT_MODEL }}
-          logs-dir: ${{ runner.temp }}/agent-logs
-
-      - name: Upload agent logs
-        if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
-        with:
-          name: agent-logs-fix-checks-pr-${{ github.event.workflow_run.pull_requests[0].number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/agent-logs
-          retention-days: 30
-          if-no-files-found: warn
+    uses: ./.github/workflows/agent-fix-checks-reusable.yml
+    with:
+      pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
+      agent-login: mfrancza-developer-agent[bot]
+      image: ''
+    secrets: inherit

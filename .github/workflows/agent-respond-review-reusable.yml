@@ -1,0 +1,169 @@
+name: agent-respond-review (reusable)
+
+# Reusable workflow extracted from agent-respond-review.yml.
+# Callers supply the event triggers, PR-author gate, review-author
+# allowlist, and concurrency group; this workflow receives the event data
+# as typed inputs plus the token secrets and performs all the actual work.
+#
+# NOTE on github.event in reusable workflows: within a reusable workflow
+# github.event is the workflow_call event payload, not the calling workflow's
+# original event. All event data that steps need must therefore be passed
+# as explicit inputs: see the with: block in agent-respond-review.yml.
+#
+# Consumer note: the composite actions referenced below
+# (./.github/actions/*) are resolved from the CALLER's workspace checkout.
+# Consumers who fork this repository have the actions available locally
+# and can call this reusable workflow as-is.
+
+on:
+  workflow_call:
+    inputs:
+      pr-number:
+        description: 'Pull request number (github.event.pull_request.number)'
+        type: number
+        required: true
+      review-state:
+        description: 'Review state (github.event.review.state): approved, changes_requested, commented, etc.'
+        type: string
+        required: true
+      review-body:
+        description: 'Review body text (github.event.review.body)'
+        type: string
+        required: false
+        default: ''
+      review-id:
+        description: 'Review ID (github.event.review.id)'
+        type: string
+        required: true
+      repo-name:
+        description: 'Repository name without owner prefix (github.event.repository.name)'
+        type: string
+        required: true
+      image:
+        description: >
+          Pre-built agent image reference to pull (e.g.
+          ghcr.io/owner/repo/developer:v1). Leave empty (default) to build
+          from the local Docker build context instead — the mode used by
+          this repository's self-hosted runs.
+        type: string
+        required: false
+        default: ''
+    secrets:
+      DEVELOPER_APP_ID:
+        required: true
+      DEVELOPER_APP_PRIVATE_KEY:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: true
+      OPENAI_API_KEY:
+        required: true
+      XAI_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: read   # for check-reviewer-feedback activity (review threads + inline comments)
+
+jobs:
+  respond-review:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      # Checkout must precede the local agent-token action: the runner resolves
+      # ./.github/actions/* references from the workspace.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      # Skip cleanly when there is nothing to respond to.
+      # Checks are applied in order:
+      #   0. PR is not open (closed or merged): skip immediately. A review on a
+      #      closed or merged PR never needs a response. This guards against a
+      #      race where the human approves-and-merges within seconds and the
+      #      head branch is deleted before the container can check it out.
+      #      On API error the check fails open (proceeds to the feedback checks).
+      # Non-approval states (changes_requested, commented) always proceed — they
+      # signal the reviewer wants something changed or opened a discussion.
+      # For approved reviews two additional skip conditions apply, checked in order:
+      #   1. Zero unresolved PR review threads (primary check): threads are the
+      #      ground truth for outstanding feedback. Skip even when the review
+      #      carries body text or inline comments — those are advisory when
+      #      nothing remains unresolved. This check runs first so a
+      #      summary-carrying clean approval (e.g. "Resolved 3 threads; all
+      #      clean.") still skips. On GraphQL errors, falls through to the
+      #      bare-approval fallback below rather than failing open.
+      #   2. Bare approval (no body, no inline comments): fallback reached only
+      #      when the GraphQL call above errored or returned a non-numeric value.
+      #      Skip when there is provably nothing to respond to.
+      - name: Check for reviewer feedback
+        id: feedback
+        uses: ./.github/actions/check-reviewer-feedback
+        with:
+          token: ${{ github.token }}
+          review-state: ${{ inputs.review-state }}
+          review-body: ${{ inputs.review-body }}
+          review-id: ${{ inputs.review-id }}
+          pr-number: ${{ inputs.pr-number }}
+          repo-owner: ${{ github.repository_owner }}
+          repo-name: ${{ inputs.repo-name }}
+
+      # Mint only after we've decided to proceed — no installation token for runs we skip.
+      - name: Mint installation token for developer-agent
+        if: steps.feedback.outputs.proceed == 'true'
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Resolve linked issue from PR body
+        if: steps.feedback.outputs.proceed == 'true'
+        id: linked-issue
+        uses: ./.github/actions/find-linked-issue
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          pr-number: ${{ inputs.pr-number }}
+
+      - name: Resolve Claude model from issue labels
+        if: steps.linked-issue.outputs.proceed == 'true'
+        id: model
+        uses: ./.github/actions/resolve-model
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          subject-type: issue
+          subject-number: ${{ steps.linked-issue.outputs.issue_number }}
+          repo: ${{ github.repository }}
+          default-model: ${{ vars.DEFAULT_MODEL }}
+          agent-type: developer
+
+      - name: Prepare agent log directory
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/agent-logs"
+          chmod 0777 "${RUNNER_TEMP}/agent-logs"
+
+      - name: Run agent
+        if: steps.feedback.outputs.proceed == 'true'
+        uses: ./.github/actions/run-agent
+        with:
+          image: ${{ inputs.image }}
+          gh-token: ${{ steps.setup.outputs.token }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          xai-api-key: ${{ secrets.XAI_API_KEY }}
+          repo: ${{ github.repository }}
+          agent-action: respond-review
+          pr-number: ${{ inputs.pr-number }}
+          model: ${{ steps.model.outputs.claude_model || vars.DEFAULT_MODEL }}
+          logs-dir: ${{ runner.temp }}/agent-logs
+
+      - name: Upload agent logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: agent-logs-respond-review-pr-${{ inputs.pr-number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-logs
+          retention-days: 30
+          if-no-files-found: warn

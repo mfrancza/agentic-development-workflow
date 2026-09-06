@@ -1,0 +1,290 @@
+name: agent-auto-trigger (reusable)
+
+# Reusable workflow extracted from agent-auto-trigger.yml.
+# Callers supply the event triggers, allowlist gates, label predicates, and
+# the AUTO_TRIGGER_AGENTS toggle checks; this workflow performs the actual
+# label mutations for the specified SDLC transition.
+#
+# NOTE on github.event in reusable workflows: within a reusable workflow
+# github.event is the workflow_call event payload, not the calling workflow's
+# original event. All event data that steps need (issue number, PR number)
+# must therefore be passed as explicit inputs.
+#
+# Design choice — one reusable, dispatch by transition string:
+#   The caller's six jobs each evaluate their own if: conditions (event type,
+#   allowlist, draft guard, blocker check, etc.) and call this workflow with
+#   the matching transition: input and the relevant issue-number or pr-number.
+#   The reusable has six jobs, each guarded by
+#   `if: inputs.transition == '<name>'`, so exactly one job runs per
+#   invocation. This keeps the caller's event-routing logic visible and
+#   auditable in one file while delegating the label-mutation mechanics here.
+#
+#   Tradeoff: six jobs are created per call, five of which are immediately
+#   skipped. This costs a small amount of scheduler overhead but keeps the
+#   file count low (one reusable instead of six) and makes the full
+#   transition inventory visible in a single file.
+#
+#   Alternative (discrete toggle inputs): expose boolean inputs
+#   enable-auto-groom, enable-auto-design, etc., and let the caller evaluate
+#   AUTO_TRIGGER_AGENTS once and pass the results in. Rejected because it
+#   requires passing all event data (issue number, PR number, label name,
+#   sender login, issue labels) as additional inputs — the caller already
+#   evaluates those conditions in its if: blocks, making the extra inputs
+#   redundant. The dispatch-by-name approach avoids this duplication.
+#
+# Consumer note: the composite actions referenced below
+# (./.github/actions/*) are resolved from the CALLER's workspace checkout.
+# Consumers who fork this repository have the actions available locally
+# and can call this reusable workflow as-is.
+# Exception: auto-review deliberately has no checkout (see that job).
+
+on:
+  workflow_call:
+    inputs:
+      transition:
+        description: >
+          The SDLC transition to execute. One of: auto-groom, auto-design,
+          auto-developer-do, auto-developer-undraft, auto-review,
+          auto-developer-unblock.
+        type: string
+        required: true
+      issue-number:
+        description: >
+          Issue number for issue-related transitions (auto-groom,
+          auto-design, auto-developer-do, auto-developer-undraft,
+          auto-developer-unblock). Pass 0 for pull_request transitions.
+        type: number
+        required: false
+        default: 0
+      pr-number:
+        description: >
+          Pull request number for the auto-review transition. Pass 0 for
+          issue-related transitions.
+        type: number
+        required: false
+        default: 0
+    secrets:
+      DEVELOPER_APP_ID:
+        required: true
+      DEVELOPER_APP_PRIVATE_KEY:
+        required: true
+
+# Label writes go through the minted App token; the workflow itself only needs
+# contents: read to resolve local composite actions.
+permissions:
+  contents: read
+
+jobs:
+  # ── Transition 1 ─────────────────────────────────────────────────────────────
+  # issues.opened → agent:groom
+  auto-groom:
+    if: inputs.transition == 'auto-groom'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # Checkout is required to resolve the local ./.github/actions/agent-token
+      # composite action. The issues.opened event does not carry PR-authored
+      # code, so checking out the default branch is safe here.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Apply agent:groom label
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:groom"
+
+  # ── Transition 2 ─────────────────────────────────────────────────────────────
+  # issues.labeled (plan) → agent:design
+  auto-design:
+    if: inputs.transition == 'auto-design'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Apply agent:design label
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:design"
+
+  # ── Transition 3 ─────────────────────────────────────────────────────────────
+  # issues.labeled (do) → agent:developer
+  auto-developer-do:
+    if: inputs.transition == 'auto-developer-do'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Check for open blockers
+        id: check-blockers
+        uses: ./.github/actions/check-blockers
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ inputs.issue-number }}
+
+      - name: Apply agent:developer label (no open blockers)
+        if: steps.check-blockers.outputs.blocked == 'false'
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:developer"
+
+      - name: Apply blocked label (open blockers detected)
+        if: steps.check-blockers.outputs.blocked == 'true'
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "blocked"
+
+  # ── Transition 4 ─────────────────────────────────────────────────────────────
+  # issues.unlabeled (draft) → agent:developer
+  auto-developer-undraft:
+    if: inputs.transition == 'auto-developer-undraft'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Check for open blockers
+        id: check-blockers
+        uses: ./.github/actions/check-blockers
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          issue-number: ${{ inputs.issue-number }}
+
+      - name: Apply agent:developer label (no open blockers)
+        if: steps.check-blockers.outputs.blocked == 'false'
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:developer"
+
+      - name: Apply blocked label (open blockers detected)
+        if: steps.check-blockers.outputs.blocked == 'true'
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "blocked"
+
+  # ── Transition 5 ─────────────────────────────────────────────────────────────
+  # pull_request.opened on an agent/… or design/… branch → agent:review
+  #
+  # No checkout: actions/create-github-app-token is called directly to avoid
+  # executing PR-authored local actions with secrets in scope. See
+  # docs/design/auto-trigger-agents.md Decision 3.
+  auto-review:
+    if: inputs.transition == 'auto-review'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      # No checkout step: see comment on this job above.
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Apply agent:review label
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPO" --add-label "agent:review"
+
+  # ── Transition 6 ─────────────────────────────────────────────────────────────
+  # issues.closed → agent:developer (cascade on newly-unblocked issues)
+  auto-developer-unblock:
+    if: inputs.transition == 'auto-developer-unblock'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Checkout is required to resolve the local composite actions
+      # (./.github/actions/agent-token and ./.github/actions/find-newly-unblocked).
+      # The issues.closed event does not carry PR-authored code, so checking
+      # out the default branch is safe here.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Find newly unblocked issues
+        id: find-unblocked
+        uses: ./.github/actions/find-newly-unblocked
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          closed-issue-number: ${{ inputs.issue-number }}
+
+      - name: Apply agent:developer and remove blocked from each newly-unblocked issue
+        uses: ./.github/actions/apply-unblocked-labels
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ github.repository }}
+          unblocked: ${{ steps.find-unblocked.outputs.unblocked }}
