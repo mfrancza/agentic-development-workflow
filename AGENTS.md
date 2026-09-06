@@ -88,20 +88,32 @@ The [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composit
 The developer container is a single image dispatched by `AGENT_ACTION`. Required environment variables:
 
 <!-- generated:agent-actions:start — do not edit; run scripts/generate-docs.sh to regenerate -->
-| Action            | Required vars (in addition to the provider API key, `GH_TOKEN`, `GITHUB_REPO`) |
-|-------------------|--------------------------------------------------------------------------------|
-| `implement`       | `GITHUB_ISSUE_NUMBER`                                                          |
-| `groom`           | `GITHUB_ISSUE_NUMBER`                                                          |
-| `design`          | `GITHUB_ISSUE_NUMBER`                                                          |
-| `fix-checks`        | `GITHUB_PR_NUMBER`                                                           |
-| `resolve-conflicts` | `GITHUB_PR_NUMBER`                                                           |
-| `respond-review`    | `GITHUB_PR_NUMBER`                                                           |
-| `fix-deployment`    | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                       |
+| Action              | Required vars (in addition to the provider API key, `GH_TOKEN`, `GITHUB_REPO`) |
+|---------------------|--------------------------------------------------------------------------------|
+| `implement`         | `GITHUB_ISSUE_NUMBER`                                                          |
+| `fix-checks`        | `GITHUB_PR_NUMBER`                                                             |
+| `respond-review`    | `GITHUB_PR_NUMBER`                                                             |
+| `fix-deployment`    | `GITHUB_ISSUE_NUMBER`, `GITHUB_RUN_ID`                                         |
+| `groom`             | `GITHUB_ISSUE_NUMBER`                                                          |
+| `design`            | `GITHUB_ISSUE_NUMBER`                                                          |
+| `resolve-conflicts` | `GITHUB_PR_NUMBER`                                                             |
 <!-- generated:agent-actions:end -->
 
 ### Workflow Triggers
 
 <!-- generated:workflow-triggers:start — do not edit; run scripts/generate-docs.sh to regenerate -->
+| Workflow                      | Trigger                                                              | Key gate                                                                                                                                                                                                                                                                                                                                                                                                        |
+|-------------------------------|----------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `agent-auto-trigger.yml`      | issues: [opened, labeled, unlabeled, closed]; pull_request: [opened] | github.event_name == 'issues' && github.event.action == 'opened' && vars.AUTO_TRIGGER_AGENTS != '' && fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true && contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login) && !contains(github.event.issue.labels.*.name, 'draft')                                                                                                                           |
+| `agent-design.yml`            | issues: [labeled]; pull_request: [closed]                            | github.event.label.name == 'agent:design' && github.event.issue.state == 'open' && contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)                                                                                                                                                                                                                                                          |
+| `agent-fix-checks.yml`        | workflow_run: [completed]                                            | github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.pull_requests[0] != null                                                                                                                                                                                                                                                                                                         |
+| `agent-fix-deployment.yml`    | deployment_status                                                    | github.event.deployment_status.state == 'failure' || github.event.deployment_status.state == 'error'                                                                                                                                                                                                                                                                                                            |
+| `agent-groom.yml`             | issues: [labeled]                                                    | github.event.label.name == 'agent:groom' && github.event.issue.state == 'open' && contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)                                                                                                                                                                                                                                                           |
+| `agent-implement.yml`         | issues: [labeled]                                                    | github.event.label.name == 'agent:developer' && github.event.issue.state == 'open' && contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)                                                                                                                                                                                                                                                       |
+| `agent-pr-merged.yml`         | pull_request: [closed]                                               | github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]'                                                                                                                                                                                                                                                                                                                                         |
+| `agent-resolve-conflicts.yml` | push: branches: [main]; workflow_dispatch                            |                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `agent-respond-review.yml`    | pull_request_review: [submitted]                                     | github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]' && ( contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.review.user.login) || github.event.review.user.login == 'mfrancza-reviewer-agent[bot]' || github.event.review.user.login == 'Copilot' || github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' || github.event.review.user.login == 'github-copilot[bot]' ) |
+| `agent-review.yml`            | pull_request_target: [labeled, synchronize]                          | github.event.pull_request.state == 'open' && github.event.pull_request.head.repo.full_name == github.repository && ( (github.event.action == 'labeled' && github.event.label.name == 'agent:review' && contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)) || (github.event.action == 'synchronize' && contains(github.event.pull_request.labels.*.name, 'agent:review')) )                    |
 <!-- generated:workflow-triggers:end -->
 
 Provider/key mapping: `ANTHROPIC_API_KEY` for Anthropic models — the tier aliases `model:sonnet`/`model:opus`/`model:haiku` (unqualified — resolve to the latest snapshot of each series, kept as-is for backwards compatibility), any generic series tag beginning with `claude-` (e.g. `model:claude-sonnet-4-5`, `model:claude-3-5-haiku-latest`), and any pinned snapshot ID (e.g. `model:claude-sonnet-4-5-20250929`); `OPENAI_API_KEY` for OpenAI models (e.g. `model:o3`); `XAI_API_KEY` for xAI Grok models run via the Grok Build CLI (`model:grok-4.20-0309-non-reasoning`, `model:grok-4.20-0309-reasoning`, `model:grok-4.20-multi-agent-0309`, `model:grok-4.3`, `model:grok-4.5`, `model:grok-4.6`, `model:grok-build-0.1`) — Grok models are executed by the Grok Build CLI (`grok --prompt-file /dev/stdin`), not by Codex; the CLI reads `XAI_API_KEY` directly from the process environment with no login sub-command required. The entrypoint infers the provider from the resolved model name — any name starting with `claude-`, plus the three tier aliases, routes to Anthropic — and validates that the corresponding key is set.
@@ -113,6 +125,68 @@ The **reviewer image** at [`docker/reviewer/`](docker/reviewer/) does not use `A
 ## Labels
 
 <!-- generated:labels:start — do not edit; run scripts/generate-docs.sh to regenerate -->
+| Label                                | Description                                                                                    |
+|--------------------------------------|------------------------------------------------------------------------------------------------|
+| `agent:design`                       | Route this issue to the designer agent to write a design doc and create draft sub-issues.      |
+| `agent:developer`                    | Route this issue to the developer agent for implementation.                                    |
+| `agent:groom`                        | Route this issue to the grooming agent to add labels and notes.                                |
+| `agent:review`                       | Request a review of this PR from the code review agent.                                        |
+| `blocked`                            | Deferred pending blocker closure; also usable as a manual 'hold for later' marker.             |
+| `bug`                                | Reports incorrect or unexpected behavior in an existing feature.                               |
+| `dependency upgrade`                 | Requests upgrading a library, package, tool version, or other dependency.                      |
+| `do`                                 | Simple, well-defined; implementable in a single easy-to-review commit.                         |
+| `draft`                              | Scoped by an unmerged design; do not implement yet.                                            |
+| `enhancement`                        | Requests new functionality or an improvement to existing behavior.                             |
+| `human-required`                     | A human is needed in the loop — agent should also assign the issue/PR to a human actor.      |
+| `model:claude-3-5-haiku-20241022`    | Run agents pinned to Claude 3.5 Haiku snapshot 2024-10-22 (overrides DEFAULT_MODEL).           |
+| `model:claude-3-5-haiku-latest`      | Run agents with the latest Claude 3.5 Haiku snapshot (overrides DEFAULT_MODEL).                |
+| `model:claude-3-5-sonnet-20241022`   | Run agents pinned to Claude 3.5 Sonnet snapshot 2024-10-22 (overrides DEFAULT_MODEL).          |
+| `model:claude-3-5-sonnet-latest`     | Run agents with the latest Claude 3.5 Sonnet snapshot (overrides DEFAULT_MODEL).               |
+| `model:claude-3-7-sonnet-20250219`   | Run agents pinned to Claude 3.7 Sonnet snapshot 2025-02-19 (overrides DEFAULT_MODEL).          |
+| `model:claude-3-7-sonnet-latest`     | Run agents with the latest Claude 3.7 Sonnet snapshot (overrides DEFAULT_MODEL).               |
+| `model:claude-3-haiku-20240307`      | Run agents pinned to Claude 3 Haiku snapshot 2024-03-07 (overrides DEFAULT_MODEL).             |
+| `model:claude-3-opus-20240229`       | Run agents pinned to Claude 3 Opus snapshot 2024-02-29 (overrides DEFAULT_MODEL).              |
+| `model:claude-3-opus-latest`         | Run agents with the latest Claude 3 Opus snapshot (overrides DEFAULT_MODEL).                   |
+| `model:claude-haiku-4-5-20251001`    | Run agents pinned to Claude Haiku 4.5 snapshot 2025-10-01 (overrides DEFAULT_MODEL).           |
+| `model:claude-haiku-4-5`             | Run agents with the latest Claude Haiku 4.5 snapshot (overrides DEFAULT_MODEL).                |
+| `model:claude-opus-4-1-20250805`     | Run agents pinned to Claude Opus 4.1 snapshot 2025-08-05 (overrides DEFAULT_MODEL).            |
+| `model:claude-opus-4-1`              | Run agents with the latest Claude Opus 4.1 snapshot (overrides DEFAULT_MODEL).                 |
+| `model:claude-opus-4-20250514`       | Run agents pinned to Claude Opus 4 snapshot 2025-05-14 (overrides DEFAULT_MODEL).              |
+| `model:claude-opus-4-5`              | Run agents with the latest Claude Opus 4.5 snapshot (overrides DEFAULT_MODEL).                 |
+| `model:claude-opus-4`                | Run agents with the latest Claude Opus 4 snapshot (overrides DEFAULT_MODEL).                   |
+| `model:claude-sonnet-4-20250514`     | Run agents pinned to Claude Sonnet 4 snapshot 2025-05-14 (overrides DEFAULT_MODEL).            |
+| `model:claude-sonnet-4-5-20250929`   | Run agents pinned to Claude Sonnet 4.5 snapshot 2025-09-29 (overrides DEFAULT_MODEL).          |
+| `model:claude-sonnet-4-5`            | Run agents with the latest Claude Sonnet 4.5 snapshot (overrides DEFAULT_MODEL).               |
+| `model:claude-sonnet-4`              | Run agents with the latest Claude Sonnet 4 snapshot (overrides DEFAULT_MODEL).                 |
+| `model:design:haiku`                 | Design agent only: use latest Claude Haiku (overrides generic model:* labels).                 |
+| `model:design:opus`                  | Design agent only: use latest Claude Opus (overrides generic model:* labels).                  |
+| `model:design:sonnet`                | Design agent only: use latest Claude Sonnet (overrides generic model:* labels).                |
+| `model:developer:haiku`              | Developer agent only: use latest Claude Haiku (overrides generic model:* labels).              |
+| `model:developer:opus`               | Developer agent only: use latest Claude Opus (overrides generic model:* labels).               |
+| `model:developer:sonnet`             | Developer agent only: use latest Claude Sonnet (overrides generic model:* labels).             |
+| `model:gpt-5.6-luna`                 | Run agents on this issue with OpenAI gpt-5.6-luna (overrides DEFAULT_MODEL).                   |
+| `model:gpt-5.6-sol`                  | Run agents on this issue with OpenAI gpt-5.6-sol (overrides DEFAULT_MODEL).                    |
+| `model:gpt-5.6-terra`                | Run agents on this issue with OpenAI gpt-5.6-terra (overrides DEFAULT_MODEL).                  |
+| `model:gpt-5`                        | Run agents on this issue with OpenAI gpt-5 (overrides DEFAULT_MODEL).                          |
+| `model:grok-4.20-0309-non-reasoning` | Run agents with xAI grok-4.20-0309-non-reasoning (overrides DEFAULT_MODEL).                    |
+| `model:grok-4.20-0309-reasoning`     | Run agents with xAI grok-4.20-0309-reasoning (overrides DEFAULT_MODEL).                        |
+| `model:grok-4.20-multi-agent-0309`   | Run agents with xAI grok-4.20-multi-agent-0309 (overrides DEFAULT_MODEL).                      |
+| `model:grok-4.3`                     | Run agents on this issue with xAI grok-4.3 via Grok Build CLI (overrides DEFAULT_MODEL).       |
+| `model:grok-4.5`                     | Run agents on this issue with xAI grok-4.5 via Grok Build CLI (overrides DEFAULT_MODEL).       |
+| `model:grok-4.6`                     | Run agents on this issue with xAI grok-4.6 via Grok Build CLI (overrides DEFAULT_MODEL).       |
+| `model:grok-build-0.1`               | Run agents on this issue with xAI grok-build-0.1 via Grok Build CLI (overrides DEFAULT_MODEL). |
+| `model:groom:haiku`                  | Groom agent only: use latest Claude Haiku (overrides generic model:* labels).                  |
+| `model:groom:opus`                   | Groom agent only: use latest Claude Opus (overrides generic model:* labels).                   |
+| `model:groom:sonnet`                 | Groom agent only: use latest Claude Sonnet (overrides generic model:* labels).                 |
+| `model:haiku`                        | Run agents on this issue with the latest Claude Haiku (overrides DEFAULT_MODEL).               |
+| `model:o3`                           | Run agents on this issue with OpenAI o3 (overrides DEFAULT_MODEL).                             |
+| `model:opus`                         | Run agents on this issue with the latest Claude Opus (overrides DEFAULT_MODEL).                |
+| `model:review:haiku`                 | Pre-provisioned for future use; PR-based workflows still use single-tier model:* resolution.   |
+| `model:review:opus`                  | Pre-provisioned for future use; PR-based workflows still use single-tier model:* resolution.   |
+| `model:review:sonnet`                | Pre-provisioned for future use; PR-based workflows still use single-tier model:* resolution.   |
+| `model:sonnet`                       | Run agents on this issue with the latest Claude Sonnet (overrides DEFAULT_MODEL).              |
+| `plan`                               | Complex enough to require design or planning before implementation.                            |
+| `question`                           | Issue lacks sufficient detail; clarifying questions posted.                                    |
 <!-- generated:labels:end -->
 
 - `agent:groom` — triggers the grooming agent on the issue. On success, the label is automatically removed from the issue so the grooming run is not repeated; to re-groom an issue, re-apply the label. If the run fails the label is intentionally left in place so the issue can be re-triggered without manual re-labeling.
