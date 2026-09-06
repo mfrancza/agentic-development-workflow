@@ -41,6 +41,11 @@ _die() { echo "ERROR: $*" >&2; exit 1; }
 command -v python3 >/dev/null 2>&1 || _die "python3 is required but not found in PATH"
 [[ "${BASH_VERSINFO[0]}" -ge 4 ]] || _die "bash 4+ required (found ${BASH_VERSION})"
 
+# Global accumulator for temp files so the EXIT trap covers all three
+# replace_section calls even though each would otherwise overwrite the trap.
+TMPFILES=()
+trap 'rm -f "${TMPFILES[@]}"' EXIT
+
 # -----------------------------------------------------------------------------
 # Helper: replace a generated section in AGENTS.md in-place
 #
@@ -66,7 +71,7 @@ replace_section() {
     local cf tf
     cf=$(mktemp)
     tf=$(mktemp)
-    trap 'rm -f "${cf:-}" "${tf:-}"' EXIT
+    TMPFILES+=("$cf" "$tf")
     printf '%s' "$content" > "$cf"
 
     awk \
