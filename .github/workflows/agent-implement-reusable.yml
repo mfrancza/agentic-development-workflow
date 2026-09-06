@@ -1,0 +1,168 @@
+name: agent-implement (reusable)
+
+# Reusable workflow — call this from agent-implement.yml (or any external
+# caller) to run the developer agent on a specific issue.
+#
+# Security: allowlist gating is the caller's responsibility; this reusable
+# performs no sender check. Keep the allowlist condition in the caller stub.
+# The preflight checks here (skip-if-PR-exists, skip-if-draft,
+# block-on-open-blockers) are operational checks, not security gates, so they
+# live in the reusable.
+#
+# External consumers: pass `image` to use a published developer image and
+# skip the Docker build, e.g.:
+#   image: ghcr.io/mfrancza/agentic-development-workflow/developer:v1
+# Leave image empty (the default) to build from the local source tree —
+# this repo's own caller stub relies on the default.
+
+on:
+  workflow_call:
+    inputs:
+      issue-number:
+        description: 'Issue number to implement'
+        required: true
+        type: number
+      repo:
+        description: 'GitHub repository (owner/name), e.g. octocat/my-repo'
+        required: true
+        type: string
+      image:
+        description: >
+          Pre-built developer image reference to pull and run (e.g.
+          ghcr.io/mfrancza/agentic-development-workflow/developer:v1).
+          Leave empty (the default) to build the developer image from the
+          local source tree — this repo uses this mode.
+        required: false
+        type: string
+        default: ''
+      default-model:
+        description: 'Default Claude model when no model label is present on the issue'
+        required: false
+        type: string
+        default: ''
+      code-reviewers:
+        description: >
+          CODE_REVIEWERS value forwarded to the agent container (JSON-encoded
+          list of GitHub logins, e.g. ["alice","bob"]).
+        required: false
+        type: string
+        default: ''
+      logs-retention-days:
+        description: 'Days to retain uploaded log artifacts'
+        required: false
+        type: number
+        default: 30
+    secrets:
+      DEVELOPER_APP_ID:
+        required: true
+      DEVELOPER_APP_PRIVATE_KEY:
+        required: true
+      ANTHROPIC_API_KEY:
+        required: true
+      OPENAI_API_KEY:
+        required: true
+      XAI_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  implement:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      # Checkout must precede the local agent-token action: the runner resolves
+      # ./.github/actions/* references from the workspace.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: "Preflight: skip if PR already exists"
+        id: preflight
+        uses: ./.github/actions/find-existing-pr
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ inputs.repo }}
+          branch: agent/issue-${{ inputs.issue-number }}
+          owner: ${{ github.repository_owner }}
+
+      - name: "Preflight: skip if issue is labeled draft"
+        id: draft-check
+        if: steps.preflight.outputs.skip != 'true'
+        uses: ./.github/actions/check-draft-label
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ inputs.repo }}
+          issue-number: ${{ inputs.issue-number }}
+
+      - name: "Preflight: check for open blockers"
+        id: blockers-check
+        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
+        uses: ./.github/actions/check-blockers
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          repo: ${{ inputs.repo }}
+          issue-number: ${{ inputs.issue-number }}
+
+      - name: "Preflight: fail if blockers are open"
+        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true' && steps.blockers-check.outputs.blocked == 'true'
+        env:
+          OPEN_BLOCKERS: ${{ steps.blockers-check.outputs.open-blockers }}
+        run: |
+          set -euo pipefail
+          msg=$(jq -r '[.[] | "#\(.number): \(.title)"] | join(", ")' <<< "${OPEN_BLOCKERS}")
+          echo "::error::Issue #${{ inputs.issue-number }} is blocked by open issues: ${msg}"
+          exit 1
+
+      - name: Resolve Claude model from issue labels
+        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
+        id: model
+        uses: ./.github/actions/resolve-model
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          subject-type: issue
+          subject-number: ${{ inputs.issue-number }}
+          repo: ${{ inputs.repo }}
+          default-model: ${{ inputs.default-model }}
+          agent-type: developer
+
+      - name: Prepare agent log directory
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/agent-logs"
+          chmod 0777 "${RUNNER_TEMP}/agent-logs"
+
+      - name: Run agent
+        if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
+        uses: ./.github/actions/run-agent
+        env:
+          CODE_REVIEWERS: ${{ inputs.code-reviewers }}
+        with:
+          image: ${{ inputs.image }}
+          gh-token: ${{ steps.setup.outputs.token }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          xai-api-key: ${{ secrets.XAI_API_KEY }}
+          repo: ${{ inputs.repo }}
+          agent-action: implement
+          issue-number: ${{ inputs.issue-number }}
+          model: ${{ steps.model.outputs.claude_model }}
+          logs-dir: ${{ runner.temp }}/agent-logs
+
+      - name: Upload agent logs
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: agent-logs-implement-issue-${{ inputs.issue-number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-logs
+          retention-days: ${{ inputs.logs-retention-days }}
+          if-no-files-found: warn
