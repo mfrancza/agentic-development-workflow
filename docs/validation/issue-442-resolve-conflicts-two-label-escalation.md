@@ -171,7 +171,7 @@ PR #457 — Design: Initial v1.0.0 release
 ```
 
 **None of the currently open PRs carry `human-required`.** No backfill is
-required. All open PRs are either mergeable with `agent:review` label. No PR
+required. All open PRs are mergeable and carry only the `agent:review` label. No PR
 was silently skipped by the old resolver due to `human-required` being present
 without a corresponding `conflicts-escalated` marker.
 
