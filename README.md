@@ -251,6 +251,14 @@ gh secret set TF_API_TOKEN             --body "<hcp-terraform-api-token>"  # gen
 
 Workflows use `DEVELOPER_APP_ID` / `DEVELOPER_APP_PRIVATE_KEY` to mint short-lived installation tokens for developer-agent runs, and `REVIEWER_APP_ID` / `REVIEWER_APP_PRIVATE_KEY` for reviewer-agent runs (`agent-review.yml`). All workflows pass `ANTHROPIC_API_KEY` through to the container. **Important:** despite the `_APP_ID` suffix, these secrets must hold the GitHub App **Client ID** (the `Iv23.xxx` string visible in the App's General settings), which is the value forwarded as `client-id` to `actions/create-github-app-token`. The separate numeric "App ID" shown on the same page is not used here.
 
+To verify all secrets are configured before triggering a workflow run, list the secret names (values are never exposed):
+
+```bash
+gh secret list --repo <owner>/<repo>
+```
+
+For the Terraform CI pipeline specifically, confirm that `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, and `TF_API_TOKEN` all appear in the output. If any are missing, re-run the corresponding `gh secret set` command above. A missing secret causes `startup_failure` on the Terraform CI workflow before any job starts — `gh secret list` is the fastest way to identify which secret is absent.
+
 ### 4. Build the developer agent container
 
 The image is built on-demand inside each workflow (see [`.github/workflows/`](.github/workflows/)). To build locally for testing:
