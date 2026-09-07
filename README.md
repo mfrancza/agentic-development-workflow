@@ -155,13 +155,17 @@ Then install each App on this repository (sidebar → **Install App** → **Inst
 
 ### 2. Run Terraform
 
-```bash
-cd terraform
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars:
+`terraform/terraform.tfvars` is committed in this repository and contains the
+operational configuration for this deployment (repo owner/name, agent allowlist,
+auto-trigger flags, assignee/reviewer lists). Nothing in it is a secret — secrets
+live only in Actions secrets (step 3). If you are setting up your own fork, edit
+`terraform/terraform.tfvars` directly:
+
+```
 #   repo_owner           — GitHub user or org that owns the repo
 #   repo_name            — repository name (default: agentic-development-workflow)
-#   agent_allowlist      — GitHub usernames permitted to trigger agent workflows
+#   agent_allowlist      — GitHub usernames and agent bot identities (e.g.
+#                          myfork-developer-agent[bot]) permitted to trigger workflows
 #   default_model        — repo-wide default model (e.g. "sonnet")
 #   auto_trigger_agents  — per-stage auto-trigger switches (all false by default;
 #                          set a key to true to auto-apply that stage's agent:* label)
@@ -174,6 +178,10 @@ cp terraform.tfvars.example terraform.tfvars
 #                          is warranted; stored as the JSON-encoded CODE_REVIEWERS
 #                          Actions variable; omit or set to [] to request no specific
 #                          reviewers
+```
+
+```bash
+cd terraform
 
 export GITHUB_TOKEN=$(gh auth token)  # or any token with `repo` scope
 

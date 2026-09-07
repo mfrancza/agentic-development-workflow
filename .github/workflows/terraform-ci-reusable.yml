@@ -62,6 +62,7 @@ jobs:
     name: Terraform plan
     if: inputs.event == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
@@ -166,7 +167,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -euo pipefail
-          terraform init
+          terraform init -input=false
 
       - name: Terraform fmt check
         working-directory: terraform
@@ -188,7 +189,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -euo pipefail
-          terraform plan -out=tfplan
+          terraform plan -input=false -out=tfplan
 
       - name: Show plan as text
         working-directory: terraform
@@ -214,6 +215,7 @@ jobs:
     name: Terraform apply
     if: inputs.event == 'push'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     concurrency:
@@ -256,7 +258,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -euo pipefail
-          terraform init
+          terraform init -input=false
 
       - name: Terraform plan
         working-directory: terraform
@@ -264,7 +266,7 @@ jobs:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -euo pipefail
-          terraform plan -out=tfplan
+          terraform plan -input=false -out=tfplan
 
       - name: Terraform apply
         working-directory: terraform
@@ -272,4 +274,4 @@ jobs:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -euo pipefail
-          terraform apply -auto-approve tfplan
+          terraform apply -input=false -auto-approve tfplan
