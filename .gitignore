@@ -10,9 +10,13 @@
 crash.log
 crash.*.log
 
-# Secrets — never commit real values
+# terraform.tfvars is committed operational config (non-secret: repo owner/name,
+# agent allowlist, auto-trigger flags, assignee/reviewer lists).  Secrets stay
+# in Actions secrets only — nothing in terraform.tfvars is a secret.
+# All other .tfvars files (local overrides, one-off experiments) remain ignored.
 *.tfvars
 !*.tfvars.example
+!terraform/terraform.tfvars
 
 # Agent App private keys (PEM downloads from GitHub)
 *.pem
