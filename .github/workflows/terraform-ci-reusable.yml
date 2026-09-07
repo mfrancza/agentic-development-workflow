@@ -66,7 +66,10 @@ jobs:
       contents: read
       pull-requests: write
     env:
-      TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+      # Terraform reads HCP credentials from TF_TOKEN_<hostname> env vars
+      # (dots as underscores) — a bare TF_API_TOKEN env var is ignored by the
+      # CLI and init fails asking for `terraform login`.
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
 
     steps:
       # Checkout the base branch first so local composite actions
@@ -217,7 +220,10 @@ jobs:
       group: terraform-apply
       cancel-in-progress: false
     env:
-      TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+      # Terraform reads HCP credentials from TF_TOKEN_<hostname> env vars
+      # (dots as underscores) — a bare TF_API_TOKEN env var is ignored by the
+      # CLI and init fails asking for `terraform login`.
+      TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
 
     steps:
       - name: Checkout
