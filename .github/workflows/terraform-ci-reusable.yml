@@ -50,9 +50,6 @@ on:
       TF_API_TOKEN:
         required: true
 
-# Deny-all at the workflow level; each job declares only what it needs.
-permissions: {}
-
 env:
   TF_IN_AUTOMATION: 'true'
 
