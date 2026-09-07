@@ -40,7 +40,7 @@ See [`requirements.md`](requirements.md) for the full project specification and 
     │   ├── tsconfig.json             # strict: true
     │   ├── src/                      # One entry file per activity; lib/ for shared helpers
     │   └── test/                     # Vitest unit tests (one file per activity)
-    └── workflows/                    # Event-triggered caller stubs (one per AGENT_ACTION trigger), reusable `*-reusable.yml` counterparts for all eight agent-container workflows, plus ci.yml and secret-scan.yml
+    └── workflows/                    # Event-triggered caller stubs (one per AGENT_ACTION trigger), reusable `*-reusable.yml` counterparts for all eight agent-container workflows, plus ci.yml, secret-scan.yml, and terraform-ci.yml (plan on PR / apply on push to main)
 ```
 
 ## MVP Workflow

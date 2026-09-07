@@ -1,0 +1,259 @@
+name: Terraform CI (reusable)
+
+# Reusable Terraform CI workflow.
+#
+# Two jobs — one per triggering mode:
+#   plan  (inputs.event == 'pull_request'): fmt-check → validate → plan → post PR comment
+#   apply (inputs.event == 'push'):         init → plan → apply -auto-approve
+#
+# Caller responsibilities:
+#   - Use pull_request_target (not pull_request) for the plan trigger so the
+#     workflow YAML and local composite actions are always loaded from the base
+#     branch (Decision 2, docs/design/terraform-ci.md).
+#   - Gate the plan call on github.event.pull_request.head.repo.full_name ==
+#     github.repository to exclude fork-headed PRs (same model as agent-review).
+#   - Pass secrets: inherit so TF_API_TOKEN and the TERRAFORM_APP_* secrets
+#     are available here.
+#
+# External consumers can reference this workflow by path from their own caller
+# stub. The steps use paths relative to the workspace root (terraform/,
+# .github/actions/), so the caller's repository must have the same layout.
+
+on:
+  workflow_call:
+    inputs:
+      event:
+        description: >
+          Triggering event type. Pass "pull_request" to run the plan job;
+          pass "push" to run the apply job.
+        required: true
+        type: string
+      pr-number:
+        description: >
+          Pull request number to post the plan comment on.
+          Required when event is "pull_request"; ignored for "push".
+        required: false
+        type: number
+        default: 0
+      head-sha:
+        description: >
+          PR head commit SHA to check out and plan against.
+          Required when event is "pull_request"; ignored for "push".
+        required: false
+        type: string
+        default: ''
+    secrets:
+      TERRAFORM_APP_ID:
+        required: true
+      TERRAFORM_APP_PRIVATE_KEY:
+        required: true
+      TF_API_TOKEN:
+        required: true
+
+# Deny-all at the workflow level; each job declares only what it needs.
+permissions: {}
+
+env:
+  TF_VERSION: '1.9.0'
+  TF_IN_AUTOMATION: 'true'
+
+jobs:
+  # ── Plan job ────────────────────────────────────────────────────────────────
+  # Triggered on pull_request_target (caller's responsibility).
+  # Runs from the base-branch workflow YAML so a PR cannot modify the workflow
+  # code that executes against the terraform-ci token.
+  plan:
+    name: Terraform plan
+    if: inputs.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+
+    steps:
+      # Checkout the base branch first so local composite actions
+      # (./.github/actions/**) resolve from trusted base-branch code.
+      # On pull_request_target the default ref is GITHUB_SHA = current
+      # base branch HEAD (not a merge commit). See agent-review-reusable.yml
+      # for the same pattern and rationale.
+      - name: Checkout base branch (local actions)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint terraform-ci App token
+        id: token
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.TERRAFORM_APP_ID }}
+          private-key: ${{ secrets.TERRAFORM_APP_PRIVATE_KEY }}
+
+      # Check out the PR head so the Terraform steps run against the PR's
+      # changes. persist-credentials: false prevents git credential helpers
+      # from seeing the minted token after the checkout.
+      - name: Checkout PR head (Terraform code)
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ inputs.head-sha }}
+          persist-credentials: false
+
+      # Provider allowlist gate — runs from base-branch workflow YAML so a PR
+      # cannot modify the gate that inspects it.  Fails if any provider source
+      # in .terraform.lock.hcl or required_providers blocks is not on the
+      # explicit allowlist.  See docs/design/terraform-ci.md Decision 2,
+      # mitigation 4 for the full rationale.
+      - name: Terraform provider allowlist gate
+        run: |
+          set -euo pipefail
+          python3 - << 'PYEOF'
+          import re, sys, pathlib, glob
+
+          # Hardcoded allowlist — lives in the base-branch workflow YAML; a PR
+          # under inspection cannot modify this list via pull_request_target.
+          ALLOWED = {
+              "registry.terraform.io/integrations/github",
+              # Short form used in required_providers (Terraform normalises it
+              # to the canonical registry.terraform.io/ prefix at init time).
+              "integrations/github",
+          }
+
+          sources = set()
+
+          # 1. Provider blocks in .terraform.lock.hcl (canonical registry form)
+          lockfile = pathlib.Path("terraform/.terraform.lock.hcl")
+          if lockfile.exists():
+              for m in re.finditer(
+                  r'^provider\s+"([^"]+)"', lockfile.read_text(), re.MULTILINE
+              ):
+                  sources.add(m.group(1))
+
+          # 2. source = "..." inside required_providers { } blocks in all .tf files
+          for tf_path in glob.glob("terraform/**/*.tf", recursive=True):
+              content = pathlib.Path(tf_path).read_text()
+              for rp_match in re.finditer(
+                  r'required_providers\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}',
+                  content,
+                  re.DOTALL,
+              ):
+                  block = rp_match.group(1)
+                  for src_match in re.finditer(r'source\s*=\s*"([^"]+)"', block):
+                      sources.add(src_match.group(1))
+
+          violations = sources - ALLOWED
+          if violations:
+              for v in sorted(violations):
+                  print(f"::error::Terraform provider source not on allowlist: {v}")
+              sys.exit(1)
+          print(f"Provider allowlist gate passed. Sources checked: {sources or '(none)'}")
+          PYEOF
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform init
+        working-directory: terraform
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          terraform init
+
+      - name: Terraform fmt check
+        working-directory: terraform
+        run: |
+          set -euo pipefail
+          terraform fmt -check -recursive
+
+      - name: Terraform validate
+        working-directory: terraform
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          terraform validate
+
+      - name: Terraform plan
+        working-directory: terraform
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          terraform plan -out=tfplan
+
+      - name: Show plan as text
+        working-directory: terraform
+        run: |
+          set -euo pipefail
+          terraform show -no-color tfplan > "$GITHUB_WORKSPACE/terraform/tfplan.txt"
+
+      - name: Post Terraform plan comment
+        uses: ./.github/actions/terraform-plan-comment
+        with:
+          token: ${{ steps.token.outputs.token }}
+          repo: ${{ github.repository }}
+          pr-number: ${{ inputs.pr-number }}
+          plan-file: ${{ github.workspace }}/terraform/tfplan.txt
+          bot-login: "terraform-ci[bot]"
+
+  # ── Apply job ───────────────────────────────────────────────────────────────
+  # Triggered on push to main (caller's responsibility).
+  # Serialised by a named concurrency group so a second merge that lands while
+  # an apply is running queues rather than cancels — a mid-apply cancel leaves
+  # the HCP state file locked and requires manual force-unlock.
+  apply:
+    name: Terraform apply
+    if: inputs.event == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    concurrency:
+      group: terraform-apply
+      cancel-in-progress: false
+    env:
+      TF_API_TOKEN: ${{ secrets.TF_API_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Mint terraform-ci App token
+        id: token
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.TERRAFORM_APP_ID }}
+          private-key: ${{ secrets.TERRAFORM_APP_PRIVATE_KEY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform init
+        working-directory: terraform
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          terraform init
+
+      - name: Terraform plan
+        working-directory: terraform
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          terraform plan -out=tfplan
+
+      - name: Terraform apply
+        working-directory: terraform
+        env:
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          terraform apply -auto-approve tfplan
