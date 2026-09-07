@@ -1,6 +1,19 @@
 terraform {
   required_version = ">= 1.6.0"
 
+  # HCP Terraform (state-only backend — execution mode = local so every
+  # plan/apply runs in GitHub Actions; HCP only stores state and holds the lock).
+  # One-time bootstrap: after creating the workspace in the HCP UI, run
+  #   cd terraform && terraform init -migrate-state
+  # to copy the existing local state into the HCP workspace.
+  # Requires TF_API_TOKEN to be set (see README §2 and §3).
+  cloud {
+    organization = "mfrancza"
+    workspaces {
+      name = "agentic-development-workflow"
+    }
+  }
+
   required_providers {
     github = {
       source  = "integrations/github"
@@ -76,6 +89,9 @@ module "labels" {
 module "actions_policy" {
   source     = "./modules/actions-policy"
   repository = github_repository.this.name
+  patterns_allowed = [
+    "hashicorp/setup-terraform",
+  ]
 }
 
 # ── State migration ───────────────────────────────────────────────────────────
