@@ -130,7 +130,7 @@ The steps below describe how to wire up the same workflow in your own GitHub rep
 
 ### 1. Create the agent GitHub Apps (one-time, manual)
 
-Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **Settings → Developer settings → GitHub Apps → New GitHub App**. Create two Apps:
+Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **Settings → Developer settings → GitHub Apps → New GitHub App**. Create three Apps:
 
 **developer-agent**
 - Repository permissions: Contents (R/W), Issues (R/W), Pull requests (R/W), Workflows (R/W), Metadata (R), Checks (R), Deployments (R)
@@ -143,6 +143,12 @@ Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **S
 - Subscribe to events: Pull request, Pull request review, Issue comment
 - Webhook: **uncheck "Active"** (same reason as above).
 - After creation: note the **Client ID** (same as above — the `Iv23.xxx` string) and download the private key.
+
+**terraform-ci**
+- Repository permissions: Administration (R/W), Metadata (R), Contents (R), Issues (R/W), Actions (R/W)
+- Subscribe to events: none (App is only used to mint tokens for Terraform runs; no webhook events needed).
+- Webhook: **uncheck "Active"** (same reason as above).
+- After creation: note the **Client ID** (the `Iv23.xxx` string) and download the private key.
 
 Then install each App on this repository (sidebar → **Install App** → **Install** next to your username → **Only select repositories** → pick `agentic-development-workflow`). That per-repo selection is what scopes the App to this repo; Terraform deliberately does not manage App installations (the GitHub API endpoints for it reject OAuth user tokens, which is what `gh auth token` issues).
 
@@ -233,6 +239,10 @@ gh secret set XAI_API_KEY             --body "<xai api key>"         # optional 
 # Required for the reviewer agent (used by agent-review.yml)
 gh secret set REVIEWER_APP_ID          --body "<reviewer App Client ID>"   # the Iv23.xxx Client ID, not the numeric App ID
 gh secret set REVIEWER_APP_PRIVATE_KEY < ~/.config/agentic-agents/reviewer-agent.pem
+
+# Required for the terraform-ci App (used by terraform-ci.yml)
+gh secret set TERRAFORM_APP_ID         --body "<terraform-ci App Client ID>"  # the Iv23.xxx Client ID, not the numeric App ID
+gh secret set TERRAFORM_APP_PRIVATE_KEY < ~/.config/agentic-agents/terraform-ci.pem
 
 # Required for HCP Terraform remote state backend (used by terraform-ci.yml and local terraform init)
 gh secret set TF_API_TOKEN             --body "<hcp-terraform-api-token>"  # generate in HCP UI: User Settings → Tokens
