@@ -40,7 +40,9 @@ terraform {
 #  - grooming labels (the grooming agent applies these based on issue
 #    content — see agents/grooming/label-criteria.json).
 #  - workflow labels (`human-required` signals that an agent has escalated to
-#    a human and the issue/PR should be assigned to a human actor).
+#    a human and the issue/PR should be assigned to a human actor;
+#    `conflicts-escalated` marks PRs where the resolve-conflicts agent has
+#    already tried and escalated, so subsequent pushes to main skip re-attempting).
 #  - lifecycle labels (`draft` is applied by the designer agent to sub-issues
 #    it creates; means the issue is scoped by an unmerged design and is not
 #    yet ready for implementation; `blocked` is applied by the auto-trigger
@@ -315,6 +317,10 @@ locals {
     "human-required" = {
       color       = "b60205"
       description = "A human is needed in the loop — agent should also assign the issue/PR to a human actor."
+    }
+    "conflicts-escalated" = {
+      color       = "b60205"
+      description = "The resolve-conflicts agent already tried this PR and escalated; remove to re-attempt."
     }
 
     "blocked" = {
