@@ -87,14 +87,14 @@ module "labels" {
 }
 
 module "actions_policy" {
-  source           = "./modules/actions-policy"
-  repository       = github_repository.this.name
+  source     = "./modules/actions-policy"
+  repository = github_repository.this.name
   patterns_allowed = [
     # Keep this SHA in lockstep with the uses: pin in
     # .github/workflows/terraform-ci-reusable.yml (both occurrences).
     # GitHub's allowlist requires OWNER/REPO@SHA-OR-TAG — a bare OWNER/REPO
     # matches nothing and silently startup-fails all workflows that use it.
-    "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e",  # v4.0.1
+    "hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e", # v4.0.1
   ]
 }
 
