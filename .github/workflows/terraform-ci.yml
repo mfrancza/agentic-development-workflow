@@ -26,7 +26,6 @@ on:
       - '.github/workflows/terraform-ci.yml'
       - '.github/workflows/terraform-ci-reusable.yml'
       - '.github/actions/terraform-plan-comment/**'
-      - '.github/scripts/**'
 
 # Deny-all at the workflow level; each job grants only what it needs.
 permissions: {}
