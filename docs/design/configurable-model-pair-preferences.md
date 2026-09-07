@@ -135,13 +135,25 @@ The `preferred_vendors` list is the tie-breaker when `different-vendor-same-clas
 }
 ```
 
-The first entry in each per-vendor list is the **canonical pick** for that (class, vendor) pair — used when the pairing resolver needs to name one model. Additional entries recognise alternative model IDs as members of the same class (so an author label `claude-sonnet-4-5` still resolves to sonnet-class).
+**Semantics of the two sections.**
 
-Extend `docs/model-guidance.md` with a new "Cross-vendor class table" section that renders the same data in Markdown, prefaced by: "This section mirrors `.github/scripts/data/model-classes.json`; edit the JSON and refresh this section in the same PR." Add a Vitest unit test that fails when the JSON's canonical picks disagree with the doc's cross-vendor tier table — the class table is small and static, so a hand-rolled snapshot check is enough.
+- `classes[class][vendor]` is a **forward-only** listing of models known to belong to that class for that vendor. The first entry is the **canonical pick** — the model the pairing resolver names when it needs to pick one representative for `(class, vendor)`. Additional entries recognise alternative model IDs as members of the same class (so an author label `claude-sonnet-4-5` still resolves to sonnet-class). A model MAY appear under more than one `class` when the source table in `docs/model-guidance.md` legitimately places it in multiple tiers (e.g. `grok-4.6` in both `sonnet` and `opus`); this is not an error.
+- `modelToClass` is the **authoritative reverse lookup**: given any model ID, it returns the single class the resolver treats it as. For dual-class models, `modelToClass` records the resolved class (the one the pairing use case prefers). Loaders in `.github/scripts/src/lib/model-classes.ts` MUST use `modelToClass` — never a reverse-iteration of `classes` — for author-model → class resolution.
 
-**Rationale.** The class table is consumed at runtime by the pairing resolver (a TypeScript activity) and at read-time by humans skimming `docs/model-guidance.md`. Keeping both readers pointed at one JSON file is the "volatile facts live at their sources" convention from `AGENTS.md` applied to a new source. A JSON file is trivially importable in TypeScript (`import * as data from "./data/model-classes.json"`), unit-testable, and reviewable in a diff. Markdown-as-source with a parser was considered and rejected — Markdown parsing at CI time is fragile and every table edit becomes a doc-formatting exercise.
+Extend `docs/model-guidance.md` with a new "Cross-vendor class table" section that renders the same data in Markdown, prefaced by: "This section mirrors `.github/scripts/data/model-classes.json`; edit the JSON and refresh this section in the same PR." Where a model is a member of more than one class (currently `grok-4.6`), that section MUST include a short paragraph naming the model, listing every class it appears under in the JSON, and stating which class `modelToClass` resolves it to and why. JSON itself does not support comments, so the human-readable resolution lives in the doc rather than in the data file.
 
-The initial class assignments align with the existing "Cross-vendor capability tiers at a glance" table in `docs/model-guidance.md` (line 172): the "Alternatives" column already lists which OpenAI/xAI models substitute for `model:haiku` / `model:sonnet` / `model:opus`. The JSON file captures those mappings machine-readably. Where the existing table lists a model in more than one row (e.g. `grok-4.6` appears in both "Balanced" and "High capability"), the JSON assigns it to the row that best fits the pairing use case; a comment in the JSON file documents the resolution.
+Add a Vitest unit test at `.github/scripts/src/lib/model-classes.test.ts` with the following checks (the class table is small and static, so hand-rolled assertions are enough):
+
+1. **Canonical picks are mapped consistently.** For every `(class, vendor)` pair, the *first* entry in `classes[class][vendor]` (the canonical pick) MUST appear as a key in `modelToClass` and MUST map to that same `class`. This catches the "canonical pick and reverse lookup disagree" bug without prohibiting dual-class membership for non-canonical entries.
+2. **`modelToClass` is a superset of every entry in `classes`.** Every model listed anywhere in `classes[*][*]` MUST appear as a key in `modelToClass`. Missing keys mean the reverse lookup can't resolve an author model that the forward table advertises.
+3. **Dual-class entries are intentional, not stray.** For any model that appears in more than one `classes[class][vendor]` list, `modelToClass` MUST map it to one of those classes (never to a third class it isn't listed under). Any model that is a dual-class member MUST also be named in the "Cross-vendor class table" paragraph in `docs/model-guidance.md` — the test asserts the doc contains a line matching `/\bgrok-4\.6\b/` (or, more generally, iterates the dual-class model set and greps for each name). This is the JSON → doc consistency check called out in the design.
+4. **Canonical picks in the JSON agree with the "Alternatives" column in the doc.** For each class row, the first entry per vendor in the JSON MUST appear in the corresponding doc row's Alternatives cell.
+
+The test does NOT verify that every model listed in `classes` maps back to that same class via `modelToClass` — that would make dual-class membership an error rather than a documented exception.
+
+**Rationale.** The class table is consumed at runtime by the pairing resolver (a TypeScript activity) and at read-time by humans skimming `docs/model-guidance.md`. Keeping both readers pointed at one JSON file is the "volatile facts live at their sources" convention from `AGENTS.md` applied to a new source. A JSON file is trivially importable in TypeScript (`import * as data from "./data/model-classes.json"`), unit-testable, and reviewable in a diff. Markdown-as-source with a parser was considered and rejected — Markdown parsing at CI time is fragile and every table edit becomes a doc-formatting exercise. JSON's lack of comment support is a real constraint: the design accepts it and puts human-readable exceptions in the companion doc, keeping the JSON parseable by `import * as data from "./data/model-classes.json"` without a preprocessing step.
+
+The initial class assignments align with the existing "Cross-vendor capability tiers at a glance" table in `docs/model-guidance.md` (line 172): the "Alternatives" column already lists which OpenAI/xAI models substitute for `model:haiku` / `model:sonnet` / `model:opus`. The JSON file captures those mappings machine-readably. Where the existing table lists a model in more than one row (e.g. `grok-4.6` appears in both "Balanced" and "High capability"), the JSON preserves that dual membership in `classes` (both `sonnet.xai` and `opus.xai` include `grok-4.6`) and `modelToClass` records the resolved class the pairing resolver treats it as (currently `"sonnet"`, because grok-4.6's cost/latency profile is closer to the sonnet tier for reviewer selection). The dual-class-explanation paragraph in the new `docs/model-guidance.md` section documents this resolution; see the Vitest test for the JSON ↔ doc consistency check.
 
 **Alternative considered — hand-maintained TypeScript constant.** Rejected. TypeScript constants are less approachable for non-developers reviewing a class-table change; JSON is more portable.
 
@@ -187,6 +199,8 @@ If the primary policy is already `"different-vendor-same-class"`, that entry is 
 
 **Loud logging.** Every deviation from "primary policy pick succeeded" is emitted via `core.warning()` — visible in the workflow annotations and the run summary. The resolver never silently returns the author's model unless `policy == "same-model"`.
 
+**Edge case: `DEFAULT_MODEL == authoringModel`.** The word "silently" in Requirement 6 is load-bearing: returning the author's model with a loud log line is acceptable; returning it with no signal is not. When the implicit terminal `DEFAULT_MODEL` fallback fires and `DEFAULT_MODEL` resolves to the same model as `authoringModel` (e.g. both are `sonnet` because the repo default matches the PR's author), the resolver MUST emit `core.error()` — not just `core.warning()` — and include the string `"DEFAULT_MODEL equals authoring model; reviewer will share the author's blind spots"` in the annotation. This is a soft failure (the resolver still returns `DEFAULT_MODEL`, the review still runs), but `core.error()` surfaces the condition in the workflow summary and in the PR checks pane so operators notice and can either widen the fallback chain, set additional provider keys, or apply an explicit `model:review:*` label. In all other cases where a fallback is taken, `core.warning()` remains the correct level.
+
 **Rationale.** The grooming notes require: "fall back to same-vendor different-model, then `DEFAULT_MODEL`; fail-safe and logged, never silently same-model unless configured." The three-entry supported chain covers the enumerated fallbacks and lets the operator narrow the ladder if they want (e.g. `fallback_chain = ["default-model"]` skips the same-vendor fallback entirely and lands on the repo default whenever the pairing pick misses).
 
 **Alternative considered — hard-code the fallback chain in the resolver.** Rejected. Different operators have different tolerances: some want the "prefer any cross-vendor pick even if class doesn't match" behaviour, some want strict fail-to-default. A configurable chain accommodates both without prompt-engineering the resolver.
@@ -203,8 +217,18 @@ export function selectReviewerModel(
   policy: PairingPolicy,
   availableProviders: readonly string[],
   classTable: ClassTable,
-): { model: string; source: "primary" | "fallback:same-vendor" | "fallback:default"; warnings: string[] }
+): {
+  model: string;
+  source:
+    | "primary"
+    | "fallback:different-vendor-same-class"
+    | "fallback:same-vendor-different-model"
+    | "fallback:default-model";
+  warnings: string[];
+}
 ```
+
+The `source` values mirror the fallback-chain entry names from **Decision 5** verbatim, so a caller (or a log-line reader) can trace the returned model back to the configured `fallback_chain` without a translation layer. `"primary"` means the configured `policy` succeeded on its first pick; every other value names the fallback-chain entry that produced the model. When the primary policy is itself `"different-vendor-same-class"` and it succeeds, `source` is `"primary"` (not `"fallback:different-vendor-same-class"`) — the fallback labels are reserved for picks made after the primary attempt failed.
 
 This function is called once by `resolve-model` today. When [#449](https://github.com/mfrancza/agentic-development-workflow/issues/449) lands N reviewers, the multi-reviewer workflow will call `selectReviewerModel` once per slot with a per-slot `policy` (e.g. slot 1: `"different-vendor-same-class"`, slot 2: `"same-vendor-same-class"`). The pure-function shape lets the pairing computation compose without change.
 
