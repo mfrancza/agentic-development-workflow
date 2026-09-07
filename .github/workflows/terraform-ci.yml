@@ -27,8 +27,18 @@ on:
       - '.github/workflows/terraform-ci-reusable.yml'
       - '.github/actions/terraform-plan-comment/**'
 
-# Deny-all at the workflow level; each job grants only what it needs.
-permissions: {}
+# Workflow-level permissions are the ceiling GitHub enforces on the CALLED
+# (reusable) workflow's jobs at run creation: job-level `permissions` on a
+# `uses:` job cannot elevate past this, and the whole job graph is validated
+# at startup regardless of `if:` conditions — a deny-all here therefore
+# startup-fails every run because the reusable plan job requests
+# pull-requests: write (observed: "The nested job 'plan' is requesting
+# 'pull-requests: write', but is only allowed 'pull-requests: none'", issue
+# #487). Grant the union needed by the reusable jobs here; the apply job
+# downgrades below.
+permissions:
+  contents: read
+  pull-requests: write
 
 jobs:
   plan:
@@ -41,9 +51,8 @@ jobs:
     if: >
       github.event_name == 'pull_request_target' &&
       github.event.pull_request.head.repo.full_name == github.repository
-    permissions:
-      contents: read
-      pull-requests: write
+    # Inherits the workflow-level grant (contents: read, pull-requests: write)
+    # — see the note on `permissions` above for why the grant lives there.
     uses: ./.github/workflows/terraform-ci-reusable.yml
     with:
       event: pull_request
