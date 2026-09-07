@@ -1,0 +1,61 @@
+name: Terraform CI
+
+# Runs Terraform CI in two modes depending on the triggering event:
+#   - pull_request_target: plan on PR, post plan output as a comment.
+#   - push to main:        apply after each qualifying merge.
+#
+# pull_request_target (not pull_request) is intentional: GitHub always resolves
+# the workflow YAML and local composite actions (.github/actions/**) from the
+# *base* branch, so a PR that modifies terraform-ci.yml or the plan-comment
+# activity cannot cause its modified copy to run against the terraform-ci token.
+# The plan job checks out the PR head explicitly for the Terraform steps.
+# See docs/design/terraform-ci.md Decision 2 for the full threat-model rationale.
+
+on:
+  pull_request_target:
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-ci.yml'
+      - '.github/workflows/terraform-ci-reusable.yml'
+      - '.github/actions/terraform-plan-comment/**'
+      - '.github/scripts/**'
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - '.github/workflows/terraform-ci.yml'
+      - '.github/workflows/terraform-ci-reusable.yml'
+      - '.github/actions/terraform-plan-comment/**'
+
+# Deny-all at the workflow level; each job grants only what it needs.
+permissions: {}
+
+jobs:
+  plan:
+    # Only on pull_request_target and only for same-repo PRs.
+    # Fork-headed PRs are excluded: even with pull_request_target running
+    # base-branch code, the attacker-controlled Terraform diff executes in
+    # the job under a token with Administration:R/W scope.  Collaborators who
+    # need a plan of a fork's changes should cherry-pick onto a same-repo
+    # branch first (same policy as agent-review.yml).
+    if: >
+      github.event_name == 'pull_request_target' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: ./.github/workflows/terraform-ci-reusable.yml
+    with:
+      event: pull_request
+      pr-number: ${{ github.event.pull_request.number }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit
+
+  apply:
+    if: github.event_name == 'push'
+    permissions:
+      contents: read
+    uses: ./.github/workflows/terraform-ci-reusable.yml
+    with:
+      event: push
+    secrets: inherit
