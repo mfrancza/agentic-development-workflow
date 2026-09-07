@@ -86,10 +86,13 @@ If Claude reports it cannot reconcile confidently, or entrypoint verification
 fails (markers remain, unmerged paths, or a zero-diff file with no
 justification — an empty diff with a valid `**Kept PR side (ours):**`
 justification in the resolution summary is accepted),
-the entrypoint runs `git merge --abort`, applies the `human-required` label,
-and comments on the PR naming the files it could not resolve and why. It
-never pushes a partial resolution. This reuses the
-escalation convention added by #46: label + comment, human takes over.
+the entrypoint runs `git merge --abort`, applies both the `conflicts-escalated`
+label (the resolver's own re-invocation marker) and the `human-required` label
+(generic human-attention marker), and comments on the PR naming the files it
+could not resolve and why. It never pushes a partial resolution. This reuses the
+escalation convention added by #46: label + comment, human takes over. See
+[`docs/design/resolve-conflicts-escalation-marker.md`](resolve-conflicts-escalation-marker.md)
+for the rationale behind the two-label split.
 
 **Exception — justified "ours"-equal resolutions:** A zero-diff result (staged
 file identical to PR branch HEAD) is not automatically an error. When Claude
@@ -130,9 +133,9 @@ that was already required now simply covers the resolution too.
   happens on the next push to `main`, and a then-clean merge exits at step 1.
 - **One attempt per conflict event:** a failed resolution flags
   `human-required` and stops; the workflow does not retry until the next
-  push to `main` or a manual dispatch. The prompt instructs Claude to skip
-  PRs already labeled `human-required` (a human is mid-intervention) — the
-  entrypoint enforces this before merging.
+  push to `main` or a manual dispatch. PRs already labeled
+  `conflicts-escalated` (the resolver's own re-invocation marker) are skipped
+  — the entrypoint enforces this before merging.
 - **Model:** uses `vars.DEFAULT_CLAUDE_MODEL`; no per-PR override initially
   (can adopt the `model:*` PR-label pattern later if needed).
 

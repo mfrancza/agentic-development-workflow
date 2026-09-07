@@ -211,12 +211,21 @@ verification completes.
 This reuses the escalation convention established by the `human-required` label
 system described in `AGENTS.md`.
 
-### Decision 8 — `human-required` skip check
+### Decision 8 — `conflicts-escalated` skip check
 
 **Decision:** Before running the merge, call `gh pr view $GITHUB_PR_NUMBER
---json labels` and exit 0 (with a log line) if the `human-required` label is
-present. This matches the skip-guard pattern already used in other actions (e.g.
+--json labels` and exit 0 (with a log line and a `::notice::` workflow-run
+annotation) if the `conflicts-escalated` label is present. This label is
+applied by the resolver itself on every escalation path (along with
+`human-required`); checking only `conflicts-escalated` ensures that PRs
+carrying `human-required` for unrelated reasons (bootstrap steps, security,
+permissions, etc.) are still eligible for automated conflict resolution.
+This matches the skip-guard pattern already used in other actions (e.g.
 `action_implement` skips `draft`-labeled issues).
+
+See [`docs/design/resolve-conflicts-escalation-marker.md`](resolve-conflicts-escalation-marker.md)
+for the full rationale for the two-label split and for all three escalation
+paths that apply both labels together.
 
 ### Decision 9 — No `CLAUDE_MODEL` override for this action
 
