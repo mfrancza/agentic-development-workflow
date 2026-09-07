@@ -486,12 +486,29 @@ Two ways to get it:
   standard way and adding one `patterns_allowed` entry is not
   a meaningful policy expansion.
 
-The Terraform version is pinned via an env var in the workflow
-(`TF_VERSION: '1.9.0'` — matching the current
-`required_version = ">= 1.6.0"` in `terraform/main.tf`; a
-`.terraform-version` file is not added because it would need to
-stay in sync with the workflow pin, and one source of truth is
-better).
+The Terraform version is read from `.tool-versions` (the asdf pin
+file at the repository root) at the start of each job via a shell
+step that parses the `terraform <version>` line and exports
+`TF_VERSION` to `GITHUB_ENV`. This makes `.tool-versions` the
+single source of truth for the Terraform version across local
+operations (asdf) and CI — removing the version-drift class
+entirely. Updating `.tool-versions` when upgrading Terraform is the
+only change required; the workflow picks up the new version
+automatically on the next run.
+
+The previous approach (a hardcoded `TF_VERSION: '1.9.0'`
+workflow-level env var) predated the repo's `.tool-versions` pin and
+required a two-file update on every version bump; it is superseded
+by the parsed form above.
+
+**HCP workspace version pin.** New HCP Terraform workspaces default
+to the latest Terraform release. The workspace's **Terraform
+Version** setting (Workspace → Settings → General) must be pinned to
+the same version as `.tool-versions` — otherwise HCP's
+remote-version check may reject state files written by CI or local
+operations that use a different binary. Pin it once when creating the
+workspace (see the bootstrap section below) and update it in lockstep
+with `.tool-versions`.
 
 ### Decision 7: state-migration bootstrap is a one-time manual step
 
@@ -578,6 +595,12 @@ account signup that no Terraform resource or GitHub Action can bootstrap.
    setting: HCP stores the state file and holds the state lock, but every
    `plan` and `apply` still runs on the local machine (or in a GitHub Actions
    runner) — HCP is never asked to execute Terraform itself.
+5. In the workspace settings, also pin the **Terraform Version** to match the
+   repo's `.tool-versions` value (currently `1.15.3`). New workspaces default
+   to the latest Terraform release; if the workspace version differs from the
+   version CI and local operations use, HCP's remote-version check will reject
+   state writes. Update this setting in lockstep whenever `.tool-versions` is
+   bumped.
 
 ### 2. Generate a team or user API token
 
