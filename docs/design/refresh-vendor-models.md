@@ -22,7 +22,7 @@ Places that must stay in one-to-one sync (per the multi-provider and per-agent-l
 - [`docs/model-guidance.md`](../model-guidance.md) — tier summary, cross-vendor cost analysis, and task-class matrix rows must reflect the refreshed lineup and pricing.
 - [`agents/grooming/label-criteria.json`](../../agents/grooming/label-criteria.json) — refreshed only if the groomer's tier-selection semantics change (e.g. if Anthropic introduces a fourth tier the grooming agent must pick from). Purely refreshing which snapshot each alias resolves to does not touch this file.
 
-Retired-label safety is part of the refresh, not a follow-up: for every label the refresh removes, open issues carrying that label must have it removed first (before `terraform apply` destroys it). The precedent is the grok-3 retirement (see Issue [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356), the 2026-08-30 rev 6 change log entry in [`docs/model-guidance.md`](../model-guidance.md)).
+Retired-label safety in *this* repo is part of the refresh, not a follow-up: for every label the refresh removes from `mfrancza/agentic-development-workflow`, open issues here carrying that label must have it removed first (before `terraform apply` destroys it). The precedent is the grok-3 retirement (see Issue [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356), the 2026-08-30 rev 6 change log entry in [`docs/model-guidance.md`](../model-guidance.md)). The labels module is also consumed by other repos (see [`terraform/modules/labels/README.md`](../../terraform/modules/labels/README.md) "Git source (external consumer)"); downstream consumers own their own sweep when they bump their pinned module ref, and this refresh cannot guarantee cross-repo sweep completeness — see Decision 2.
 
 ### Ambiguities and how they were resolved
 
@@ -30,7 +30,7 @@ Retired-label safety is part of the refresh, not a follow-up: for every label th
 - **One atomic refresh PR or one PR per provider?** Split per provider (see Decision 3). Same-file conflicts across the three provider PRs are section-scoped (each provider owns disjoint blocks in Terraform, disjoint case-arms in the entrypoints, and disjoint doc sections) and reviewer-friendly.
 - **Does `agents/grooming/label-criteria.json` need updating?** Only if the refresh changes tier semantics — e.g. if Anthropic adds a fourth tier the groomer should choose from. A snapshot-only rev (haiku-4-5 → haiku-4-6) does not touch it. This is a conditional bit of the Anthropic task, not a separate one.
 - **Is a `model:fable` label added if Anthropic's Fable series ships a new snapshot?** No — the current guidance ([`docs/model-guidance.md`](../model-guidance.md) Tier Summary "Note on Fable") explicitly does not provision Fable "because no use case has been identified that Opus does not already cover." This design does not revisit that decision; if a use case emerges the implementer files a follow-up issue.
-- **Should retired labels be kept in Terraform in a "deprecated" state for backwards compatibility?** No — the parent designs treat the Terraform label set as authoritative, and unlabelled runtime routing already accepts any `claude-*` name for Anthropic. For OpenAI and xAI, retired labels fail loudly on unknown-model at runtime (which is the intended signal), and the retired-label sweep ensures no open issue is stranded by the removal.
+- **Should retired labels be kept in Terraform in a "deprecated" state for backwards compatibility?** No — the parent designs treat the Terraform label set as authoritative, and unlabelled runtime routing already accepts any `claude-*` name for Anthropic. For OpenAI and xAI, retired labels fail loudly on unknown-model at runtime (which is the intended signal). The in-repo sweep (see Decision 2) ensures no open issue in this repo is stranded by the removal; downstream consumer repos are responsible for their own sweep on module-ref bump and the same loud-fail-at-runtime behavior applies there.
 
 ## Decisions
 
@@ -48,18 +48,28 @@ For each provider, the implementing sub-issue's first step is to read the vendor
 - **(b) Automate the audit via a scheduled workflow that scrapes vendor docs.** Rejected as out of scope. Vendor doc pages are unstructured HTML; a maintainable scraper is more surface area than a periodic manual refresh justifies, especially given how rarely the refresh runs (this is the second one — grok-3 retirement was the first). Revisit only if the refresh cadence increases.
 - **(c) Add a lint job that fails CI if `resolve_provider` and the Terraform label set disagree.** Deferred to a follow-up (mentioned in Out of scope). It is not strictly needed for the refresh itself, and Issue [#384](https://github.com/mfrancza/agentic-development-workflow/issues/384) is the tracking ticket for that drift-detection idea.
 
-### Decision 2 — Retired-label sweep is a mandatory prerequisite of each provider PR
+### Decision 2 — In-repo retired-label sweep is a mandatory prerequisite of each provider PR; downstream consumer repos own their own sweep
 
-For every label the refresh removes, the sweep runs *before* the Terraform destroy applies. Precedent: grok-3 retirement, Issue [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356), PR [#365](https://github.com/mfrancza/agentic-development-workflow/pull/365).
+**Scope: `mfrancza/agentic-development-workflow` only.** For every label the refresh removes from this repo, the sweep runs here *before* the Terraform destroy applies. Precedent: grok-3 retirement, Issue [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356), PR [#365](https://github.com/mfrancza/agentic-development-workflow/pull/365).
 
-Concretely, each provider task's PR description records the sweep result: for each label that would be destroyed by `terraform apply`, list any open issues still carrying it, then either remove the label from those issues (documenting the replacement chosen) or explain why removal is safe. The command in the issue-scope grooming notes is the canonical form:
+Concretely, each provider task's PR description records the sweep result *for this repo*: for each label that would be destroyed by `terraform apply` here, list any open issues still carrying it, then either remove the label from those issues (documenting the replacement chosen) or explain why removal is safe. The command in the issue-scope grooming notes is the canonical form:
 
 ```bash
 gh issue list --repo mfrancza/agentic-development-workflow --state open \
   --label "model:<retired-label>" --json number,title
 ```
 
-**Why in-PR rather than in a separate task.** The sweep window has to close before `terraform apply` runs. Splitting it into a preceding task creates a race: an open issue can be re-labeled between the sweep task landing and the destroy task landing. Executing the sweep in the same PR that removes the label — and re-running it as the last check before merge — closes that window.
+**Cross-repo sweep is explicitly not guaranteed.** The labels module is consumed by other repos via a git-source module ref (see [`terraform/modules/labels/README.md`](../../terraform/modules/labels/README.md) "Git source (external consumer)"). This refresh cannot enumerate those downstream repos or guarantee a sweep in each: the source repo does not know which repos have imported the module, which ref they pin, or when (or whether) they will bump to a ref that destroys a given label. Downstream consumer repos own their own retired-label sweep at the moment they bump the pinned module ref. This design does not require or promise that all downstream repos are swept before this PR merges — that guarantee is not achievable, and blocking on it would freeze the refresh cadence.
+
+**Runtime behavior when a sweep is skipped.** Retired labels that survive on downstream open issues are inert until an agent workflow tries to route on them. At that point:
+- Anthropic — the pattern arm `sonnet|opus|haiku|claude-*` still routes any `claude-*` name to the Anthropic call; if the API has retired that snapshot, the vendor returns an unknown-model error loudly at runtime (the intended signal).
+- OpenAI and xAI — the enumerated case-arms will not match a retired label and the wildcard "supported values" error fires, again loudly at runtime.
+
+The loud-fail behavior is the safety net: an orphaned retired label in a downstream repo cannot silently route to a stale model, and the failure is scoped to that one workflow run rather than being a repo-wide break.
+
+**Consumer heads-up.** To make downstream sweeps tractable, the consolidated Change Log entry (see Decision 6) enumerates every destroyed label across all three providers, so a consumer can grep the entry to know exactly what to sweep before bumping their module ref. A follow-up (out of scope for this refresh) could add a machine-readable per-ref `RETIRED_LABELS` manifest in the module directory; deferred until a consumer requests it.
+
+**Why in-PR rather than in a separate task (within this repo).** The sweep window has to close before `terraform apply` runs here. Splitting it into a preceding task creates a race: an open issue can be re-labeled between the sweep task landing and the destroy task landing. Executing the sweep in the same PR that removes the label — and re-running it as the last check before merge — closes that window for this repo.
 
 **PRs (both agent and human) count.** A retired label on an open PR gets the same treatment. Grok pattern also applies: closed issues/PRs are not swept (GitHub prevents label mutations on closed items in the ways that would matter, and stale historical labels on closed issues are harmless).
 
