@@ -640,12 +640,13 @@ ADMIN_ASSIGNEES: ${ADMIN_ASSIGNEES}"
 action_resolve_conflicts() {
     : "${GITHUB_PR_NUMBER:?GITHUB_PR_NUMBER is required for resolve-conflicts}"
 
-    # Skip if PR already carries human-required — a human is already intervening.
-    # Preflight check avoids an unnecessary clone.
-    log "Checking PR #${GITHUB_PR_NUMBER} for human-required label"
+    # Skip if PR already carries conflicts-escalated — a prior resolution attempt already
+    # escalated to a human; do not loop. Preflight check avoids an unnecessary clone.
+    log "Checking PR #${GITHUB_PR_NUMBER} for conflicts-escalated label"
     PR_LABELS_JSON="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json labels)"
-    if echo "$PR_LABELS_JSON" | jq -e '[.labels[].name] | any(. == "human-required")' > /dev/null; then
-        log "PR #${GITHUB_PR_NUMBER} carries 'human-required' label — skipping (human is already intervening)"
+    if echo "$PR_LABELS_JSON" | jq -e '[.labels[].name] | any(. == "conflicts-escalated")' > /dev/null; then
+        echo "::notice title=resolve-conflicts declined::PR #${GITHUB_PR_NUMBER} carries 'conflicts-escalated' — a prior resolution attempt escalated to a human; remove the label to re-attempt."
+        log "PR #${GITHUB_PR_NUMBER} carries 'conflicts-escalated' label — skipping (prior escalation)"
         return 0
     fi
 
@@ -737,11 +738,11 @@ ${BASE_COMMITS}")"
     if [ "$AGENT_EXIT" -ne 0 ]; then
         log "ERROR: run_agent exited with code ${AGENT_EXIT} (API failure, max-turn exhaustion, or CLI error) — aborting merge and escalating"
         git merge --abort 2>/dev/null || true
-        log "Applying human-required label to PR #${GITHUB_PR_NUMBER}"
+        log "Applying human-required and conflicts-escalated labels to PR #${GITHUB_PR_NUMBER}"
         if [ -n "${ESCALATION_ASSIGNEE:-}" ]; then
-            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "$ESCALATION_ASSIGNEE"
+            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-label "conflicts-escalated" --add-assignee "$ESCALATION_ASSIGNEE"
         else
-            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
+            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-label "conflicts-escalated"
         fi
         AGENT_FAIL_BODY="## Automated conflict resolution failed
 
@@ -750,7 +751,7 @@ The conflict-resolution agent exited unexpectedly (exit code ${AGENT_EXIT}) befo
 Conflicted files:
 $(echo "$CONFLICTED_FILES" | sed 's/^/- /')
 
-Please resolve the conflicts manually, commit the merge, push, and remove the \`human-required\` label when done."
+Please resolve the conflicts manually, commit the merge, push, and remove the \`conflicts-escalated\` label when done so future conflicts on this PR are auto-resolved again. Remove \`human-required\` separately when the PR no longer needs human attention."
         gh pr comment "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --body "$AGENT_FAIL_BODY"
         exit 1
     fi
@@ -788,11 +789,11 @@ Please resolve the conflicts manually, commit the merge, push, and remove the \`
             UNRESOLVABLE_FILES="$CONFLICTED_FILES"
         fi
 
-        log "Applying human-required label to PR #${GITHUB_PR_NUMBER}"
+        log "Applying human-required and conflicts-escalated labels to PR #${GITHUB_PR_NUMBER}"
         if [ -n "${ESCALATION_ASSIGNEE:-}" ]; then
-            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "$ESCALATION_ASSIGNEE"
+            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-label "conflicts-escalated" --add-assignee "$ESCALATION_ASSIGNEE"
         else
-            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
+            gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-label "conflicts-escalated"
         fi
 
         FALLBACK_BODY="## Automated conflict resolution failed
@@ -801,7 +802,7 @@ The conflict-resolution agent was unable to automatically resolve all merge conf
 
 $(echo "$UNRESOLVABLE_FILES" | sed 's/^/- /')
 
-Please resolve the conflicts manually, commit the merge, push, and remove the \`human-required\` label when done."
+Please resolve the conflicts manually, commit the merge, push, and remove the \`conflicts-escalated\` label when done so future conflicts on this PR are auto-resolved again. Remove \`human-required\` separately when the PR no longer needs human attention."
 
         gh pr comment "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --body "$FALLBACK_BODY"
 
@@ -846,11 +847,11 @@ Please resolve the conflicts manually, commit the merge, push, and remove the \`
             log "Verification failed — the following conflicted files have no staged diff relative to HEAD and no justification; escalating"
             log "Unjustified zero-diff files: $(echo "$UNJUSTIFIED_FILES" | tr '\n' ' ')"
             git merge --abort 2>/dev/null || true
-            log "Applying human-required label to PR #${GITHUB_PR_NUMBER}"
+            log "Applying human-required and conflicts-escalated labels to PR #${GITHUB_PR_NUMBER}"
             if [ -n "${ESCALATION_ASSIGNEE:-}" ]; then
-                gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "$ESCALATION_ASSIGNEE"
+                gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-label "conflicts-escalated" --add-assignee "$ESCALATION_ASSIGNEE"
             else
-                gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required"
+                gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-label "conflicts-escalated"
             fi
             ZERODIFF_BODY="## Automated conflict resolution failed
 
@@ -858,7 +859,7 @@ The conflict-resolution agent resolved the following files with no staged change
 
 $(echo "$UNJUSTIFIED_FILES" | sed 's/^/- /')
 
-Please review each file, resolve the conflicts intentionally, commit the merge, push, and remove the \`human-required\` label when done."
+Please review each file, resolve the conflicts intentionally, commit the merge, push, and remove the \`conflicts-escalated\` label when done so future conflicts on this PR are auto-resolved again. Remove \`human-required\` separately when the PR no longer needs human attention."
             gh pr comment "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --body "$ZERODIFF_BODY"
             exit 1
         fi
