@@ -150,6 +150,7 @@ jobs:
           PYEOF
 
       - name: Setup Terraform
+        # SHA must match patterns_allowed in module "actions_policy" in terraform/main.tf.
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         with:
           terraform_version: ${{ env.TF_VERSION }}
@@ -230,6 +231,7 @@ jobs:
           private-key: ${{ secrets.TERRAFORM_APP_PRIVATE_KEY }}
 
       - name: Setup Terraform
+        # SHA must match patterns_allowed in module "actions_policy" in terraform/main.tf.
         uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e  # v4.0.1
         with:
           terraform_version: ${{ env.TF_VERSION }}
