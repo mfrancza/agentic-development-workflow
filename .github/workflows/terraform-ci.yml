@@ -62,8 +62,13 @@ jobs:
 
   apply:
     if: github.event_name == 'push'
-    permissions:
-      contents: read
+    # No job-level permissions downgrade here: GitHub validates every caller
+    # job against EVERY job in the called workflow, ignoring `if:` conditions
+    # — a `contents: read`-only grant on this job startup-fails the whole
+    # workflow because the reusable's *plan* job requests pull-requests: write
+    # (issue #487, third finding). This job inherits the workflow-level union;
+    # the reusable's apply job carries its own job-level `contents: read`
+    # downgrade, which is what scopes the token that actually runs.
     uses: ./.github/workflows/terraform-ci-reusable.yml
     with:
       event: push
