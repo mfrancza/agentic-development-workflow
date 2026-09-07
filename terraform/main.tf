@@ -87,8 +87,8 @@ module "labels" {
 }
 
 module "actions_policy" {
-  source     = "./modules/actions-policy"
-  repository = github_repository.this.name
+  source           = "./modules/actions-policy"
+  repository       = github_repository.this.name
   patterns_allowed = [
     # Keep this SHA in lockstep with the uses: pin in
     # .github/workflows/terraform-ci-reusable.yml (both occurrences).

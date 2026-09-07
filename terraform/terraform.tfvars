@@ -9,7 +9,6 @@ agent_allowlist = [
   "mfrancza",
   "mfrancza-s-claude-code[bot]",
   "mfrancza-developer-agent[bot]",
-  "mfrancza-reviewer-agent[bot]",
 ]
 
 default_model = "sonnet"
