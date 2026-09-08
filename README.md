@@ -121,7 +121,7 @@ adoption guide, including:
 
 - Adoption profiles (labels-only, grooming only, review only, full pipeline)
 - Common prerequisites (GitHub Apps, secrets, Terraform provider config)
-- Version pinning strategy (`@v1` vs. `@v1.2.3` vs. `@<sha>`)
+- Version pinning strategy (`@v0` vs. `@v0.0.0` vs. `@<sha>`)
 - Per-module and per-workflow sections with copy-paste wiring snippets
 - Manual repository settings (fork-PR approval policy, interaction limit)
 
@@ -335,14 +335,14 @@ The entrypoint clones the repo read-only, gathers the diff against the merge-bas
 
 The developer and reviewer images are published to GHCR on every `v*` tag push by [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml). Two tags are published per release:
 
-- **Full tag** (e.g. `v1.2.3`) — immutable; pin to this for reproducible runs.
-- **Major tag** (e.g. `v1`) — a moving pointer updated on every release within the same major version; use this to receive automatic patch and minor updates.
+- **Full tag** (e.g. `v0.0.0`) — immutable; pin to this for reproducible runs.
+- **Major tag** (e.g. `v0`) — a moving pointer updated on every release within the same major version; use this to receive automatic patch and minor updates.
 
 ```
-ghcr.io/mfrancza/agentic-development-workflow/developer:v1.2.3
-ghcr.io/mfrancza/agentic-development-workflow/developer:v1
-ghcr.io/mfrancza/agentic-development-workflow/reviewer:v1.2.3
-ghcr.io/mfrancza/agentic-development-workflow/reviewer:v1
+ghcr.io/mfrancza/agentic-development-workflow/developer:v0.0.0
+ghcr.io/mfrancza/agentic-development-workflow/developer:v0
+ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0.0.0
+ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0
 ```
 
 **Pull mode vs build mode in the `run-agent` composite action**
