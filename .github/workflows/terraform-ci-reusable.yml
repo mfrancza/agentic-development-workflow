@@ -15,9 +15,16 @@ name: Terraform CI (reusable)
 #   - Pass secrets: inherit so TF_API_TOKEN and the TERRAFORM_APP_* secrets
 #     are available here.
 #
-# External consumers can reference this workflow by path from their own caller
-# stub. The steps use paths relative to the workspace root (terraform/,
-# .github/actions/), so the caller's repository must have the same layout.
+# !! CONSUMER-ONLY — NOT PART OF THE EXTERNALLY PUBLISHED SURFACE IN v0 !!
+#
+# This workflow is not intended for use by external repositories in v0.  Its
+# plan and apply jobs read paths specific to this repo's layout (terraform/,
+# .github/actions/, .tool-versions) and target this repo's Terraform GitHub
+# App.  External consumers who need Terraform CI should copy the workflow and
+# its helpers or build a bespoke one.
+#
+# See docs/design/reusable-workflow-helper-resolution.md Decision 6 for the
+# rationale and the conditions under which this restriction may be revisited.
 
 on:
   workflow_call:

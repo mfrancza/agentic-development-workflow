@@ -1523,3 +1523,21 @@ as a literal placeholder.
 
 **Fix:** Replace with your developer-agent App's bot login, the same value used
 in the `agent-respond-review` stub.
+
+---
+
+### `terraform-ci-reusable.yml` is not available for external adoption in v0
+
+`terraform-ci-reusable.yml` is **consumer-only** — it is not part of the
+externally published surface for v0.  The workflow's `plan` and `apply` jobs
+depend on paths specific to this repository's layout (`terraform/`,
+`.github/actions/`, `.tool-versions`) and target this repository's dedicated
+Terraform GitHub App.  Attempting to call it from an external repository will
+fail at the composite-action resolution step.
+
+External repositories that need Terraform CI should copy the workflow and its
+helper composite actions directly, or build a bespoke CI workflow.
+
+See [docs/design/reusable-workflow-helper-resolution.md](design/reusable-workflow-helper-resolution.md)
+Decision 6 for the rationale.  This restriction may be revisited in a future
+release if external demand emerges.
