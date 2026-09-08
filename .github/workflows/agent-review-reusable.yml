@@ -93,32 +93,31 @@ jobs:
       pull-requests: write
 
     steps:
-      # Checkout must precede the local agent-token action: the runner resolves
-      # ./.github/actions/* references from the workspace.
-      # No explicit ref: on pull_request_target the default checkout is
-      # GITHUB_SHA = the latest commit on the base branch, so the local
-      # actions, .github/scripts activities, and the docker/reviewer build
-      # context are always loaded from trusted, *current* base-branch code —
-      # never from the PR head. Do NOT pin to
-      # github.event.pull_request.base.sha instead: GitHub freezes that value
-      # at the base tip as of the PR's last head push, so after any merge to
-      # main every review of an un-rebased PR would execute stale workspace
-      # code (hit live when the #253 composite-action fix merged and
-      # re-reviews of open PRs kept running the broken pre-fix resolve-model).
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      # Check out this repo's own helper actions at the exact SHA the caller
+      # pinned to.  github.job_workflow_sha is GitHub's trust anchor: it
+      # resolves the ref the caller used in `uses: …@<ref>` at dispatch time
+      # and is not influenceable by the caller's workspace.  Using a dedicated
+      # subdirectory (_agentic-workflow/) avoids overwriting the caller's
+      # workspace and keeps the helper checkout clearly separate.
+      # See docs/design/reusable-workflow-helper-resolution.md Decisions 1, 3, 4.
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ github.job_workflow_sha }}
+          path: _agentic-workflow
           persist-credentials: false
 
       - name: Mint installation token for reviewer-agent
         id: setup
-        uses: ./.github/actions/agent-token
+        uses: ./_agentic-workflow/.github/actions/agent-token
         with:
           client-id: ${{ secrets.REVIEWER_APP_ID }}
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
 
       - name: Resolve Claude model from PR labels
         id: model
-        uses: ./.github/actions/resolve-model
+        uses: ./_agentic-workflow/.github/actions/resolve-model
         with:
           token: ${{ steps.setup.outputs.token }}
           subject-type: pr
@@ -135,7 +134,7 @@ jobs:
         # core.warning() rather than core.setFailed() for individual API
         # errors, so the common case is a clean zero exit.
         continue-on-error: true
-        uses: ./.github/actions/dismiss-stale-reviewer-reviews
+        uses: ./_agentic-workflow/.github/actions/dismiss-stale-reviewer-reviews
         with:
           token: ${{ steps.setup.outputs.token }}
           repo: ${{ inputs.repo }}
@@ -150,10 +149,10 @@ jobs:
       - name: Run reviewer agent
         # The container records the GraphQL IDs of addressed review threads
         # into the mounted output directory; the resolve step below reads them.
-        uses: ./.github/actions/run-agent
+        uses: ./_agentic-workflow/.github/actions/run-agent
         with:
           image: ${{ inputs.image }}
-          build-context: ./docker/reviewer
+          build-context: _agentic-workflow/docker/reviewer
           image-tag: agent-reviewer:ci
           gh-token: ${{ steps.setup.outputs.token }}
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -183,7 +182,7 @@ jobs:
         # agent-generated output derived from PR content, so they are treated
         # as untrusted: each ID is format-checked and intersected against the
         # PR's actual open threads before the mutation is issued.
-        uses: ./.github/actions/resolve-review-threads
+        uses: ./_agentic-workflow/.github/actions/resolve-review-threads
         with:
           token: ${{ github.token }}
           pr-number: ${{ inputs.pr-number }}
