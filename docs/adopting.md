@@ -1401,7 +1401,7 @@ Or use the Actions UI: Actions → release-images → Run workflow → enter the
 version tag (e.g. `v0.0.0`).
 
 After the run completes, verify unauthenticated pullability for all four tags
-(see the next gotcha for the visibility-flip fix if packages land as private).
+(see [GHCR image pull fails in workflow](#ghcr-image-pull-fails-in-workflow) for the visibility-flip fix if packages land as private).
 
 ---
 
