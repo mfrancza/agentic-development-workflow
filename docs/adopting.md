@@ -1499,6 +1499,68 @@ published by the `release-images` workflow, no authentication is needed to pull 
 
 ---
 
+### Helper actions not found when calling a reusable workflow from an external repo
+
+**Symptom:** A job that calls one of the reusable workflows fails early with an
+error like:
+
+```
+Error: Can't find 'action.yml', 'action.yaml' or 'Dockerfile' under
+'./.github/actions/agent-token'. Did you forget to run actions/checkout?
+```
+
+or a similar "action not found" message referring to a path under `.github/actions/`.
+
+**Cause:** The v0.0.0 release of the reusable workflows used workspace-relative
+action paths (`uses: ./.github/actions/<name>`). When a caller repo invokes a
+reusable workflow, GitHub populates `$GITHUB_WORKSPACE` with the **caller's**
+repository — not this repo. A workspace-relative reference therefore resolves
+against the caller's tree, which does not contain this repo's `.github/actions/`
+directory, so every composite-action step fails with "action not found".
+
+This was the root cause reported in issue
+[#498](https://github.com/mfrancza/agentic-development-workflow/issues/498) and
+fixed in the v0.0.1 patch release. (See
+[`docs/design/reusable-workflow-helper-resolution.md`](design/reusable-workflow-helper-resolution.md)
+for the full analysis and the chosen fix: each reusable now self-checks out its
+own helper actions into a `_agentic-workflow/` subdirectory before any composite
+action step runs, keyed to `github.job_workflow_sha` so the helper version is
+always consistent with the reusable workflow version the caller pinned to.)
+
+**Fix:**
+
+- If you pinned to an exact tag, upgrade from `@v0.0.0` to `@v0.0.1` (or `@v0`
+  to track future patches automatically). Both the reusable workflow ref and the
+  `image:` input should be updated together:
+
+  ```yaml
+  uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@v0
+  with:
+    image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
+  ```
+
+- If you are already on `@v0` (the moving major tag) and you first adopted
+  before 2026-09-08, force a re-run — the `v0` tag now points at the v0.0.1
+  SHA, so the next workflow run automatically picks up the fix.
+
+**Verification after fixing:** Open a test issue on your consumer repo and apply
+`agent:developer`. The workflow should:
+
+1. Complete the "Check out upstream helper actions" step with no error.
+2. Mint a developer-agent token (the `agent-token` composite action runs
+   successfully).
+3. Pass all preflight steps (find-existing-pr, check-draft-label, check-blockers).
+4. Run the agent container and open a PR on `agent/issue-<N>`.
+5. Upload an `agent-logs-implement-issue-<N>-…` artifact (visible in the
+   workflow run's Summary page even on failure, because the upload step uses
+   `if: always()`).
+
+If step 1 still fails after upgrading, check that your `uses:` line references
+the reusable workflow file (not the caller stub file), and that the `@` ref
+resolves to a tag or SHA that exists on the source repo.
+
+---
+
 ### `agent-respond-review` stub placeholders
 
 **Symptom:** The `agent-respond-review` caller stub in this guide contains
