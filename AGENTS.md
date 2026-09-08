@@ -247,6 +247,37 @@ A `run:` block moves to a TypeScript activity when it contains **any** of: API-r
 
 The [`.github/workflows/ci.yml`](.github/workflows/ci.yml) workflow (name: `CI`) runs on every pull request and executes `npm ci`, `tsc --noEmit`, and `vitest run` inside `.github/scripts`. This workflow being named `CI` is what activates the `agent-fix-checks` feedback loop — `agent-fix-checks.yml` triggers on `workflow_run` for a workflow named `CI`.
 
+### Reusable workflows: self-checkout for helper actions
+
+Reusable workflows (`*-reusable.yml`) that reference local composite actions must **not** rely on the caller's workspace to resolve those actions. When an external consumer invokes `mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@<ref>`, the runner populates `$GITHUB_WORKSPACE` with the **caller's** repository — not this repo — so workspace-relative paths like `uses: ./.github/actions/<name>` will not resolve.
+
+The fix is a self-checkout at the exact SHA the caller pinned to, into a dedicated subdirectory, before any composite action is invoked:
+
+```yaml
+- name: Check out upstream helper actions
+  uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+  with:
+    repository: mfrancza/agentic-development-workflow
+    ref: ${{ github.job_workflow_sha }}
+    path: _agentic-workflow
+    persist-credentials: false
+```
+
+Every subsequent step references helpers via the `_agentic-workflow/` prefix:
+
+```yaml
+uses: ./_agentic-workflow/.github/actions/<name>
+```
+
+Key properties of this pattern:
+
+- **`github.job_workflow_sha` is the trust anchor.** GitHub sets this context value to the resolved SHA of the reusable workflow file — the SHA the caller's `@<ref>` resolved to at dispatch time. It is not attacker-influenceable; it matches the caller's intent exactly (e.g. `@v1.0.0` → that tag's SHA, `@v1` → the current SHA behind the moving tag).
+- **`_agentic-workflow/` is the fixed subdirectory convention.** The leading underscore signals "not part of the caller's repo"; the fixed name makes the pattern uniformly grep-able across all reusable workflows.
+- **The caller's workspace is not populated** for jobs that previously checked out the caller's workspace only to resolve local-action paths. The upstream subdirectory is the only tree the reusable's steps touch, keeping the trust surface minimal.
+- **`persist-credentials: false`** is required so the checkout token is not retained after the step completes — the minted developer-agent token is the only credential in scope thereafter.
+
+This pattern is applied to every reusable workflow that references local composite actions and is intended for external consumption. See [`docs/design/reusable-workflow-helper-resolution.md`](docs/design/reusable-workflow-helper-resolution.md) Decisions 1, 3, and 4 for the full rationale and audit inventory.
+
 ## Code Review Standards
 
 This section defines what a pull-request review — by either the reviewer agent or a human — must cover. It is the single source of truth for both audiences: the reviewer agent's prompt should link back here rather than duplicate the list, and human reviewers can use it as a checklist.
