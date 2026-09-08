@@ -278,9 +278,19 @@ the fix.
 A caller workflow (`test-reusable-workflow-sha.yml`) invokes it via
 `uses: ./.github/workflows/test-only-job-workflow-sha-reusable.yml` on
 `pull_request` (paths gated to the reusable workflows, the test
-files, and this design doc) and `workflow_dispatch`. When invoked
-from within this repo, `job.workflow_sha` should equal
-`github.sha` — the test asserts both are non-empty and equal.
+files, and this design doc) and `workflow_dispatch`. The step-3
+checkout-HEAD assertion (`git -C _agentic-workflow rev-parse HEAD` ==
+`job.workflow_sha`) is the primary correctness check and is
+trigger-independent: it directly proves the property the parent
+design's trust-anchor argument depends on. A secondary `job.workflow_sha
+== github.sha` assertion is included but scoped with
+`if: github.event_name == 'workflow_dispatch'` because for
+`pull_request` triggers `github.sha` is the *merge commit* GitHub
+synthesises to test mergeability, while `job.workflow_sha` is the SHA
+of the reusable workflow file in the PR head branch — the two will
+legitimately differ whenever the PR branch is not at the default
+branch HEAD, so an unconditional equality check would produce false
+failures on every non-trivial PR.
 
 This is a *runtime* regression guard that complements the static
 lint: it exercises the actual GitHub Actions behaviour that the
