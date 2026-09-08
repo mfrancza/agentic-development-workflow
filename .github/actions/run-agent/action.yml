@@ -21,9 +21,17 @@ inputs:
     required: false
     default: ''
   build-context:
-    description: 'Docker build context directory (e.g. ./docker or ./docker/reviewer). Ignored when image is set.'
+    description: >
+      Docker build context directory. Ignored when image is set. When empty
+      (default), resolves to the docker/ directory of this action's own
+      checkout via github.action_path — correct both for workflows that check
+      out the repo at the workspace root and for migrated reusables that
+      self-checkout into _agentic-workflow/ (issue #498 design). Pass an
+      explicit path only for non-default contexts (e.g. the reviewer image:
+      './docker/reviewer' pre-migration, '_agentic-workflow/docker/reviewer'
+      after a reusable migrates to self-checkout).
     required: false
-    default: './docker'
+    default: ''
   image-tag:
     description: 'Docker image tag used when building from build-context (e.g. agent-developer:ci). Ignored when image is set.'
     required: false
@@ -124,7 +132,18 @@ runs:
       env:
         _BUILD_CONTEXT: ${{ inputs.build-context }}
         _IMAGE_TAG: ${{ inputs.image-tag }}
-      run: docker build -t "${_IMAGE_TAG}" "${_BUILD_CONTEXT}"
+        _ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        ctx="${_BUILD_CONTEXT}"
+        # Default: the docker/ tree of this action's own checkout. Resolving
+        # via action_path keeps build mode working regardless of where the
+        # action tree was checked out (workspace root, or _agentic-workflow/
+        # after the issue #498 self-checkout migration).
+        if [ -z "${ctx}" ]; then
+          ctx="$(cd "${_ACTION_PATH}/../../.." && pwd)/docker"
+        fi
+        docker build -t "${_IMAGE_TAG}" "${ctx}"
 
     - name: Run agent
       shell: bash
