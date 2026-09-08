@@ -1,0 +1,249 @@
+name: Test reusable-workflow helper resolution
+
+# Verifies that reusable workflows resolve their helper composite actions from
+# the _agentic-workflow/ upstream subdirectory rather than from the caller's
+# workspace (./.github/actions/<name>).
+#
+# This guards against the regression described in Issue #498 where reusable
+# workflows used workspace-relative paths that fail for external consumers
+# whose workspace does not contain this repo's .github/actions/ tree.
+#
+# Background: when an external caller invokes
+#   uses: mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@<ref>
+# the runner populates $GITHUB_WORKSPACE with the caller's repository — not
+# this repo — so any "uses: ./.github/actions/<name>" step would resolve
+# against a tree that lacks those actions. The fix (Decision 1 in
+# docs/design/reusable-workflow-helper-resolution.md) is a self-checkout at
+# github.job_workflow_sha into a _agentic-workflow/ subdirectory before any
+# composite action is invoked; every subsequent step references helpers via
+# "./_agentic-workflow/.github/actions/<name>".
+#
+# This workflow contains two jobs:
+#   reusable-portability-test  — shell simulation of the cross-repo call;
+#                                asserts the _agentic-workflow/ layout resolves
+#                                correctly from an empty caller workspace.
+#   static-lint                — grep scan that fails if any *-reusable.yml
+#                                file contains a "uses: ./.github/actions/"
+#                                reference outside the documented exceptions.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/*-reusable.yml'
+      - '.github/actions/*/action.yml'
+      - '.github/scripts/**'
+      - '.github/workflows/test-reusable-portability.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  reusable-portability-test:
+    name: Verify _agentic-workflow helper resolution
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      # Build a simulated caller workspace that mirrors the runner layout when
+      # an external consumer invokes the reusable workflow:
+      #
+      #   /tmp/simulated-caller-workspace/          ← caller's $GITHUB_WORKSPACE
+      #     _agentic-workflow/                      ← created by the self-checkout step
+      #       .github/
+      #         actions/                            ← helper composite actions
+      #         scripts/                            ← shared TypeScript package
+      #
+      # The caller workspace deliberately has no .github/actions/ at its root,
+      # matching the cross-repo scenario this test is designed to catch.
+      - name: Build simulated caller workspace with _agentic-workflow layout
+        run: |
+          set -euo pipefail
+
+          CALLER_WORKSPACE="/tmp/simulated-caller-workspace"
+          mkdir -p "$CALLER_WORKSPACE"
+
+          # Populate _agentic-workflow/ as the self-checkout step does in
+          # the fixed reusable workflows (path: _agentic-workflow).
+          mkdir -p "$CALLER_WORKSPACE/_agentic-workflow/.github"
+          cp -r .github/actions "$CALLER_WORKSPACE/_agentic-workflow/.github/"
+          cp -r .github/scripts "$CALLER_WORKSPACE/_agentic-workflow/.github/"
+
+          echo "CALLER_WORKSPACE=$CALLER_WORKSPACE" >> "$GITHUB_ENV"
+          echo "Built _agentic-workflow/ layout:"
+          ls "$CALLER_WORKSPACE/_agentic-workflow/.github/"
+
+      # Key regression guard: the caller workspace must not contain
+      # .github/actions/.  If it did, the old broken "uses: ./.github/actions/"
+      # pattern would still resolve — masking the regression.
+      - name: Assert caller workspace has no .github/actions/ tree
+        run: |
+          set -euo pipefail
+          if [ -d "$CALLER_WORKSPACE/.github/actions" ]; then
+            echo "ERROR: test setup incorrect — caller workspace must not have .github/actions/"
+            exit 1
+          fi
+          echo "Confirmed: .github/actions/ absent from caller workspace"
+
+      # Verify that each helper action referenced by the fixed reusable
+      # workflows exists at the _agentic-workflow/ path.
+      - name: Verify helper actions exist under _agentic-workflow/
+        run: |
+          set -euo pipefail
+          STATUS=0
+
+          # All actions currently referenced as
+          #   uses: ./_agentic-workflow/.github/actions/<name>
+          # in the fixed *-reusable.yml files must be present here.
+          EXPECTED_ACTIONS=(
+            agent-token
+            apply-unblocked-labels
+            check-blockers
+            check-draft-label
+            check-reviewer-feedback
+            dismiss-stale-reviewer-reviews
+            filter-agent-pr
+            find-conflicted-prs
+            find-existing-pr
+            find-linked-issue
+            find-newly-unblocked
+            resolve-deployment
+            resolve-model
+            resolve-review-threads
+            run-agent
+          )
+
+          for action in "${EXPECTED_ACTIONS[@]}"; do
+            ACTION_YML="$CALLER_WORKSPACE/_agentic-workflow/.github/actions/$action/action.yml"
+            if [ -f "$ACTION_YML" ]; then
+              echo "OK: $action found at _agentic-workflow/.github/actions/$action/"
+            else
+              echo "::error::$action missing at _agentic-workflow/ path: $ACTION_YML"
+              STATUS=1
+            fi
+          done
+
+          exit "$STATUS"
+
+      # Simulate the npm ci + tsx run that composite actions perform when
+      # invoked via "./_agentic-workflow/.github/actions/<name>".
+      #
+      # When a reusable workflow step runs:
+      #   uses: ./_agentic-workflow/.github/actions/resolve-model
+      # GitHub sets GITHUB_ACTION_PATH to:
+      #   $GITHUB_WORKSPACE/_agentic-workflow/.github/actions/resolve-model
+      # The composite action's "Resolve scripts directory" step then evaluates:
+      #   cd "$GITHUB_ACTION_PATH/../../scripts" && pwd
+      # which resolves to:
+      #   $GITHUB_WORKSPACE/_agentic-workflow/.github/scripts
+      #
+      # We reproduce that resolution here with CALLER_WORKSPACE as the
+      # stand-in for $GITHUB_WORKSPACE.
+      - name: Simulate composite-action path resolution from caller workspace
+        run: |
+          set -euo pipefail
+
+          # Simulate GITHUB_ACTION_PATH as GitHub sets it when the step runs
+          # uses: ./_agentic-workflow/.github/actions/resolve-model
+          SIMULATED_ACTION_PATH="$CALLER_WORKSPACE/_agentic-workflow/.github/actions/resolve-model"
+
+          # Resolve scripts/ the same way the "Resolve scripts directory" step does:
+          #   echo "dir=$(cd "$ACTION_PATH/../../scripts" && pwd)"
+          SCRIPTS_DIR="$(cd "$SIMULATED_ACTION_PATH/../../scripts" && pwd)"
+
+          echo "Simulated GITHUB_ACTION_PATH : $SIMULATED_ACTION_PATH"
+          echo "Resolved scripts directory   : $SCRIPTS_DIR"
+
+          # Verify key package files exist at the resolved path
+          test -f "$SCRIPTS_DIR/package.json"      || { echo "::error::package.json missing at _agentic-workflow/ scripts path"; exit 1; }
+          test -f "$SCRIPTS_DIR/package-lock.json" || { echo "::error::package-lock.json missing at _agentic-workflow/ scripts path"; exit 1; }
+
+          # Confirm .github/scripts/ does NOT exist at the caller-workspace root
+          # (so the old broken path would fail if a workflow regressed to it).
+          cd "$CALLER_WORKSPACE"
+          if [ -d ".github/scripts" ]; then
+            echo "ERROR: test setup incorrect — caller workspace must not have .github/scripts/"
+            exit 1
+          fi
+          echo "Confirmed: .github/scripts/ absent from caller workspace"
+
+          # Install dependencies the same way composite-action steps do,
+          # from the action-path-relative scripts directory.
+          npm ci --prefix "$SCRIPTS_DIR"
+
+          # Smoke-run one activity entry-point from the _agentic-workflow/ scripts
+          # directory to confirm tsx module resolution works.
+          OUT="$(cd "$SCRIPTS_DIR" && npx --no-install tsx src/resolve-model.ts 2>&1 || true)"
+          if printf '%s' "$OUT" | grep -qE \
+            'ERR_PACKAGE_PATH_NOT_EXPORTED|ERR_MODULE_NOT_FOUND|ERR_REQUIRE_ESM|Cannot find module'; then
+            echo "::error::resolve-model.ts failed module loading from _agentic-workflow/ scripts path:"
+            printf '%s\n' "$OUT"
+            exit 1
+          fi
+          echo "resolve-model.ts: module loading OK (output: $(printf '%s' "$OUT" | head -1))"
+
+          echo ""
+          echo "SUCCESS: npm ci and tsx ran via _agentic-workflow/.github/scripts/"
+          echo "         even though the caller workspace has no .github/scripts/"
+
+      # Assert the old workspace-relative path does not resolve.
+      # A reusable workflow that regresses to "uses: ./.github/actions/<name>"
+      # from a workspace without that tree would fail at job time; this step
+      # makes that assertion explicit and catches the regression before the
+      # broken file ships.
+      - name: Assert old ./.github/actions/ path does not resolve from caller workspace
+        run: |
+          set -euo pipefail
+          cd "$CALLER_WORKSPACE"
+
+          if [ -d ".github/actions/resolve-model" ]; then
+            echo "::error::Regression guard tripped — caller workspace unexpectedly contains .github/actions/resolve-model"
+            echo "         The old broken path would still work; test setup is incorrect."
+            exit 1
+          fi
+          echo "Confirmed: .github/actions/ absent — a regression to the old path would fail"
+          echo "           The _agentic-workflow/ path is the only valid helper resolution."
+
+  static-lint:
+    name: Static lint — no ./.github/actions/ refs in reusable workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      # Scan every *-reusable.yml file for "uses: ./.github/actions/" references.
+      #
+      # Documented exceptions (may retain ./.github/actions/ references):
+      #   terraform-ci-reusable.yml — declared consumer-only (Decision 6 in
+      #     docs/design/reusable-workflow-helper-resolution.md); its steps are
+      #     scoped to this repo's Terraform layout and not intended for external
+      #     callers.
+      #
+      # All other *-reusable.yml files must use "./_agentic-workflow/.github/actions/"
+      # exclusively so that external callers whose workspace does not contain
+      # this repo's .github/actions/ tree can run the workflow successfully.
+      - name: Fail if any reusable workflow uses ./.github/actions/ outside documented exceptions
+        run: |
+          set -euo pipefail
+          STATUS=0
+
+          for f in .github/workflows/*-reusable.yml; do
+            base="$(basename "$f")"
+
+            # Documented exception: terraform-ci-reusable.yml is consumer-only.
+            if [ "$base" = "terraform-ci-reusable.yml" ]; then
+              echo "SKIP (documented exception): $f"
+              continue
+            fi
+
+            # Search for lines matching:  uses: ./.github/actions/
+            if grep -nE 'uses: \.\/\.github\/actions\/' "$f"; then
+              echo "::error::${f}: contains 'uses: ./.github/actions/' — reusable workflows must use './_agentic-workflow/.github/actions/' so they work from an external caller's workspace. See docs/design/reusable-workflow-helper-resolution.md"
+              STATUS=1
+            else
+              echo "OK: $f"
+            fi
+          done
+
+          exit "$STATUS"
