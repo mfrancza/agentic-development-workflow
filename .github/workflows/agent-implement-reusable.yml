@@ -78,22 +78,31 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # Checkout must precede the local agent-token action: the runner resolves
-      # ./.github/actions/* references from the workspace.
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      # Check out this repo's own helper actions at the exact SHA the caller
+      # pinned to.  github.job_workflow_sha is GitHub's trust anchor: it
+      # resolves the ref the caller used in `uses: …@<ref>` at dispatch time
+      # and is not influenceable by the caller's workspace.  Using a dedicated
+      # subdirectory (_agentic-workflow/) avoids overwriting the caller's
+      # workspace and keeps the helper checkout clearly separate.
+      # See docs/design/reusable-workflow-helper-resolution.md Decisions 1, 3, 4.
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ github.job_workflow_sha }}
+          path: _agentic-workflow
           persist-credentials: false
 
       - name: Mint installation token for developer-agent
         id: setup
-        uses: ./.github/actions/agent-token
+        uses: ./_agentic-workflow/.github/actions/agent-token
         with:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
       - name: "Preflight: skip if PR already exists"
         id: preflight
-        uses: ./.github/actions/find-existing-pr
+        uses: ./_agentic-workflow/.github/actions/find-existing-pr
         with:
           token: ${{ steps.setup.outputs.token }}
           repo: ${{ inputs.repo }}
@@ -103,7 +112,7 @@ jobs:
       - name: "Preflight: skip if issue is labeled draft"
         id: draft-check
         if: steps.preflight.outputs.skip != 'true'
-        uses: ./.github/actions/check-draft-label
+        uses: ./_agentic-workflow/.github/actions/check-draft-label
         with:
           token: ${{ steps.setup.outputs.token }}
           repo: ${{ inputs.repo }}
@@ -112,7 +121,7 @@ jobs:
       - name: "Preflight: check for open blockers"
         id: blockers-check
         if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
-        uses: ./.github/actions/check-blockers
+        uses: ./_agentic-workflow/.github/actions/check-blockers
         with:
           token: ${{ steps.setup.outputs.token }}
           repo: ${{ inputs.repo }}
@@ -131,7 +140,7 @@ jobs:
       - name: Resolve Claude model from issue labels
         if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
         id: model
-        uses: ./.github/actions/resolve-model
+        uses: ./_agentic-workflow/.github/actions/resolve-model
         with:
           token: ${{ steps.setup.outputs.token }}
           subject-type: issue
@@ -148,7 +157,7 @@ jobs:
 
       - name: Run agent
         if: steps.preflight.outputs.skip != 'true' && steps.draft-check.outputs.skip != 'true'
-        uses: ./.github/actions/run-agent
+        uses: ./_agentic-workflow/.github/actions/run-agent
         env:
           CODE_REVIEWERS: ${{ inputs.code-reviewers }}
         with:
