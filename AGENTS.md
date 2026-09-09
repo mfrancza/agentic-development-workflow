@@ -258,7 +258,7 @@ The fix is a self-checkout at the exact SHA the caller pinned to, into a dedicat
   uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
   with:
     repository: mfrancza/agentic-development-workflow
-    ref: ${{ github.job_workflow_sha }}
+    ref: ${{ job.workflow_sha }}
     path: _agentic-workflow
     persist-credentials: false
 ```
@@ -271,7 +271,7 @@ uses: ./_agentic-workflow/.github/actions/<name>
 
 Key properties of this pattern:
 
-- **`github.job_workflow_sha` is the trust anchor.** GitHub sets this context value to the resolved SHA of the reusable workflow file — the SHA the caller's `@<ref>` resolved to at dispatch time. It is not attacker-influenceable; it matches the caller's intent exactly (e.g. `@v1.0.0` → that tag's SHA, `@v1` → the current SHA behind the moving tag).
+- **`job.workflow_sha` is the trust anchor.** GitHub sets this context value to the resolved SHA of the reusable workflow file — the SHA the caller's `@<ref>` resolved to at dispatch time. It is not attacker-influenceable; it matches the caller's intent exactly (e.g. `@v1.0.0` → that tag's SHA, `@v1` → the current SHA behind the moving tag).
 - **`_agentic-workflow/` is the fixed subdirectory convention.** The leading underscore signals "not part of the caller's repo"; the fixed name makes the pattern uniformly grep-able across all reusable workflows.
 - **The caller's workspace is not populated** for jobs that previously checked out the caller's workspace only to resolve local-action paths. The upstream subdirectory is the only tree the reusable's steps touch, keeping the trust surface minimal.
 - **`persist-credentials: false`** is required so the checkout token is not retained after the step completes — the minted developer-agent token is the only credential in scope thereafter.
