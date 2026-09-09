@@ -19,9 +19,18 @@ name: Test job.workflow_sha value (reusable)
 # job.workflow_sha whenever the PR branch is not at the default-branch HEAD.
 # Scoping this check to workflow_dispatch avoids false failures on every
 # non-trivial PR while still providing a stronger contract for manual runs.
+#
+# NOTE: github.event_name inside a workflow_call reusable always evaluates to
+# "workflow_call" (not the caller's triggering event), so Assertion 4 uses
+# inputs.event_name propagated from the caller instead of github.event_name.
 
 on:
   workflow_call:
+    inputs:
+      event_name:
+        description: 'The caller workflow event name (github.event_name on the caller side).'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -98,8 +107,12 @@ See docs/design/helper-checkout-job-workflow-sha-context.md Decision 5."
       # produce false failures on every non-trivial PR; scoping it to
       # workflow_dispatch keeps CI signal clean while still providing a stronger
       # contract for manual verification runs.
+      #
+      # Uses inputs.event_name (propagated from the caller) rather than
+      # github.event_name because github.event_name inside a workflow_call
+      # reusable always evaluates to "workflow_call".
       - name: Assert job.workflow_sha equals github.sha (workflow_dispatch only)
-        if: github.event_name == 'workflow_dispatch'
+        if: inputs.event_name == 'workflow_dispatch'
         env:
           JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
           GITHUB_SHA_VALUE: ${{ github.sha }}

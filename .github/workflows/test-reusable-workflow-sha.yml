@@ -16,7 +16,6 @@ on:
   pull_request:
     paths:
       - '.github/workflows/*-reusable.yml'
-      - '.github/workflows/test-only-job-workflow-sha-reusable.yml'
       - '.github/workflows/test-reusable-workflow-sha.yml'
       - 'docs/design/helper-checkout-job-workflow-sha-context.md'
   workflow_dispatch:
@@ -27,3 +26,5 @@ permissions:
 jobs:
   test-workflow-sha:
     uses: ./.github/workflows/test-only-job-workflow-sha-reusable.yml
+    with:
+      event_name: ${{ github.event_name }}
