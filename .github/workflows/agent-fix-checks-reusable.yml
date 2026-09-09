@@ -11,7 +11,7 @@ name: agent-fix-checks (reusable)
 # as explicit inputs: see the with: block in agent-fix-checks.yml.
 #
 # External consumers: this workflow self-checks out the helper actions at
-# job.workflow_sha (the SHA the caller pinned to) into _agentic-workflow/,
+# github.job_workflow_sha (the SHA the caller pinned to) into _agentic-workflow/,
 # so no checkout of the caller's workspace is needed or performed.
 
 on:
@@ -69,7 +69,7 @@ jobs:
 
     steps:
       # Check out this repo's own helper actions at the exact SHA the caller
-      # pinned to.  job.workflow_sha is GitHub's trust anchor: it
+      # pinned to.  github.job_workflow_sha is GitHub's trust anchor: it
       # resolves the ref the caller used in `uses: …@<ref>` at dispatch time
       # and is not influenceable by the caller's workspace.  Using a dedicated
       # subdirectory (_agentic-workflow/) avoids overwriting the caller's
@@ -79,7 +79,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: mfrancza/agentic-development-workflow
-          ref: ${{ job.workflow_sha }}
+          ref: ${{ github.job_workflow_sha }}
           path: _agentic-workflow
           persist-credentials: false
 
