@@ -1,0 +1,116 @@
+name: Test job.workflow_sha value (reusable)
+
+# Minimal reusable workflow that validates job.workflow_sha at runtime.
+#
+# This is the in-repo regression test described in Decision 5 of
+# docs/design/helper-checkout-job-workflow-sha-context.md.  It is
+# intentionally stripped of real agent logic so it exercises only the
+# SHA-resolution property and nothing else.
+#
+# Three assertions made by the single job:
+#   1. job.workflow_sha is non-empty (fail-loud guard from Decision 2 of the
+#      same design doc — the same pattern added to every affected reusable).
+#   2. actions/checkout at job.workflow_sha into _agentic-workflow/ completes.
+#   3. git -C _agentic-workflow rev-parse HEAD equals job.workflow_sha.
+#
+# A fourth assertion (job.workflow_sha == github.sha) is scoped to
+# workflow_dispatch only.  On pull_request, github.sha is the merge commit
+# GitHub synthesises to test mergeability, which legitimately differs from
+# job.workflow_sha whenever the PR branch is not at the default-branch HEAD.
+# Scoping this check to workflow_dispatch avoids false failures on every
+# non-trivial PR while still providing a stronger contract for manual runs.
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  assert-job-workflow-sha:
+    name: Assert job.workflow_sha is populated and matches checkout HEAD
+    runs-on: ubuntu-latest
+    steps:
+      # Assertion 1 — fail loudly if job.workflow_sha is empty.
+      # This is the guard from Decision 2 of
+      # docs/design/helper-checkout-job-workflow-sha-context.md, applied
+      # identically here so the test fails immediately on a regression rather
+      # than silently drifting to an unpinned ref.
+      - name: Validate job.workflow_sha is populated
+        env:
+          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          set -euo pipefail
+          if [ -z "${JOB_WORKFLOW_SHA}" ]; then
+            echo "::error::job.workflow_sha resolved to an empty string. \
+The reusable-workflow helper checkout cannot proceed without a resolved SHA. \
+See docs/design/helper-checkout-job-workflow-sha-context.md."
+            exit 1
+          fi
+          echo "job.workflow_sha=${JOB_WORKFLOW_SHA}"
+
+      # Assertion 2 — check out this repo at job.workflow_sha.
+      # Uses the same pattern as all other *-reusable.yml files:
+      #   repository: mfrancza/agentic-development-workflow
+      #   ref: ${{ job.workflow_sha }}
+      #   path: _agentic-workflow
+      #   persist-credentials: false
+      # If job.workflow_sha is empty or unresolvable the checkout step will
+      # fail here rather than silently falling back to the default branch.
+      - name: Check out at job.workflow_sha into _agentic-workflow/
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ job.workflow_sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      # Assertion 3 — the checkout HEAD must equal job.workflow_sha.
+      # A mismatch means actions/checkout silently fell back to a different ref
+      # (e.g. the default branch HEAD) — the exact failure mode this runtime
+      # regression test is designed to catch.  The check also confirms the SHA
+      # is non-empty a second time, providing defence-in-depth against a future
+      # GitHub-side change that starts returning an empty job.workflow_sha on
+      # some new trigger.
+      - name: Assert checkout HEAD matches job.workflow_sha
+        env:
+          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: |
+          set -euo pipefail
+          CHECKOUT_HEAD="$(git -C _agentic-workflow rev-parse HEAD)"
+          echo "job.workflow_sha : ${JOB_WORKFLOW_SHA}"
+          echo "checkout HEAD    : ${CHECKOUT_HEAD}"
+          if [ "${CHECKOUT_HEAD}" != "${JOB_WORKFLOW_SHA}" ]; then
+            echo "::error::Checkout HEAD (${CHECKOUT_HEAD}) does not match \
+job.workflow_sha (${JOB_WORKFLOW_SHA}). The helper checkout resolved to the \
+wrong commit — actions/checkout may have fallen back to an unpinned ref. \
+See docs/design/helper-checkout-job-workflow-sha-context.md Decision 5."
+            exit 1
+          fi
+          echo "OK: checkout HEAD matches job.workflow_sha"
+
+      # Assertion 4 (workflow_dispatch only) — job.workflow_sha must also
+      # equal github.sha when the caller triggers via workflow_dispatch.
+      # This check is intentionally omitted on pull_request: github.sha there
+      # is the merge commit GitHub synthesises for mergeability testing, so it
+      # legitimately differs from job.workflow_sha on any PR that is not already
+      # at the default-branch HEAD.  An unconditional equality check would
+      # produce false failures on every non-trivial PR; scoping it to
+      # workflow_dispatch keeps CI signal clean while still providing a stronger
+      # contract for manual verification runs.
+      - name: Assert job.workflow_sha equals github.sha (workflow_dispatch only)
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
+          GITHUB_SHA_VALUE: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          echo "job.workflow_sha : ${JOB_WORKFLOW_SHA}"
+          echo "github.sha       : ${GITHUB_SHA_VALUE}"
+          if [ "${JOB_WORKFLOW_SHA}" != "${GITHUB_SHA_VALUE}" ]; then
+            echo "::error::job.workflow_sha (${JOB_WORKFLOW_SHA}) does not match \
+github.sha (${GITHUB_SHA_VALUE}) on workflow_dispatch. \
+See docs/design/helper-checkout-job-workflow-sha-context.md Decision 5."
+            exit 1
+          fi
+          echo "OK: job.workflow_sha equals github.sha"
