@@ -24,7 +24,9 @@ name: Test reusable-workflow helper resolution
 #                                correctly from an empty caller workspace.
 #   static-lint                — grep scan that fails if any *-reusable.yml
 #                                file contains a "uses: ./.github/actions/"
-#                                reference outside the documented exceptions.
+#                                reference outside the documented exceptions;
+#                                also fails if any file contains
+#                                'github.job_workflow_sha' (invalid context).
 
 on:
   pull_request:
