@@ -247,3 +247,30 @@ jobs:
           done
 
           exit "$STATUS"
+
+      # Scan every *-reusable.yml file for "github.job_workflow_sha" references.
+      #
+      # The `job_workflow_sha` property lives on the `job` context, not the
+      # `github` context. Using `${{ github.job_workflow_sha }}` is an invalid
+      # expression that silently evaluates to an empty string at runtime,
+      # causing the self-checkout step to check out the default branch instead
+      # of the caller-pinned SHA — a silent trust-anchor regression.
+      #
+      # All *-reusable.yml files must use ${{ job.workflow_sha }} exclusively.
+      # Design: docs/design/helper-checkout-job-workflow-sha-context.md (Decision 3).
+      - name: Fail if any reusable workflow uses github.job_workflow_sha
+        run: |
+          set -euo pipefail
+          STATUS=0
+
+          for f in .github/workflows/*-reusable.yml; do
+            # Search for the invalid expression: github.job_workflow_sha
+            if grep -nF 'github.job_workflow_sha' "$f"; then
+              echo "::error::${f}: contains 'github.job_workflow_sha' — the property lives on the 'job' context, not the 'github' context. Replace every occurrence with '\${{ job.workflow_sha }}'. See docs/design/helper-checkout-job-workflow-sha-context.md (Decision 3)."
+              STATUS=1
+            else
+              echo "OK: $f"
+            fi
+          done
+
+          exit "$STATUS"
