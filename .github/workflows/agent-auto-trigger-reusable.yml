@@ -82,19 +82,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Validate job.workflow_sha is populated
-        env:
-          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
-        run: |
-          set -euo pipefail
-          if [ -z "${JOB_WORKFLOW_SHA}" ]; then
-            echo "::error::job.workflow_sha resolved to an empty string. \
-The reusable-workflow helper checkout cannot proceed without a resolved SHA. \
-See docs/design/helper-checkout-job-workflow-sha-context.md."
-            exit 1
-          fi
-          echo "job.workflow_sha=${JOB_WORKFLOW_SHA}"
-
       # Check out this workflow's own helpers at the exact SHA the caller
       # pinned to.  See docs/design/reusable-workflow-helper-resolution.md
       # Decisions 1, 3, 4.
@@ -129,19 +116,6 @@ See docs/design/helper-checkout-job-workflow-sha-context.md."
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Validate job.workflow_sha is populated
-        env:
-          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
-        run: |
-          set -euo pipefail
-          if [ -z "${JOB_WORKFLOW_SHA}" ]; then
-            echo "::error::job.workflow_sha resolved to an empty string. \
-The reusable-workflow helper checkout cannot proceed without a resolved SHA. \
-See docs/design/helper-checkout-job-workflow-sha-context.md."
-            exit 1
-          fi
-          echo "job.workflow_sha=${JOB_WORKFLOW_SHA}"
-
       # Check out this workflow's own helpers at the exact SHA the caller
       # pinned to.  See docs/design/reusable-workflow-helper-resolution.md
       # Decisions 1, 3, 4.
@@ -176,19 +150,6 @@ See docs/design/helper-checkout-job-workflow-sha-context.md."
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Validate job.workflow_sha is populated
-        env:
-          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
-        run: |
-          set -euo pipefail
-          if [ -z "${JOB_WORKFLOW_SHA}" ]; then
-            echo "::error::job.workflow_sha resolved to an empty string. \
-The reusable-workflow helper checkout cannot proceed without a resolved SHA. \
-See docs/design/helper-checkout-job-workflow-sha-context.md."
-            exit 1
-          fi
-          echo "job.workflow_sha=${JOB_WORKFLOW_SHA}"
-
       # Check out this workflow's own helpers at the exact SHA the caller
       # pinned to.  See docs/design/reusable-workflow-helper-resolution.md
       # Decisions 1, 3, 4.
@@ -242,19 +203,6 @@ See docs/design/helper-checkout-job-workflow-sha-context.md."
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - name: Validate job.workflow_sha is populated
-        env:
-          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
-        run: |
-          set -euo pipefail
-          if [ -z "${JOB_WORKFLOW_SHA}" ]; then
-            echo "::error::job.workflow_sha resolved to an empty string. \
-The reusable-workflow helper checkout cannot proceed without a resolved SHA. \
-See docs/design/helper-checkout-job-workflow-sha-context.md."
-            exit 1
-          fi
-          echo "job.workflow_sha=${JOB_WORKFLOW_SHA}"
-
       # Check out this workflow's own helpers at the exact SHA the caller
       # pinned to.  See docs/design/reusable-workflow-helper-resolution.md
       # Decisions 1, 3, 4.
@@ -336,19 +284,6 @@ See docs/design/helper-checkout-job-workflow-sha-context.md."
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Validate job.workflow_sha is populated
-        env:
-          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
-        run: |
-          set -euo pipefail
-          if [ -z "${JOB_WORKFLOW_SHA}" ]; then
-            echo "::error::job.workflow_sha resolved to an empty string. \
-The reusable-workflow helper checkout cannot proceed without a resolved SHA. \
-See docs/design/helper-checkout-job-workflow-sha-context.md."
-            exit 1
-          fi
-          echo "job.workflow_sha=${JOB_WORKFLOW_SHA}"
-
       # Check out this workflow's own helpers at the exact SHA the caller
       # pinned to.  See docs/design/reusable-workflow-helper-resolution.md
       # Decisions 1, 3, 4.

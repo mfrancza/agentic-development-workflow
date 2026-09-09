@@ -65,19 +65,6 @@ jobs:
       conflicted_prs: ${{ steps.find.outputs.conflicted_prs }}
 
     steps:
-      - name: Validate job.workflow_sha is populated
-        env:
-          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
-        run: |
-          set -euo pipefail
-          if [ -z "${JOB_WORKFLOW_SHA}" ]; then
-            echo "::error::job.workflow_sha resolved to an empty string. \
-The reusable-workflow helper checkout cannot proceed without a resolved SHA. \
-See docs/design/helper-checkout-job-workflow-sha-context.md."
-            exit 1
-          fi
-          echo "job.workflow_sha=${JOB_WORKFLOW_SHA}"
-
       # Check out this repo's own helper actions at the exact SHA the caller
       # pinned to.  job.workflow_sha is GitHub's trust anchor: it
       # resolves the ref the caller used in `uses: …@<ref>` at dispatch time
@@ -121,19 +108,6 @@ See docs/design/helper-checkout-job-workflow-sha-context.md."
       cancel-in-progress: false
 
     steps:
-      - name: Validate job.workflow_sha is populated
-        env:
-          JOB_WORKFLOW_SHA: ${{ job.workflow_sha }}
-        run: |
-          set -euo pipefail
-          if [ -z "${JOB_WORKFLOW_SHA}" ]; then
-            echo "::error::job.workflow_sha resolved to an empty string. \
-The reusable-workflow helper checkout cannot proceed without a resolved SHA. \
-See docs/design/helper-checkout-job-workflow-sha-context.md."
-            exit 1
-          fi
-          echo "job.workflow_sha=${JOB_WORKFLOW_SHA}"
-
       # Check out this repo's own helper actions at the exact SHA the caller
       # pinned to.  job.workflow_sha is GitHub's trust anchor: it
       # resolves the ref the caller used in `uses: …@<ref>` at dispatch time
