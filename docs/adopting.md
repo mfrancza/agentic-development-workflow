@@ -1524,7 +1524,7 @@ fixed in the v0.0.1 patch release. (See
 [`docs/design/reusable-workflow-helper-resolution.md`](design/reusable-workflow-helper-resolution.md)
 for the full analysis and the chosen fix: each reusable now self-checks out its
 own helper actions into a `_agentic-workflow/` subdirectory before any composite
-action step runs, keyed to `github.job_workflow_sha` so the helper version is
+action step runs, keyed to `job.workflow_sha` so the helper version is
 always consistent with the reusable workflow version the caller pinned to.)
 
 **Fix:**

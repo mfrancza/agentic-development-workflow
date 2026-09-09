@@ -14,7 +14,7 @@ name: Test reusable-workflow helper resolution
 # this repo — so any "uses: ./.github/actions/<name>" step would resolve
 # against a tree that lacks those actions. The fix (Decision 1 in
 # docs/design/reusable-workflow-helper-resolution.md) is a self-checkout at
-# github.job_workflow_sha into a _agentic-workflow/ subdirectory before any
+# job.workflow_sha into a _agentic-workflow/ subdirectory before any
 # composite action is invoked; every subsequent step references helpers via
 # "./_agentic-workflow/.github/actions/<name>".
 #

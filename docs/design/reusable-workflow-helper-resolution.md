@@ -19,7 +19,7 @@ The fix is to make every reusable workflow that uses local composite actions
 first check out **its own source repository at the exact SHA the caller
 pinned to**, into a dedicated subdirectory, and then reference every helper
 action from that subdirectory (`uses: ./_agentic-workflow/.github/actions/<name>`).
-The `github.job_workflow_sha` context variable, which GitHub populates with the
+The `job.workflow_sha` context variable, which GitHub populates with the
 resolved SHA of the reusable workflow file being executed, is the trust anchor
 that makes this safe: it is chosen by GitHub from the ref the caller pinned to
 (`@v1`, `@v1.2.3`, or `@<sha>`), so the code that runs is exactly the code the
@@ -60,7 +60,7 @@ Restated from issue #498 and its
 
 1. **Which upstream ref to pin the helper checkout to?** The grooming Q&A
    explicitly flagged this as the security-critical decision requiring human
-   ratification. This design proposes `github.job_workflow_sha`. That value is
+   ratification. This design proposes `job.workflow_sha`. That value is
    populated by GitHub with the resolved SHA of the reusable workflow file
    the caller invoked — it is not attacker-influenceable within a workflow
    run, and it exactly matches what the caller already pinned to (`@v1` →
@@ -93,7 +93,20 @@ Restated from issue #498 and its
 
 ## Decisions
 
-### Decision 1 — Pin the upstream checkout to `github.job_workflow_sha`
+### Decision 1 — Pin the upstream checkout to `job.workflow_sha`
+
+> **Correction note (Issue [#515](https://github.com/mfrancza/agentic-development-workflow/issues/515)):**
+> The original decision text and all implementations shipped with the expression
+> `github.job_workflow_sha`. That expression is invalid — the `github` context
+> has no `job_workflow_sha` property, so the value resolves to an empty string,
+> causing `actions/checkout` to fall back to an unpinned default ref. The correct
+> expression is `job.workflow_sha` (under the `job` context), as documented in
+> [GitHub's job-context reference](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context).
+> The bug is tracked in Issue [#513](https://github.com/mfrancza/agentic-development-workflow/issues/513)
+> and the correction design is at
+> [`docs/design/helper-checkout-job-workflow-sha-context.md`](helper-checkout-job-workflow-sha-context.md).
+> Issue #515 corrected the expression in every affected file; the remainder of
+> this decision section has been updated in place to reflect the corrected name.
 
 **Decision.** Each affected reusable workflow adds an initial step that runs
 `actions/checkout` with:
@@ -103,7 +116,7 @@ Restated from issue #498 and its
   uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
   with:
     repository: mfrancza/agentic-development-workflow
-    ref: ${{ github.job_workflow_sha }}
+    ref: ${{ job.workflow_sha }}
     path: _agentic-workflow
     persist-credentials: false
 ```
@@ -111,8 +124,8 @@ Restated from issue #498 and its
 Subsequent steps reference the helpers via
 `uses: ./_agentic-workflow/.github/actions/<name>`.
 
-`github.job_workflow_sha` is a
-[GitHub-provided context value](https://docs.github.com/en/actions/reference/contexts-reference#github-context)
+`job.workflow_sha` is a
+[GitHub-provided context value](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#job-context)
 described as "the commit SHA for the reusable workflow file" of the currently
 executing job. GitHub sets it by resolving the ref the caller used in `uses:
 owner/repo/.github/workflows/<name>.yml@<ref>` at dispatch time; the value is
@@ -154,7 +167,7 @@ access to this repo.
   the caller's SHA (e.g. the caller's default-branch tip at the moment the
   triggering event fired), not the reusable's SHA. Using it would check out
   this repo at an arbitrary consumer-influenced SHA, which is exactly the
-  wrong trust boundary. `github.job_workflow_sha` is the correct value.
+  wrong trust boundary. `job.workflow_sha` is the correct value.
 
 ### Decision 2 — Self-checkout, not cross-repo `uses:` references
 
@@ -327,7 +340,7 @@ inside a single PR.
 Two docs get updated in this design's implementation tasks:
 
 - **`AGENTS.md`** gains a short subsection under **Workflow Activity
-  Conventions** documenting the "self-checkout at `job_workflow_sha`" pattern
+  Conventions** documenting the "self-checkout at `job.workflow_sha`" pattern
   and pointing to the reusable workflows that already implement it.
 - **`docs/adopting.md`** already assumes the reusable workflows work; the
   wording does not need to change functionally, but a new short **Adoption
@@ -368,7 +381,7 @@ address.
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#500](https://github.com/mfrancza/agentic-development-workflow/issues/500) | Establish the upstream-checkout pattern in `agent-implement-reusable.yml` (the reported failure): remove the caller-workspace `actions/checkout`; add the `_agentic-workflow` checkout at `github.job_workflow_sha`; update every `uses: ./.github/actions/<name>` reference to `uses: ./_agentic-workflow/.github/actions/<name>`. Add the "self-checkout at `job_workflow_sha`" subsection to `AGENTS.md` under **Workflow Activity Conventions** so it becomes the documented pattern for the follow-up tasks. | — |
+| [#500](https://github.com/mfrancza/agentic-development-workflow/issues/500) | Establish the upstream-checkout pattern in `agent-implement-reusable.yml` (the reported failure): remove the caller-workspace `actions/checkout`; add the `_agentic-workflow` checkout at `job.workflow_sha`; update every `uses: ./.github/actions/<name>` reference to `uses: ./_agentic-workflow/.github/actions/<name>`. Add the "self-checkout at `job_workflow_sha`" subsection to `AGENTS.md` under **Workflow Activity Conventions** so it becomes the documented pattern for the follow-up tasks. | — |
 | [#501](https://github.com/mfrancza/agentic-development-workflow/issues/501) | Apply the same pattern to the remaining developer/reviewer container reusables: `agent-groom-reusable.yml`, `agent-design-reusable.yml` (design job only — leave `undraft-sub-issues` untouched), `agent-review-reusable.yml`, `agent-respond-review-reusable.yml`, `agent-fix-checks-reusable.yml`, `agent-fix-deployment-reusable.yml`, `agent-resolve-conflicts-reusable.yml`. | Issue #500 |
 | [#502](https://github.com/mfrancza/agentic-development-workflow/issues/502) | Apply the pattern to `agent-auto-trigger-reusable.yml` for the five jobs that reference local actions (auto-groom, auto-design, auto-developer-do, auto-developer-undraft, auto-developer-unblock). Explicitly do not modify the `auto-review` job. Add a header note to `terraform-ci-reusable.yml` declaring it consumer-only (Decision 6) and add a paragraph to `docs/adopting.md` recording the same. | Issue #500 |
 | [#503](https://github.com/mfrancza/agentic-development-workflow/issues/503) | Extend `.github/workflows/test-action-portability.yml` (or add a sibling `test-reusable-portability.yml`) to reproduce the failing scenario from Issue #498: simulate a caller workspace with no `.github/actions/` tree, dispatch a reusable workflow that expects to find its helpers under `_agentic-workflow/`, and assert that helper resolution succeeds. Fails the CI job if the fix regresses. | Issues #500, #501, #502 |
@@ -388,11 +401,11 @@ issues.
 ## Human ratification required
 
 The parent issue carries the `human-required` label because the trust-anchor
-choice in Decision 1 (`github.job_workflow_sha`) and the "no caller-workspace
+choice in Decision 1 (`job.workflow_sha`) and the "no caller-workspace
 checkout" posture in Decision 4 are security-sensitive. Before implementation
 proceeds, a maintainer should confirm:
 
-1. **Decision 1 is acceptable.** `github.job_workflow_sha` is the pinning
+1. **Decision 1 is acceptable.** `job.workflow_sha` is the pinning
    anchor; the reusable workflow's helpers run at whatever SHA the caller's
    pin resolved to.
 2. **Decision 4 is acceptable.** Reusable workflows that previously checked
