@@ -40,6 +40,8 @@ If you determine that a `human-required` label must be applied to this issue, ap
 
 ## Volatile facts live at their sources
 
+Before classifying a linter or schema warning against a workflow expression as a bug, check `AGENTS.md` § "Reverting or replacing code with a passing live-run history" — the linter may be reporting a known false positive (see `AGENTS.md` § "Known traps").
+
 `AGENTS.md` points to authoritative source files rather than copying their content. Before adding, removing, or reasoning about labels, `AGENT_ACTION` values, or workflow triggers, read the source directly:
 
 - **Labels** → [`terraform/modules/labels/main.tf`](terraform/modules/labels/main.tf) (`automation_labels` local)

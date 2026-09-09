@@ -112,6 +112,8 @@ gh pr edit    "<pr-number>"          --repo "$GITHUB_REPO" --add-label "human-re
 
 ## Volatile facts live at their sources
 
+Before proposing a change to a workflow file or a workflow expression that has a passing run in the history, check `AGENTS.md` § "Reverting or replacing code with a passing live-run history" — a design that proposes to change working code must cite a runtime failure in its requirements section, not just a linter or schema warning (see `AGENTS.md` § "Known traps").
+
 `AGENTS.md` points to authoritative source files rather than copying their content. Before adding, removing, or reasoning about labels, `AGENT_ACTION` values, or workflow triggers, read the source directly:
 
 - **Labels** → [`terraform/modules/labels/main.tf`](terraform/modules/labels/main.tf) (`automation_labels` local)
