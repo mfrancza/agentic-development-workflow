@@ -1,0 +1,63 @@
+name: Test helper-ref contract (runtime)
+
+# Runtime regression test for the helpers-ref bootstrap contract described in
+# docs/design/helper-checkout-job-workflow-sha-context.md Decision 3.
+#
+# Invokes the minimal reusable fixture (test-helper-ref-reusable.yml) with
+# helpers-ref: ${{ github.sha }}, then asserts that the requested ref (github.sha),
+# the GitHub API-resolved SHA, and the _agentic-workflow/ checkout HEAD are all equal.
+#
+# This proves the four-step bootstrap (validate → resolve → checkout → verify-HEAD)
+# produces the correct commit identity without minting a GitHub App token or running
+# an agent container. A successful checkout-step conclusion alone is not sufficient
+# evidence; the equality assertion in the assert-equality job is the actual regression guard.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/test-helper-ref*.yml'
+      - '.github/workflows/*-reusable.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  call-fixture:
+    uses: ./.github/workflows/test-helper-ref-reusable.yml
+    with:
+      helpers-ref: ${{ github.sha }}
+
+  assert-equality:
+    name: Assert requested-ref == resolved-sha == checkout-head
+    runs-on: ubuntu-latest
+    needs: call-fixture
+    steps:
+      - name: Assert all three commit identities match
+        env:
+          REQUESTED_REF: ${{ github.sha }}
+          RESOLVED_SHA: ${{ needs.call-fixture.outputs.resolved-sha }}
+          CHECKOUT_HEAD: ${{ needs.call-fixture.outputs.checkout-head }}
+        run: |
+          set -euo pipefail
+          echo "Requested ref : ${REQUESTED_REF}"
+          echo "Resolved SHA  : ${RESOLVED_SHA}"
+          echo "Checkout HEAD : ${CHECKOUT_HEAD}"
+
+          STATUS=0
+
+          if [[ "${REQUESTED_REF}" != "${RESOLVED_SHA}" ]]; then
+            echo "::error::Requested ref (${REQUESTED_REF}) does not match resolved SHA (${RESOLVED_SHA})."
+            STATUS=1
+          fi
+
+          if [[ "${RESOLVED_SHA}" != "${CHECKOUT_HEAD}" ]]; then
+            echo "::error::Resolved SHA (${RESOLVED_SHA}) does not match checkout HEAD (${CHECKOUT_HEAD})."
+            STATUS=1
+          fi
+
+          if [[ "${STATUS}" -eq 0 ]]; then
+            echo "OK: all three commit identities match — helpers-ref bootstrap contract verified."
+          fi
+
+          exit "${STATUS}"
