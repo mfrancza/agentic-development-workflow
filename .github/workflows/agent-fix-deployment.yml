@@ -21,4 +21,5 @@ jobs:
     with:
       deployment-sha: ${{ github.event.deployment.sha }}
       image: ''
+      helpers-ref: ${{ github.sha }}
     secrets: inherit

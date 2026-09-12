@@ -242,6 +242,7 @@ A `run:` block moves to a TypeScript activity when it contains **any** of: API-r
 
 - `undraft-sub-issues` job in `agent-design-reusable.yml` — runs on `pull_request.closed`; executing workspace code here would allow a merged PR to route script changes past `DEVELOPER_APP_PRIVATE_KEY`.
 - All jobs in `agent-pr-merged.yml` and `agent-pr-merged-reusable.yml` — triggered on `pull_request: closed`; neither file performs a workspace checkout. The reusable uses `actions/create-github-app-token` at a pinned SHA instead of the local `./.github/actions/agent-token` composite action (which would require a checkout). Migrating any of this logic to `.github/scripts/` or introducing a checkout would reopen the secret-exfiltration path.
+- **Bootstrap steps in all helper-consuming reusable workflows** (the "Validate helpers-ref input", "Resolve helpers-ref to commit SHA", and "Verify helper checkout HEAD matches resolved SHA" steps) — these use inline shell `gh api` and `git rev-parse` rather than TypeScript activities, even though the resolve step contains API-response parsing (`--jq`). This is a narrow, deliberate bootstrap exception: these steps must execute before any checkout that would make `.github/scripts/` available, and they must not consume code from the caller's workspace. See Decision 2 in [`docs/design/helper-checkout-job-workflow-sha-context.md`](docs/design/helper-checkout-job-workflow-sha-context.md).
 
 ### CI
 
@@ -251,16 +252,57 @@ The [`.github/workflows/ci.yml`](.github/workflows/ci.yml) workflow (name: `CI`)
 
 Reusable workflows (`*-reusable.yml`) that reference local composite actions must **not** rely on the caller's workspace to resolve those actions. When an external consumer invokes `mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@<ref>`, the runner populates `$GITHUB_WORKSPACE` with the **caller's** repository — not this repo — so workspace-relative paths like `uses: ./.github/actions/<name>` will not resolve.
 
-The fix is a self-checkout at the exact SHA the caller pinned to, into a dedicated subdirectory, before any composite action is invoked:
+The fix is a four-step bootstrap in each affected job, run before any composite action is invoked:
+
+1. **Validate** that the required `helpers-ref` input is non-empty — fail with `::error::` if not.
+2. **Resolve** `helpers-ref` against `mfrancza/agentic-development-workflow` via the GitHub commits API to a full 40-character commit SHA. An empty or unresolvable result is fatal.
+3. **Check out** the upstream repo at the **resolved SHA** (never the symbolic input) into `_agentic-workflow/` with `persist-credentials: false`.
+4. **Assert** that `_agentic-workflow` HEAD equals the resolved SHA. Any mismatch aborts before a single composite action runs.
 
 ```yaml
+- name: Validate helpers-ref input
+  env:
+    HELPERS_REF: ${{ inputs.helpers-ref }}
+  run: |
+    set -euo pipefail
+    if [[ -z "${HELPERS_REF}" ]]; then
+      echo "::error::helpers-ref input is required and must not be empty."
+      exit 1
+    fi
+
+- name: Resolve helpers-ref to commit SHA
+  id: resolve-ref
+  env:
+    HELPERS_REF: ${{ inputs.helpers-ref }}
+    GH_TOKEN: ${{ github.token }}
+  run: |
+    set -euo pipefail
+    resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+    if [[ -z "${resolved}" ]]; then
+      echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+      exit 1
+    fi
+    echo "Resolved ${HELPERS_REF} → ${resolved}"
+    echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
 - name: Check out upstream helper actions
   uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
   with:
     repository: mfrancza/agentic-development-workflow
-    ref: ${{ github.job_workflow_sha }}
+    ref: ${{ steps.resolve-ref.outputs.sha }}
     path: _agentic-workflow
     persist-credentials: false
+
+- name: Verify helper checkout HEAD matches resolved SHA
+  env:
+    EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+  run: |
+    set -euo pipefail
+    actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+    if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+      echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+      exit 1
+    fi
 ```
 
 Every subsequent step references helpers via the `_agentic-workflow/` prefix:
@@ -271,12 +313,15 @@ uses: ./_agentic-workflow/.github/actions/<name>
 
 Key properties of this pattern:
 
-- **`github.job_workflow_sha` is the trust anchor.** GitHub sets this context value to the resolved SHA of the reusable workflow file — the SHA the caller's `@<ref>` resolved to at dispatch time. It is not attacker-influenceable; it matches the caller's intent exactly (e.g. `@v1.0.0` → that tag's SHA, `@v1` → the current SHA behind the moving tag). If actionlint reports this expression as undefined, that is a known false positive — see `## Known traps`.
+- **`helpers-ref` is the version-pinning contract.** Every affected reusable workflow declares `helpers-ref` as a required string input with no default. Repository-owned caller stubs pass `helpers-ref: ${{ github.sha }}` so helpers and the calling workflow always run at the same commit. External consumers pass the same ref used on the `uses:` line (e.g. `helpers-ref: v0` alongside `uses: ...@v0`). Omitting the input triggers fail-loud validation rather than falling through to an unknown helper version.
+- **Independent resolution before checkout.** The resolve step converts the symbolic input to a commit SHA via the GitHub API before `actions/checkout` runs, so the checkout always receives a 40-character hex SHA rather than a branch or tag that could move between resolve and checkout.
+- **HEAD equality guard prevents silent fallback.** The verification step reads the actual checkout HEAD and asserts equality with the resolved SHA. This catches the class of failure seen in run [34303371563](https://github.com/mfrancza/agentic-development-workflow/actions/runs/34303371563), where `github.job_workflow_sha` evaluated to empty and `actions/checkout` silently fell back to `main` — a green checkout step was not evidence of version pinning.
+- **Bootstrap exception to TypeScript extraction threshold.** The resolve and verify steps use inline `gh api` shell rather than a TypeScript activity. This is a narrow, deliberate exception: the bootstrap executes before any checkout that would make `.github/scripts/` available, and must not consume code from the caller's workspace. See the "Permanent security exceptions" list above and Decision 2 in [`docs/design/helper-checkout-job-workflow-sha-context.md`](docs/design/helper-checkout-job-workflow-sha-context.md).
 - **`_agentic-workflow/` is the fixed subdirectory convention.** The leading underscore signals "not part of the caller's repo"; the fixed name makes the pattern uniformly grep-able across all reusable workflows.
 - **The caller's workspace is not populated** for jobs that previously checked out the caller's workspace only to resolve local-action paths. The upstream subdirectory is the only tree the reusable's steps touch, keeping the trust surface minimal.
 - **`persist-credentials: false`** is required so the checkout token is not retained after the step completes — the minted developer-agent token is the only credential in scope thereafter.
 
-This pattern is applied to every reusable workflow that references local composite actions and is intended for external consumption. See [`docs/design/reusable-workflow-helper-resolution.md`](docs/design/reusable-workflow-helper-resolution.md) Decisions 1, 3, and 4 for the full rationale and audit inventory.
+This pattern is applied to every reusable workflow that references local composite actions and is intended for external consumption. See [`docs/design/helper-checkout-job-workflow-sha-context.md`](docs/design/helper-checkout-job-workflow-sha-context.md) for the full rationale and the runtime-failure evidence that motivated the transition away from `github.job_workflow_sha`.
 
 ## Code Review Standards
 
@@ -319,15 +364,17 @@ A proposed change that would replace, revert, or "fix" code that has a passing l
 
 These are documented gotchas that have caused real incidents or are structurally likely to recur. Each entry states what is correct, what the wrong alternative is, why the wrong path looks plausible, and where the full history lives. Future traps can be appended here without restructuring the section.
 
-### `github.job_workflow_sha` — actionlint false positive
+### `github.job_workflow_sha` — evaluated empty at runtime; replaced by `helpers-ref`
 
-**Correct expression:** `${{ github.job_workflow_sha }}` — GitHub defines `job_workflow_sha` on the `github` context for reusable-workflow runs. It resolves to the SHA the caller's `@<ref>` resolved to at dispatch time and is the trust anchor for the self-checkout pattern (see "Reusable workflows: self-checkout for helper actions" above).
+**Retired pattern — do not restore:** `${{ github.job_workflow_sha }}` was previously used as the trust anchor for the helper-actions self-checkout. GitHub defines the property, and actionlint's context schema warning was initially treated as a false positive. However, runtime evidence from run [34303371563](https://github.com/mfrancza/agentic-development-workflow/actions/runs/34303371563) showed the expression evaluated to an empty string in practice: `actions/checkout` received no `ref` input and silently selected `main`. A green checkout step conclusion was not evidence of version pinning.
 
-**Wrong alternative:** `${{ job.workflow_sha }}` does not exist. The `job` context exposes only `container`, `services`, and `status`; `workflow_sha` is not a property. Using `job.workflow_sha` evaluates to an empty string. In the specific case of a reusable workflow file (not just a step-level expression), an empty ref invalidates the file at parse time and yields a zero-job failure run with the file path shown in place of the workflow name — breaking every event that dispatches the workflow.
+**Correct pattern:** The `helpers-ref` required input with the four-step bootstrap (validate → resolve via GitHub API → checkout at resolved SHA → assert HEAD equality). See "Reusable workflows: self-checkout for helper actions" above.
 
-**False positive:** actionlint's bundled context schema is outdated and reports `${{ github.job_workflow_sha }}` as an undefined property. **Do not act on this warning.** The expression is correct, and a pre-emptive ignore in `.github/actionlint.yaml` suppresses the diagnostic for any actionlint run that picks up the repo config. If you encounter the warning without the repo config loaded, treat it as a known false positive and keep the correct expression.
+**Wrong alternative:** `${{ job.workflow_sha }}` does not exist. The `job` context exposes only `container`, `services`, and `status`; `workflow_sha` is not a property. Using `job.workflow_sha` evaluates to an empty string. In a reusable workflow file, an empty ref invalidates the file at parse time and yields a zero-job failure run with the file path shown in place of the workflow name — breaking every event that dispatches the workflow. PRs #522–#525 demonstrated this fleet-wide failure on 2026-09-09; PR [#527](https://github.com/mfrancza/agentic-development-workflow/issues/527) reverted all four.
 
-**Incident anchor:** On 2026-09-09 this false positive triggered a four-PR cascade (`#522`–`#525`) that replaced the correct expression across every reusable workflow and stalled the entire agent fleet for six minutes. PR [#527](https://github.com/mfrancza/agentic-development-workflow/issues/527) reverted all four. See Issue [#526](https://github.com/mfrancza/agentic-development-workflow/issues/526) and [`docs/design/job-workflow-sha-linter-trap.md`](docs/design/job-workflow-sha-linter-trap.md) for the full postmortem and preventive follow-ups.
+**actionlint note:** actionlint's bundled context schema reports `${{ github.job_workflow_sha }}` as an undefined property. This diagnostic was initially treated as a false positive (see Issue [#526](https://github.com/mfrancza/agentic-development-workflow/issues/526) and [`docs/design/job-workflow-sha-linter-trap.md`](docs/design/job-workflow-sha-linter-trap.md)), but the runtime evidence shows the expression was unreliable regardless. The expression is no longer used in this repo; the actionlint ignore in `.github/actionlint.yaml` remains to prevent a future agent from reintroducing it on the basis of a linter-only warning.
+
+**Incident anchor:** The 2026-09-09 cascade (#522–#525) replaced `github.job_workflow_sha` with the non-existent `job.workflow_sha` based solely on the actionlint diagnostic. PR #527 reverted all four. The subsequent design (Issue [#513](https://github.com/mfrancza/agentic-development-workflow/issues/513), [`docs/design/helper-checkout-job-workflow-sha-context.md`](docs/design/helper-checkout-job-workflow-sha-context.md)) provided the runtime-failure evidence and replaced the mechanism entirely with the `helpers-ref` input pattern.
 
 ## Adding a New Agent Action
 

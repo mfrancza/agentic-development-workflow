@@ -47,6 +47,15 @@ on:
         type: string
         required: false
         default: ''
+      helpers-ref:
+        description: >
+          Git ref (tag, branch, or full commit SHA) of
+          mfrancza/agentic-development-workflow to check out for helper
+          actions. Must not be empty. Repository-owned callers pass
+          github.sha; external callers pass the same ref used in the uses:
+          selector (e.g. v0, v0.0.2, or a full SHA).
+        required: true
+        type: string
     secrets:
       DEVELOPER_APP_ID:
         required: true
@@ -74,20 +83,50 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # Check out this repo's own helper actions at the exact SHA the caller
-      # pinned to.  github.job_workflow_sha is GitHub's trust anchor: it
-      # resolves the ref the caller used in `uses: …@<ref>` at dispatch time
-      # and is not influenceable by the caller's workspace.  Using a dedicated
-      # subdirectory (_agentic-workflow/) avoids overwriting the caller's
-      # workspace and keeps the helper checkout clearly separate.
-      # See docs/design/reusable-workflow-helper-resolution.md Decisions 1, 3, 4.
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
       - name: Check out upstream helper actions
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: mfrancza/agentic-development-workflow
-          ref: ${{ github.job_workflow_sha }}
+          ref: ${{ steps.resolve-ref.outputs.sha }}
           path: _agentic-workflow
           persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
 
       # Skip cleanly when there is nothing to respond to.
       # Checks are applied in order:
