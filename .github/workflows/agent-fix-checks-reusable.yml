@@ -12,8 +12,8 @@ name: agent-fix-checks (reusable)
 #
 # External consumers: this workflow self-checks out helper actions into
 # _agentic-workflow/ before any composite-action step runs. The checkout ref
-# is github.job_workflow_sha (pending replacement by helpers-ref in Issue #537;
-# see AGENTS.md § Known traps). No checkout of the caller workspace is performed.
+# is the resolved helpers-ref input (see docs/design/helper-checkout-job-workflow-sha-context.md
+# and AGENTS.md § Known traps). No checkout of the caller workspace is performed.
 
 on:
   workflow_call:
