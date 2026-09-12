@@ -32,7 +32,7 @@ code_reviewers = [
 # advancing the SDLC pipeline without manual labeling.
 # See docs/design/auto-trigger-agents.md for full behavior and security notes.
 auto_trigger_agents = {
-  groom     = true
+  groom     = false
   design    = true
   developer = true
   review    = true
