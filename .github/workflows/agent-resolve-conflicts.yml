@@ -20,4 +20,5 @@ jobs:
       pr-number: ${{ inputs.pr_number || '' }}
       escalation-assignee: ${{ github.repository_owner }}
       image: ''
+      helpers-ref: ${{ github.sha }}
     secrets: inherit

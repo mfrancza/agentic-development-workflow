@@ -75,4 +75,5 @@ jobs:
       image: ${{ vars.REVIEWER_IMAGE }}
       default-model: ${{ vars.DEFAULT_MODEL }}
       logs-retention-days: 30
+      helpers-ref: ${{ github.sha }}
     secrets: inherit
