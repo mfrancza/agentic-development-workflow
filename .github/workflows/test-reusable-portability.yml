@@ -361,15 +361,22 @@ jobs:
           STATUS=0
 
           for f in .github/workflows/*.yml; do
+            # Skip this file: the error messages below contain the banned literal
+            # patterns (e.g. github.job_workflow_sha) and would self-flag the scan.
+            if [[ "$f" == ".github/workflows/test-reusable-portability.yml" ]]; then
+              echo "SKIP (self: literal patterns appear in error messages): $f"
+              continue
+            fi
+
             # github.job_workflow_sha — retired; evaluated empty at runtime
             if grep -nE '\$\{\{[^}]*github\.job_workflow_sha' "$f"; then
-              echo "::error::${f}: uses \${{ github.job_workflow_sha }} — this expression evaluated to an empty string at runtime (see AGENTS.md § Known traps). Use the helpers-ref input pattern instead."
+              echo "::error::${f}: uses github.job_workflow_sha in an expression — this context evaluated to an empty string at runtime (see AGENTS.md § Known traps). Use the helpers-ref input pattern instead."
               STATUS=1
             fi
 
             # job.workflow_sha — does not exist; invalidates the workflow at parse time
             if grep -nE '\$\{\{[^}]*job\.workflow_sha' "$f"; then
-              echo "::error::${f}: uses \${{ job.workflow_sha }} — this property does not exist (see AGENTS.md § Known traps). Use the helpers-ref input pattern instead."
+              echo "::error::${f}: uses job.workflow_sha in an expression — this property does not exist (see AGENTS.md § Known traps). Use the helpers-ref input pattern instead."
               STATUS=1
             fi
           done
@@ -420,7 +427,11 @@ jobs:
               continue
             fi
 
-            if ! grep -qF 'helpers-ref: ${{ github.sha }}' "$f"; then
+            # Build the search string in two fragments so GitHub Actions does not
+            # pre-evaluate the ${{ }} token before bash runs the script.
+            NEEDLE='helpers-ref: $'
+            NEEDLE+='{{ github.sha }}'
+            if ! grep -qF "$NEEDLE" "$f"; then
               echo "::error::${f}: does not pass 'helpers-ref: \${{ github.sha }}'. Repository-owned callers must pass the current commit SHA so helpers and the calling workflow run at the same commit."
               STATUS=1
             else
