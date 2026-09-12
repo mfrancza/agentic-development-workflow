@@ -213,7 +213,9 @@ jobs:
       # token below, long after the marker step (if loaded from _pr/) would
       # have already run.
       - name: Create scratch plan file
-        run: echo "(test plan output — not a real plan)" > "$GITHUB_WORKSPACE/tfplan.txt"
+        run: |
+          set -euo pipefail
+          echo "(test plan output — not a real plan)" > "$GITHUB_WORKSPACE/tfplan.txt"
 
       # Invoke the composite action via the same path the restructured plan job
       # uses: uses: ./_base/.github/actions/terraform-plan-comment
@@ -247,6 +249,7 @@ jobs:
       #            test is designed to catch.
       - name: Assert MARKER-PR-HEAD-RAN is absent (marker-ran.txt must not exist)
         run: |
+          set -euo pipefail
           if [ -f "$GITHUB_WORKSPACE/marker-ran.txt" ]; then
             echo "::error::MARKER-PR-HEAD-RAN was written — the composite action ran from _pr/ (PR-head checkout) instead of _base/ (trusted base checkout)."
             echo "::error::This is a trust-boundary regression: the plan job is loading terraform-plan-comment from PR-head content, which could allow a same-repo PR to execute modified helper code with the terraform-ci App token."
