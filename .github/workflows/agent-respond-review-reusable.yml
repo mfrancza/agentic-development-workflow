@@ -10,9 +10,10 @@ name: agent-respond-review (reusable)
 # original event. All event data that steps need must therefore be passed
 # as explicit inputs: see the with: block in agent-respond-review.yml.
 #
-# External consumers: this workflow self-checks out the helper actions at
-# github.job_workflow_sha (the SHA the caller pinned to) into _agentic-workflow/,
-# so no checkout of the caller's workspace is needed or performed.
+# External consumers: this workflow self-checks out helper actions into
+# _agentic-workflow/ before any composite-action step runs. The checkout ref
+# is the resolved helpers-ref input (see docs/design/helper-checkout-job-workflow-sha-context.md
+# and AGENTS.md § Known traps). No checkout of the caller workspace is performed.
 
 on:
   workflow_call:

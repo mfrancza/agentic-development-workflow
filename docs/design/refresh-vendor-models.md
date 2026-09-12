@@ -1,0 +1,167 @@
+# Design: Refresh currently available models for all vendors
+
+**Issue:** [#448](https://github.com/mfrancza/agentic-development-workflow/issues/448)
+
+**Parent designs (already-settled decisions this doc references rather than re-argues):**
+
+- [`multi-provider-models.md`](multi-provider-models.md) — one-to-one Terraform-label ↔ entrypoint-allowlist rule; explicit allowlists for OpenAI and xAI.
+- [`anthropic-model-labels.md`](anthropic-model-labels.md) — three-tier Anthropic label taxonomy (tier aliases, generic series tags, pinned snapshots); pattern-based `claude-*` provider routing so ad-hoc pinned labels also route at runtime.
+- [`grok-build-cli.md`](grok-build-cli.md) — xAI Grok label set is sourced from `grok models` at the pinned Grok Build CLI version.
+- [`split-model-labels-by-agent-type.md`](split-model-labels-by-agent-type.md) — per-agent `model:<agent-type>:<name>` label taxonomy is pre-provisioned for the four agent types (`developer`, `groom`, `design`, `review`).
+- [`agent-usage-guidance.md`](agent-usage-guidance.md) — grooming agent picks only from the three Anthropic tier aliases (never a generic series tag or a pinned snapshot).
+
+## Requirements as understood
+
+Issue #448 asks for a periodic audit and refresh of the model sets provisioned across all three providers (Anthropic, OpenAI, xAI), retiring discontinued models and adding new ones, while preserving `DEFAULT_MODEL="sonnet"` and the floating tier-alias behavior. The refresh is bounded by the parent designs above — this issue does not re-open any of them; it applies their existing structure to today's vendor lineups.
+
+Places that must stay in one-to-one sync (per the multi-provider and per-agent-label designs):
+
+- [`terraform/modules/labels/main.tf`](../../terraform/modules/labels/main.tf) — the `model:*` label set (Anthropic tier aliases + generic series tags + pinned snapshots; OpenAI flat allowlist; xAI Grok flat allowlist; per-agent `model:<agent>:*` variants where applicable).
+- [`docker/scripts/entrypoint.sh`](../../docker/scripts/entrypoint.sh) — `resolve_provider()` case-arms for the developer image (Anthropic covered by the pattern `sonnet|opus|haiku|claude-*`; OpenAI and xAI enumerated explicitly).
+- [`docker/reviewer/entrypoint.sh`](../../docker/reviewer/entrypoint.sh) — same `resolve_provider()` shape in the reviewer image; the two are kept diff-visibly identical (see Issue [#384](https://github.com/mfrancza/agentic-development-workflow/issues/384) for the drift failure mode).
+- [`docs/model-guidance.md`](../model-guidance.md) — tier summary, cross-vendor cost analysis, and task-class matrix rows must reflect the refreshed lineup and pricing.
+- [`agents/grooming/label-criteria.json`](../../agents/grooming/label-criteria.json) — refreshed only if the groomer's tier-selection semantics change (e.g. if Anthropic introduces a fourth tier the grooming agent must pick from). Purely refreshing which snapshot each alias resolves to does not touch this file.
+
+Retired-label safety in *this* repo is part of the refresh, not a follow-up: for every label the refresh removes from `mfrancza/agentic-development-workflow`, open issues here carrying that label must have it removed first (before `terraform apply` destroys it). The precedent is the grok-3 retirement (see Issue [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356), the 2026-08-30 rev 6 change log entry in [`docs/model-guidance.md`](../model-guidance.md)). The labels module is also consumed by other repos (see [`terraform/modules/labels/README.md`](../../terraform/modules/labels/README.md) "Git source (external consumer)"); downstream consumers own their own sweep when they bump their pinned module ref, and this refresh cannot guarantee cross-repo sweep completeness — see Decision 2.
+
+**Inclusive-by-default provisioning.** This refresh provisions every currently-shipping model from each provider, not only those with an already-identified in-repo use case. That means labels are added for Anthropic's Fable series (previously excluded — see the "Is a `model:fable` label added…?" ambiguity below), and the same inclusive stance applies to OpenAI and xAI: if a vendor currently ships it and the vendor docs / `grok models` list it at implementation time, this refresh provisions a label for it. Rationale and alternatives in Decision 7.
+
+### Ambiguities and how they were resolved
+
+- **How much of the current lineup should be verified against live vendor docs?** The issue is explicit that vendor availability is checked at implementation time, not assumed from the issue. Each provider task therefore starts with a fresh vendor-doc read (see Decision 2) and produces the label deltas in that same PR. The design does not encode a target model list.
+- **One atomic refresh PR or one PR per provider?** Split per provider (see Decision 3). Same-file conflicts across the three provider PRs are section-scoped (each provider owns disjoint blocks in Terraform, disjoint case-arms in the entrypoints, and disjoint doc sections) and reviewer-friendly.
+- **Does `agents/grooming/label-criteria.json` need updating?** Only if the refresh changes tier semantics — e.g. if Anthropic adds a fourth tier the groomer should choose from. A snapshot-only rev (haiku-4-5 → haiku-4-6) does not touch it. This is a conditional bit of the Anthropic task, not a separate one.
+- **Is a `model:fable` label added if Anthropic's Fable series ships a new snapshot?** Yes. Per the inclusive-by-default stance (see Decision 7), the Anthropic task provisions `model:fable` as a fourth tier alias, plus the four per-agent variants (`model:developer:fable`, `model:groom:fable`, `model:design:fable`, `model:review:fable`) so the per-agent taxonomy stays uniform across all Anthropic tier aliases. This reverses the earlier "no use case identified" position in [`docs/model-guidance.md`](../model-guidance.md) Tier Summary "Note on Fable" — that note is updated in the same PR to say Fable is available for manual override. Grooming still picks only from `{haiku,sonnet,opus}` (see Decision 4); Fable is manual-selection-only, matching how OpenAI and xAI labels are treated.
+- **Should retired labels be kept in Terraform in a "deprecated" state for backwards compatibility?** No — the parent designs treat the Terraform label set as authoritative, and unlabelled runtime routing already accepts any `claude-*` name for Anthropic. For OpenAI and xAI, retired labels fail loudly on unknown-model at runtime (which is the intended signal). The in-repo sweep (see Decision 2) ensures no open issue in this repo is stranded by the removal; downstream consumer repos are responsible for their own sweep on module-ref bump and the same loud-fail-at-runtime behavior applies there.
+
+## Decisions
+
+### Decision 1 — Refresh policy is per-provider, driven by live vendor docs at implementation time
+
+For each provider, the implementing sub-issue's first step is to read the vendor's current model documentation and produce a proposed delta (add / remove / keep) against the current Terraform label set. The delta is captured in the sub-issue's PR description so a human reviewer can sanity-check "this list looks right for August 2026" without having to independently read the vendor page.
+
+- **Anthropic** — [`https://docs.anthropic.com/en/docs/about-claude/models/overview`](https://docs.anthropic.com/en/docs/about-claude/models/overview). Tier aliases (`sonnet`/`opus`/`haiku`) are preserved unconditionally (parent design's decision 1 in [`anthropic-model-labels.md`](anthropic-model-labels.md)); generic series tags and pinned snapshots are refreshed to the current lineup, dropping series that are no longer available on the API. `resolve_provider`'s `sonnet|opus|haiku|claude-*` pattern arm does not change — new Anthropic snapshots route through the same wildcard by construction (this is the payoff of parent [`anthropic-model-labels.md`](anthropic-model-labels.md) decision 2).
+- **OpenAI** — [`https://platform.openai.com/docs/models`](https://platform.openai.com/docs/models). Flat allowlist refreshed against the current lineup; both entrypoints' `openai)` case-arm and the wildcard "supported values" error message are updated in the same PR to match Terraform.
+- **xAI (Grok)** — [`https://docs.x.ai/docs/models`](https://docs.x.ai/docs/models) **plus** `grok models` invoked against the pinned Grok Build CLI version currently in both Dockerfiles ([`docker/Dockerfile`](../../docker/Dockerfile) / [`docker/reviewer/Dockerfile`](../../docker/reviewer/Dockerfile) — read at implementation time). The CLI-listed set is the operative one, because the entrypoints invoke models through that CLI. If the CLI list and the vendor docs disagree, the CLI list wins for the label set, and the discrepancy is called out in the PR description.
+
+**Alternatives considered.**
+
+- **(a) Encode target model lists in this design doc.** Rejected — the issue explicitly requires implementation-time verification. Any list this doc contained would be stale by the time it landed and would license the implementer to skip the live check.
+- **(b) Automate the audit via a scheduled workflow that scrapes vendor docs.** Rejected as out of scope. Vendor doc pages are unstructured HTML; a maintainable scraper is more surface area than a periodic manual refresh justifies, especially given how rarely the refresh runs (this is the second one — grok-3 retirement was the first). Revisit only if the refresh cadence increases.
+- **(c) Add a lint job that fails CI if `resolve_provider` and the Terraform label set disagree.** Deferred to a follow-up (mentioned in Out of scope). It is not strictly needed for the refresh itself, and Issue [#384](https://github.com/mfrancza/agentic-development-workflow/issues/384) is the tracking ticket for that drift-detection idea.
+
+### Decision 2 — In-repo retired-label sweep is a mandatory prerequisite of each provider PR; downstream consumer repos own their own sweep
+
+**Scope: `mfrancza/agentic-development-workflow` only.** For every label the refresh removes from this repo, the sweep runs here *before* the Terraform destroy applies. Precedent: grok-3 retirement, Issue [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356), PR [#365](https://github.com/mfrancza/agentic-development-workflow/pull/365).
+
+Concretely, each provider task's PR description records the sweep result *for this repo*: for each label that would be destroyed by `terraform apply` here, list any open issues still carrying it, then either remove the label from those issues (documenting the replacement chosen) or explain why removal is safe. The command in the issue-scope grooming notes is the canonical form:
+
+```bash
+gh issue list --repo mfrancza/agentic-development-workflow --state open \
+  --label "model:<retired-label>" --json number,title
+```
+
+**Cross-repo sweep is explicitly not guaranteed.** The labels module is consumed by other repos via a git-source module ref (see [`terraform/modules/labels/README.md`](../../terraform/modules/labels/README.md) "Git source (external consumer)"). This refresh cannot enumerate those downstream repos or guarantee a sweep in each: the source repo does not know which repos have imported the module, which ref they pin, or when (or whether) they will bump to a ref that destroys a given label. Downstream consumer repos own their own retired-label sweep at the moment they bump the pinned module ref. This design does not require or promise that all downstream repos are swept before this PR merges — that guarantee is not achievable, and blocking on it would freeze the refresh cadence.
+
+**Runtime behavior when a sweep is skipped.** Retired labels that survive on downstream open issues are inert until an agent workflow tries to route on them. At that point:
+- Anthropic — the pattern arm `sonnet|opus|haiku|claude-*` still routes any `claude-*` name to the Anthropic call; if the API has retired that snapshot, the vendor returns an unknown-model error loudly at runtime (the intended signal).
+- OpenAI and xAI — the enumerated case-arms will not match a retired label and the wildcard "supported values" error fires, again loudly at runtime.
+
+The loud-fail behavior is the safety net: an orphaned retired label in a downstream repo cannot silently route to a stale model, and the failure is scoped to that one workflow run rather than being a repo-wide break.
+
+**Consumer heads-up.** To make downstream sweeps tractable, the consolidated Change Log entry (see Decision 6) enumerates every destroyed label across all three providers, so a consumer can grep the entry to know exactly what to sweep before bumping their module ref. A follow-up (out of scope for this refresh) could add a machine-readable per-ref `RETIRED_LABELS` manifest in the module directory; deferred until a consumer requests it.
+
+**Why in-PR rather than in a separate task (within this repo).** The sweep window has to close before `terraform apply` runs here. Splitting it into a preceding task creates a race: an open issue can be re-labeled between the sweep task landing and the destroy task landing. Executing the sweep in the same PR that removes the label — and re-running it as the last check before merge — closes that window for this repo.
+
+**PRs (both agent and human) count.** A retired label on an open PR gets the same treatment. Grok pattern also applies: closed issues/PRs are not swept (GitHub prevents label mutations on closed items in the ways that would matter, and stale historical labels on closed issues are harmless).
+
+### Decision 3 — Split the refresh into one PR per provider (parallel-safe)
+
+Three implementation tasks — Anthropic, OpenAI, xAI — plus one end-to-end validation task that depends on all three. Each provider task is one atomic PR touching the same set of files (Terraform, both entrypoints, `docs/model-guidance.md`), but in **disjoint sections** of each file:
+
+| File | Anthropic PR touches | OpenAI PR touches | xAI PR touches |
+|---|---|---|---|
+| `terraform/modules/labels/main.tf` | Anthropic tier-alias/generic/pinned blocks (roughly lines 73–178 of today's file) — including the new `model:fable` tier alias and its four `model:<agent>:fable` per-agent variants (see Decision 7) | `model:gpt-*` / `model:o*` blocks (roughly lines 180–199) | `model:grok-*` blocks (roughly lines 201–233) |
+| `docker/scripts/entrypoint.sh` | Nothing structural — pattern arm covers new snapshots (verify wildcard error string is still accurate); confirm `fable` bare alias falls into the `sonnet\|opus\|haiku\|claude-*` arm or extend the arm to `sonnet\|opus\|haiku\|fable\|claude-*` if not | `openai)` case-arm + wildcard error string | `xai)` case-arm + wildcard error string |
+| `docker/reviewer/entrypoint.sh` | Same as developer entrypoint (mirror) | Same as developer entrypoint (mirror) | Same as developer entrypoint (mirror) |
+| `docs/model-guidance.md` | Anthropic Tier Summary + pricing rows + task-class matrix Anthropic-default column; also **rewrite the "Note on Fable"** to reflect that `model:fable` is now provisioned (manual-selection-only; grooming still picks from haiku/sonnet/opus) | OpenAI Tier Summary + pricing rows + task-class matrix cross-vendor-alternatives OpenAI entries | xAI Tier Summary + pricing rows + task-class matrix cross-vendor-alternatives Grok entries |
+| `agents/grooming/label-criteria.json` | Only if Anthropic ships a new grooming-selectable tier (Fable is provisioned but stays out of grooming picks per Decision 4 — this file is untouched by the Fable addition); typically untouched | Untouched (groomer never picks OpenAI) | Untouched (groomer never picks xAI) |
+
+The three PRs can proceed in parallel. Conflicts, if any, are section-scoped and mechanical to resolve. The e2e validation task explicitly waits for all three so it can exercise the full refreshed lineup.
+
+**Alternatives considered.**
+
+- **(a) One atomic PR for all three providers.** Rejected: bigger diff, harder review, and the vendor-doc-verification steps for the three providers are independent so bundling them buys nothing.
+- **(b) Serialize the three (each provider blocks the next).** Rejected: no dependency between the provider deltas; serializing just slows the refresh.
+- **(c) Extract the vendor-doc audit into a preceding "propose deltas" task that all three implementation tasks depend on.** Rejected as ceremony — the audit and the apply are naturally one PR per provider. A separate audit task would just produce an issue comment that the implementation task re-reads.
+
+### Decision 4 — `agents/grooming/label-criteria.json` is untouched by a snapshot-only refresh
+
+The groomer's tier-selection rules are documented against the tier aliases (`model:haiku` / `model:sonnet` / `model:opus`), not against specific snapshots. Refreshing which snapshot each alias resolves to does not change any groomer decision, so the criteria file is not touched by this refresh unless one of the providers ships a genuinely new tier the groomer should pick from.
+
+Adding `model:fable` (see Decision 7) does **not** change grooming behavior: Fable is provisioned for manual override only, matching how OpenAI and xAI labels are treated. `agents/grooming/label-criteria.json` continues to enumerate exactly the three grooming-picked tier aliases (`haiku`, `sonnet`, `opus`); the Anthropic PR does not touch that file. If a future design promotes Fable to a grooming pick, that design owns the criteria-file change (and the cost-benefit case it requires).
+
+**Alternatives considered.**
+
+- **(a) Refresh the criteria file every time regardless.** Rejected — churn without effect; violates the merge-friendly documentation guidance (one fact per line, do not reflow neighboring lines).
+- **(b) Expand the criteria to cover OpenAI and xAI tiers.** Rejected: parent design [`agent-usage-guidance.md`](agent-usage-guidance.md) decision 6 explicitly keeps grooming Anthropic-only. Cross-vendor picks are operator-driven overrides.
+- **(c) Promote Fable to a grooming pick as part of this refresh.** Rejected: the reviewer's ask on PR #463 is provisioning breadth (Decision 7), not grooming semantics. Promoting Fable requires a cost-benefit case the grooming agent can reason about at pick time (Fable is 2× Opus per token — when should it be preferred?), which is a separate design.
+
+### Decision 5 — Per-agent `model:<agent-type>:*` labels stay on the Anthropic tier aliases
+
+The per-agent label taxonomy pre-provisions `model:<agent-type>:<tier-alias>` for the four agent types (`developer`, `groom`, `design`, `review`) across every Anthropic tier alias — previously three (`haiku`, `sonnet`, `opus`, twelve labels total), and now four with the addition of `fable` under Decision 7 (sixteen labels total). This design does not add per-agent variants for generic series tags, pinned snapshots, OpenAI models, or Grok models.
+
+Rationale: the parent [`split-model-labels-by-agent-type.md`](split-model-labels-by-agent-type.md) design deliberately bounded the per-agent surface to Anthropic tier aliases so the Terraform label picker stays curated (16 labels rather than 4 × N provider models). The invariant that matters is "every Anthropic tier alias has the four per-agent variants" — extending from three to four aliases preserves that invariant; extending beyond tier aliases would break it and is a separate design if a use case emerges (e.g. per-agent pinning for reproducible-run experiments). Ad-hoc per-agent labels are not supported by the runtime — unlike Anthropic snapshot IDs, per-agent labels must be pre-provisioned to affect resolution.
+
+### Decision 6 — Single consolidated Change Log entry, written by the validation task
+
+The refresh produces one Change Log entry in `docs/model-guidance.md`, added by the validation task (#461) rather than by any of the three provider tasks. The entry covers the Anthropic, OpenAI, and xAI deltas together and mirrors the 2026-08-30 rev 6 pattern (which was itself a single entry for a whole-provider refresh).
+
+Rationale: the three provider PRs run in parallel, so no single provider PR has visibility into the other two providers' final label deltas. The validation task naturally runs after all three merge (its dependency edge already exists per the table above) and has that full visibility. Consolidating also guarantees a complete revision entry — under a per-provider-PR alternative, whichever provider PR happens to miss its Change Log line would leave that provider's changes unrecorded.
+
+**Alternatives considered.**
+
+- **(a) Each provider PR adds its own sub-entry.** Rejected: three parallel PRs prepending Change Log entries to the same list are a mechanical merge-conflict source, and if any one PR omits its entry the revision history is silently incomplete. Adds coordination cost without a corresponding benefit.
+- **(b) The xAI PR alone owns the entry (as this doc originally proposed).** Rejected: xAI-first-among-equals is arbitrary, xAI has no visibility into the other two providers' final deltas when its PR opens (they may merge before or after), and if the xAI task lands first its entry cannot describe deltas that do not yet exist.
+- **(c) No Change Log entry at all (rely on git history / PR descriptions).** Rejected: the rev 6 precedent establishes a Change Log entry as the operative record of a refresh, and future readers should not have to reconstruct three PRs' worth of deltas from git history.
+
+### Decision 7 — Provision inclusively: every currently-shipping model gets a label
+
+Per reviewer feedback on PR [#463](https://github.com/mfrancza/agentic-development-workflow/pull/463), this refresh (and future refreshes) takes an inclusive stance: for each provider, the label set aims to cover every model the vendor currently ships at implementation time, not only those with an already-identified in-repo use case. In practice for this refresh:
+
+- **Anthropic** — `model:fable` (bare tier alias) and its four `model:<agent>:fable` per-agent variants are provisioned. This reverses the "no use case has been identified that Opus does not already cover" position that the current `docs/model-guidance.md` "Note on Fable" records. The Anthropic PR (#458) updates that note in the same commit to reflect the new stance.
+- **OpenAI** — the implementation-time audit against [platform.openai.com](https://platform.openai.com/docs/models) enumerates the full current lineup (`gpt-*`, `o*`, and any newer families the vendor lists), not just the models mentioned by name in the current `docs/model-guidance.md`. The implementer records anything provisioned that was previously excluded, so a reviewer can sanity-check the additions.
+- **xAI (Grok)** — same principle applied to `grok models` output at the pinned CLI version: every model listed becomes a label. If `grok models` lists a model that the vendor docs omit (or vice-versa), the CLI list wins per Decision 1, and both are noted in the PR description.
+
+Grooming semantics are **not** changed by this decision — grooming still picks only from the three Anthropic tier aliases (`haiku` / `sonnet` / `opus`) per parent design [`agent-usage-guidance.md`](agent-usage-guidance.md) decision 6 and this doc's Decision 4. Inclusive provisioning gives *users* (and operator overrides) maximum flexibility at the issue-labeling step; it does not license the groomer to autonomously pick a more expensive model.
+
+**Alternatives considered.**
+
+- **(a) Keep the "only provision models with an identified in-repo use case" stance (as this doc originally proposed for Fable).** Rejected on reviewer feedback: the exclusion pushes users to file follow-up issues to unlock manual overrides that cost the repo nothing to provision. The `model:*` label picker is already curated; adding a fourth Anthropic tier alias and its four per-agent variants is +5 labels, well within the 16-label curated surface.
+- **(b) Provision Fable but skip the per-agent variants (leave Decision 5 at "three tier aliases").** Rejected: the invariant that matters for the per-agent taxonomy is "every Anthropic tier alias has all four per-agent variants." Adding Fable at the tier-alias level but not at the per-agent level breaks that invariant and produces an awkward asymmetry where users can override globally to Fable but not per-agent.
+- **(c) Extend inclusive provisioning to Anthropic snapshot IDs too (provision every currently-listed snapshot as a `model:*` label).** Rejected: unnecessary. The parent [`anthropic-model-labels.md`](anthropic-model-labels.md) decision 2 already gives users pattern-based `claude-*` routing, so any Anthropic snapshot ID works as an ad-hoc label without pre-provisioning. Inclusive provisioning targets things that would otherwise fail-loud (tier aliases, generic series tags, OpenAI and xAI enumerated allowlists) — not the pattern-covered surface.
+
+## Out of scope
+
+- **New model providers** (Gemini, Bedrock, on-prem, …). Adding a fourth provider is a new-runner-function design, not a model refresh.
+- **Promoting `model:fable` to a grooming-selectable tier.** Per Decision 7 the label is now provisioned for manual override, but per Decision 4 grooming continues to pick only from `{haiku, sonnet, opus}`. Promoting Fable to a grooming pick requires a cost-benefit case the grooming criteria can reason about (Fable is 2× Opus per token) and is a separate design.
+- **Automating the vendor-doc audit** (scheduled scraper, GitHub App that watches vendor changelogs, etc.). Deferred; this refresh is manual and periodic.
+- **Terraform ↔ entrypoint drift lint.** Deferred to Issue [#384](https://github.com/mfrancza/agentic-development-workflow/issues/384). The e2e validation task in this refresh covers correctness *for this refresh*; a standing lint is a separate design.
+- **Extending per-agent `model:<agent-type>:*` labels beyond tier aliases.** Parent design decision; not revisited here.
+- **`DEFAULT_MODEL` change.** Preserved at `"sonnet"` per issue notes. Revisiting the default is a separate design.
+- **Bumping the pinned Grok Build CLI version** in either Dockerfile. The xAI refresh may reveal a new CLI version publishes a new model set — bumping the CLI is a separate design (its own reproducibility, sandbox, and flag-surface implications).
+- **Prompt tuning per new model.** Prompts stay shared per the parent multi-provider design's out-of-scope list.
+- **Cost tracking / routing policies.** Same as above.
+
+## Task breakdown and dependencies
+
+| Issue | Task | Depends on |
+|---|---|---|
+| Issue [#458](https://github.com/mfrancza/agentic-development-workflow/issues/458) | Anthropic model refresh: audit against [docs.anthropic.com](https://docs.anthropic.com/en/docs/about-claude/models/overview) at implementation time; update the Anthropic block of `terraform/modules/labels/main.tf` (tier aliases preserved; generic series tags and pinned snapshots refreshed against the current lineup); **add `model:fable` as a fourth tier alias plus the four `model:<agent>:fable` per-agent variants** (`developer`, `groom`, `design`, `review`) per Decision 7; verify both entrypoints' `sonnet\|opus\|haiku\|claude-*` pattern arm covers the bare `fable` alias — if not, extend the arm to `sonnet\|opus\|haiku\|fable\|claude-*` in both files — and refresh the wildcard "supported values" error message if the enumeration changes; refresh the Anthropic Tier Summary, pricing rows, and task-class matrix Anthropic-default cells in `docs/model-guidance.md`; **rewrite the "Note on Fable" in `docs/model-guidance.md` Tier Summary** to state that `model:fable` (and its per-agent variants) is now provisioned for manual override and grooming still picks from haiku/sonnet/opus only (see Decisions 4 and 7); run the retired-label sweep per Decision 2 for any label the PR destroys, and record the results in the PR description; touch `agents/grooming/label-criteria.json` only if a new grooming-selectable tier appears (untouched by the Fable addition — see Decision 4). One atomic PR. | — |
+| Issue [#459](https://github.com/mfrancza/agentic-development-workflow/issues/459) | OpenAI model refresh: audit against [platform.openai.com](https://platform.openai.com/docs/models) at implementation time; update the OpenAI block of `terraform/modules/labels/main.tf` (flat allowlist refreshed against the current lineup, retiring discontinued models); update both entrypoints' `openai)` case-arm and the wildcard "supported values" error message to match Terraform exactly (per parent design one-to-one rule; see Issue [#384](https://github.com/mfrancza/agentic-development-workflow/issues/384) for the drift failure mode); refresh the OpenAI Tier Summary, pricing rows, and task-class matrix OpenAI-alternative cells in `docs/model-guidance.md`; run the retired-label sweep per Decision 2 for any label the PR destroys, and record the results in the PR description. One atomic PR. | — |
+| Issue [#460](https://github.com/mfrancza/agentic-development-workflow/issues/460) | xAI Grok model refresh: audit against [docs.x.ai/docs/models](https://docs.x.ai/docs/models) **plus** `grok models` invoked against the pinned Grok Build CLI version currently in both Dockerfiles at implementation time (the CLI-listed set is the operative one — see Decision 1); update the xAI block of `terraform/modules/labels/main.tf`; update both entrypoints' `xai)` case-arm and the wildcard "supported values" error message to match Terraform exactly; refresh the xAI Tier Summary, pricing rows, and task-class matrix Grok-alternative cells in `docs/model-guidance.md`; run the retired-label sweep per Decision 2 for any label the PR destroys, and record the results in the PR description. One atomic PR. Do **not** bump the pinned Grok Build CLI version (out of scope). The consolidated Change Log entry for this refresh is added by the validation task (#461) rather than here, so all three providers' deltas land in a single revision entry (see Decision 6). | — |
+| Issue [#461](https://github.com/mfrancza/agentic-development-workflow/issues/461) | End-to-end validation of the refreshed lineup: (1) `terraform plan` against the merged state shows exactly the intended label deltas and no other churn; (2) both images build and boot successfully with a representative sample of the refreshed labels (one Anthropic tier alias including `model:fable` per Decision 7, one Anthropic generic series tag, one Anthropic pinned snapshot, one new OpenAI label, one new Grok label); (3) an `AGENT_MODEL=bogus` run in each image produces a "supported values" error that enumerates the current lineup from all three providers; (4) `DEFAULT_MODEL="sonnet"` still resolves to a running Anthropic call; (5) verify no open issues still carry a destroyed label (the sweep from each provider task closed cleanly and did not regress between merges); (6) confirm `agents/grooming/label-criteria.json` still lists exactly the three grooming-picked tier aliases (`haiku`, `sonnet`, `opus`) — Fable is provisioned but not a grooming pick per Decisions 4 and 7; (7) add a single consolidated Change Log entry to `docs/model-guidance.md` covering the Anthropic, OpenAI, and xAI deltas from tasks #458/#459/#460 (including the Fable additions), mirroring the 2026-08-30 rev 6 pattern (per Decision 6). Record all validation steps and their output in the PR description. | Issues #458, #459, #460 |
+
+Tasks #458, #459, and #460 can proceed in parallel — they touch disjoint sections of the same files (see Decision 3 table). The implementer is responsible for rebasing onto `main` before opening each PR. Task #461 depends on all three so it can exercise the full refreshed lineup end-to-end.
+
+Dependencies are recorded natively as GitHub blocked-by relationships on the issues.

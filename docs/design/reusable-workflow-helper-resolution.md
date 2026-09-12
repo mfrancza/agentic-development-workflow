@@ -4,16 +4,22 @@
 **Related:** [#256](https://github.com/mfrancza/agentic-development-workflow/issues/256) (publish reusable workflows and modules), [#455](https://github.com/mfrancza/agentic-development-workflow/issues/455) (external adoption smoke test), [#451](https://github.com/mfrancza/agentic-development-workflow/issues/451) (initial release), [#496](https://github.com/mfrancza/agentic-development-workflow/issues/496) (documentation still referencing v1)
 **Parent design:** [docs/design/publish-reusable-workflows-and-modules.md](publish-reusable-workflows-and-modules.md)
 
-> **Correction note (Issue [#526](https://github.com/mfrancza/agentic-development-workflow/issues/526)):**
-> A subsequent design ([`docs/design/helper-checkout-job-workflow-sha-context.md`](helper-checkout-job-workflow-sha-context.md),
-> Issue [#513](https://github.com/mfrancza/agentic-development-workflow/issues/513)) proposed
-> renaming `github.job_workflow_sha` to `job.workflow_sha` throughout this design and its
-> implementation. That proposal was based on an actionlint false positive and was incorrect:
-> **`github.job_workflow_sha` as originally written in this design is the correct expression.**
-> Every PR spawned by Issue #513 (#522–#525) was reverted by #527, which restored the working
-> state. The retracted design is preserved in place for historical reference but must not be
-> followed. See [`docs/design/job-workflow-sha-linter-trap.md`](job-workflow-sha-linter-trap.md)
-> (Issue #526) for the full postmortem and preventive follow-ups.
+> **Correction note (Issues [#526](https://github.com/mfrancza/agentic-development-workflow/issues/526) and [#538](https://github.com/mfrancza/agentic-development-workflow/issues/538)):**
+> The original #526 postmortem declared `github.job_workflow_sha` fully correct and the
+> actionlint diagnostic a false positive. Subsequent runtime evidence from agent-groom run
+> [34303371563](https://github.com/mfrancza/agentic-development-workflow/actions/runs/34303371563)
+> (Issue [#513](https://github.com/mfrancza/agentic-development-workflow/issues/513)) shows that
+> `github.job_workflow_sha` parsed but **evaluated to an empty value**: the checkout input dump
+> omitted `ref` and `actions/checkout` fell back to `main`. Actionlint's diagnostic was
+> accidentally correct about the expression being problematic.
+>
+> `job.workflow_sha` remains an invalid property — every PR in #522–#525 that used it caused
+> parse-time failures and was reverted by #527. The correct replacement is the explicit required
+> `helpers-ref` input described in
+> [`docs/design/helper-checkout-job-workflow-sha-context.md`](helper-checkout-job-workflow-sha-context.md)
+> (Issue #513, revised design) and in `AGENTS.md` § "Reusable workflows: self-checkout for helper
+> actions". See [`docs/design/job-workflow-sha-linter-trap.md`](job-workflow-sha-linter-trap.md)
+> for the corrected postmortem.
 
 ## Summary
 

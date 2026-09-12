@@ -259,6 +259,13 @@ available:
 an exact tag or SHA when you need reproducibility for auditing or when a
 breaking major change lands that you are not yet ready to adopt.
 
+**`helpers-ref` must match the pinned version.** The reusable workflows accept
+a required `helpers-ref` input that must be set to the same selector used in
+the `uses:` line. If you pin with `@v0`, pass `helpers-ref: v0`. If you pin
+with an exact tag (`@v0.0.2`), pass `helpers-ref: v0.0.2`. If you pin with a
+SHA, pass the same SHA. Mismatched selectors are caught at runtime before any
+helper action loads.
+
 Breaking changes (reusable workflow `inputs:`/`secrets:` contract, Terraform
 required variables, composite action inputs) always bump the major version.
 Backwards-compatible additions bump the minor version. Bug fixes and internal
@@ -542,6 +549,7 @@ jobs:
       default-model: ${{ vars.DEFAULT_MODEL }}
       admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}
       logs-retention-days: 30
+      helpers-ref: v0
     secrets: inherit
 ```
 
@@ -611,6 +619,7 @@ jobs:
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       default-model: ${{ vars.DEFAULT_MODEL }}
       logs-retention-days: 30
+      helpers-ref: v0
     secrets: inherit
 
   call-undraft:
@@ -623,6 +632,7 @@ jobs:
       run-undraft: true
       pr-head-ref: ${{ github.event.pull_request.head.ref }}
       repo: ${{ github.repository }}
+      helpers-ref: v0
     secrets: inherit
 ```
 
@@ -682,6 +692,7 @@ jobs:
       default-model: ${{ vars.DEFAULT_MODEL }}
       code-reviewers: ${{ vars.CODE_REVIEWERS }}
       logs-retention-days: 30
+      helpers-ref: v0
     secrets: inherit
 ```
 
@@ -752,6 +763,7 @@ jobs:
       image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0
       default-model: ${{ vars.DEFAULT_MODEL }}
       logs-retention-days: 30
+      helpers-ref: v0
     secrets: inherit
 ```
 
@@ -817,6 +829,7 @@ jobs:
       review-id: ${{ github.event.review.id }}
       repo-name: ${{ github.event.repository.name }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
+      helpers-ref: v0
     secrets: inherit
 ```
 
@@ -877,6 +890,7 @@ jobs:
       pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
       agent-login: <developer-agent-slug>[bot]
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
+      helpers-ref: v0
     secrets: inherit
 ```
 
@@ -934,6 +948,7 @@ jobs:
     with:
       deployment-sha: ${{ github.event.deployment.sha }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
+      helpers-ref: v0
     secrets: inherit
 ```
 
@@ -987,6 +1002,7 @@ jobs:
       pr-number: ${{ inputs.pr_number || '' }}
       escalation-assignee: ${{ github.repository_owner }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
+      helpers-ref: v0
     secrets: inherit
 ```
 
@@ -1134,6 +1150,7 @@ jobs:
     with:
       transition: auto-groom
       issue-number: ${{ github.event.issue.number }}
+      helpers-ref: v0
     secrets: inherit
 
   auto-design:
@@ -1148,6 +1165,7 @@ jobs:
     with:
       transition: auto-design
       issue-number: ${{ github.event.issue.number }}
+      helpers-ref: v0
     secrets: inherit
 
   auto-developer-do:
@@ -1163,6 +1181,7 @@ jobs:
     with:
       transition: auto-developer-do
       issue-number: ${{ github.event.issue.number }}
+      helpers-ref: v0
     secrets: inherit
 
   auto-developer-undraft:
@@ -1177,6 +1196,7 @@ jobs:
     with:
       transition: auto-developer-undraft
       issue-number: ${{ github.event.issue.number }}
+      helpers-ref: v0
     secrets: inherit
 
   auto-review:
@@ -1192,6 +1212,7 @@ jobs:
     with:
       transition: auto-review
       pr-number: ${{ github.event.pull_request.number }}
+      helpers-ref: v0
     secrets: inherit
 
   auto-developer-unblock:
@@ -1205,6 +1226,7 @@ jobs:
     with:
       transition: auto-developer-unblock
       issue-number: ${{ github.event.issue.number }}
+      helpers-ref: v0
     secrets: inherit
 ```
 
@@ -1522,31 +1544,38 @@ This was the root cause reported in issue
 [#498](https://github.com/mfrancza/agentic-development-workflow/issues/498) and
 fixed in the v0.0.1 patch release. (See
 [`docs/design/reusable-workflow-helper-resolution.md`](design/reusable-workflow-helper-resolution.md)
-for the full analysis and the chosen fix: each reusable now self-checks out its
-own helper actions into a `_agentic-workflow/` subdirectory before any composite
-action step runs, keyed to `github.job_workflow_sha` so the helper version is
-always consistent with the reusable workflow version the caller pinned to.)
+for the full analysis.) Each reusable now self-checks out its own helper actions
+into a `_agentic-workflow/` subdirectory before any composite action step runs.
+The helper version is pinned via the required `helpers-ref` workflow input — pass
+the same tag or SHA you use in the `uses:` line (e.g. `helpers-ref: v0` alongside
+`uses: ...@v0`). See [`docs/design/helper-checkout-job-workflow-sha-context.md`](design/helper-checkout-job-workflow-sha-context.md)
+for the full design and `AGENTS.md` § "Reusable workflows: self-checkout for helper
+actions" for the canonical pattern.
 
 **Fix:**
 
-- If you pinned to an exact tag, upgrade from `@v0.0.0` to `@v0.0.1` (or `@v0`
-  to track future patches automatically). Both the reusable workflow ref and the
-  `image:` input should be updated together:
+- If you pinned to an exact tag, upgrade to `@v0.0.2` or later (or `@v0` to track
+  future patches automatically). Add `helpers-ref:` matching the same version
+  selector you use in the `uses:` line:
 
   ```yaml
   uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@v0
   with:
     image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
+    helpers-ref: v0
   ```
 
-- If you are already on `@v0` (the moving major tag) and you first adopted
-  before 2026-09-08, force a re-run — the `v0` tag now points at the v0.0.1
-  SHA, so the next workflow run automatically picks up the fix.
+- If you are already on `@v0` (the moving major tag) and adopted before
+  the `helpers-ref` input was added, add `helpers-ref: v0` to the `with:` block
+  of every affected caller stub — the next workflow run will pick up the required
+  input.
 
 **Verification after fixing:** Open a test issue on your consumer repo and apply
 `agent:developer`. The workflow should:
 
-1. Complete the "Check out upstream helper actions" step with no error.
+1. Validate `helpers-ref`, resolve it to a commit SHA, and complete the "Check
+   out upstream helper actions" step with no error. The step log should show the
+   resolved SHA and a HEAD-equality confirmation.
 2. Mint a developer-agent token (the `agent-token` composite action runs
    successfully).
 3. Pass all preflight steps (find-existing-pr, check-draft-label, check-blockers).
@@ -1555,9 +1584,10 @@ always consistent with the reusable workflow version the caller pinned to.)
    workflow run's Summary page even on failure, because the upload step uses
    `if: always()`).
 
-If step 1 still fails after upgrading, check that your `uses:` line references
-the reusable workflow file (not the caller stub file), and that the `@` ref
-resolves to a tag or SHA that exists on the source repo.
+If step 1 still fails after upgrading, confirm that: (a) `helpers-ref:` is present
+in the `with:` block, (b) the ref resolves to a tag or SHA that exists on the
+source repo, and (c) your `uses:` line references the reusable workflow file
+(not the caller stub file).
 
 ---
 
