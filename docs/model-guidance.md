@@ -59,17 +59,17 @@ The xAI labels provisioned in this repo are sourced from `grok models` at Grok B
 Grok models are executed by the Grok Build CLI (`grok --prompt-file /dev/stdin`), not by Codex;
 the CLI reads `XAI_API_KEY` directly from the process environment.
 
-| Model label | When to reach for it | Latency / cost (per 1M tokens, Aug 2026) | Notes |
+| Model label | When to reach for it | Latency / cost (per 1M tokens, Sep 2026) | Notes |
 |---|---|---|---|
 | `model:grok-build-0.1` | Build-specialized tasks; coding-focused | $1.00 input / $2.00 output — lowest output rate of all Grok labels | Specialized for code generation and build tasks |
 | `model:grok-4.3` | General-purpose xAI tasks; stable mid-tier model | $1.25 input / $2.50 output | Stable release |
 | `model:grok-4.20-0309-non-reasoning` | Default grok model; general-purpose coding and reasoning tasks | $1.25 input / $2.50 output | Default model at CLI v1.0.13 |
 | `model:grok-4.20-0309-reasoning` | Tasks benefiting from explicit chain-of-thought reasoning | $1.25 input / $2.50 output | Reasoning variant of grok-4.20-0309 |
 | `model:grok-4.20-multi-agent-0309` | Multi-agent orchestration and complex agentic task decomposition | $1.25 input / $2.50 output | Optimized for multi-agent workflows |
-| `model:grok-4.5` | General-purpose xAI tasks; newer than grok-4.3 | $2.00 input / $6.00 output | |
+| `model:grok-4.5` | General-purpose xAI tasks; newer than grok-4.3 | $2.00 input / $6.00 output (cached input $0.30/1M — 85% discount) | |
 | `model:grok-4.6` | Latest general-purpose xAI model; broadest capability | $2.00 input / $6.00 output (cached input $0.50/1M — 75% discount) | Best for complex cross-cutting tasks |
 
-**Pricing note.** All figures are standard-tier rates (< 200k prompt tokens) as of August 2026. Long-context tier (≥ 200k tokens) rates are 2× input / 2× output. xAI pricing changes frequently — verify against [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning large-scale runs.
+**Pricing note.** All figures are standard-tier rates (< 200k prompt tokens) as of September 2026. Long-context tier (≥ 200k tokens) rates are 2× input / 2× output. xAI pricing changes frequently — verify against [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning large-scale runs.
 
 ---
 
@@ -78,7 +78,7 @@ the CLI reads `XAI_API_KEY` directly from the process environment.
 This section provides normalized cost benchmarks, billing-plan details, and a cross-vendor
 comparison to support model selection decisions when cost is a factor.
 
-### Pricing reference (per 1M tokens, August 2026)
+### Pricing reference (per 1M tokens, September 2026)
 
 All prices are USD. API pricing changes frequently; verify against the official provider pricing
 pages before provisioning large-scale runs.
@@ -93,7 +93,7 @@ pages before provisioning large-scale runs.
 | `model:grok-4.20-0309-reasoning`‡ | xAI | $1.25 | $2.50 | Reasoning variant; same rate as non-reasoning |
 | `model:grok-4.20-multi-agent-0309`‡ | xAI | $1.25 | $2.50 | Multi-agent orchestration; same rate as -non-reasoning |
 | `model:sonnet` (claude-sonnet-5) | Anthropic | $2.00 | $10.00 | Repo default |
-| `model:grok-4.5`‡ | xAI | $2.00 | $6.00 | Same input rate as sonnet; lower output rate |
+| `model:grok-4.5`‡ | xAI | $2.00 | $6.00 | Same input rate as sonnet; lower output rate; cached input $0.30/1M |
 | `model:grok-4.6`‡ | xAI | $2.00 | $6.00 | Latest general-purpose Grok; cached input $0.50/1M |
 | `model:gpt-5.6-terra` | OpenAI | $2.00 | $12.00 | |
 | `model:gpt-5.6-sol` | OpenAI | $4.00 | $20.00 | |
@@ -101,7 +101,7 @@ pages before provisioning large-scale runs.
 | `model:gpt-6-astra` | OpenAI | $10.00 | $50.00 | |
 | `claude-fable-5` (no repo label) | Anthropic | $10.00 | $50.00 | No label provisioned |
 
-**‡ xAI pricing note.** Prices shown are standard-tier rates (< 200k prompt tokens) as of August 2026. Long-context tier (≥ 200k tokens) rates are 2× input and 2× output. xAI pricing changes frequently — verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning large-scale runs.
+**‡ xAI pricing note.** Prices shown are standard-tier rates (< 200k prompt tokens) as of September 2026. Long-context tier (≥ 200k tokens) rates are 2× input and 2× output. xAI pricing changes frequently — verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning large-scale runs.
 
 ### Normalized task benchmark
 
@@ -135,7 +135,7 @@ All three providers offer cost-reduction mechanisms layered on top of the base r
 
 | Mechanism | Anthropic | OpenAI | xAI |
 |---|---|---|---|
-| **Prompt cache** | Cache hits billed at **10% of the base input rate**; cache write at 25%. Effective for large system prompts or repeated tool schemas. | Cached input typically ~50% discount (model-dependent); check model-specific docs. | grok-4.6 cached input: $0.50/1M vs $2.00/1M standard — a 75% discount for cache-eligible prefixes. |
+| **Prompt cache** | Cache hits billed at **10% of the base input rate**; cache write at 25%. Effective for large system prompts or repeated tool schemas. | Cached input typically ~50% discount (model-dependent); check model-specific docs. | grok-4.5 cached input: $0.30/1M vs $2.00/1M standard — an 85% discount; grok-4.6 cached input: $0.50/1M vs $2.00/1M standard — a 75% discount for cache-eligible prefixes. |
 | **Batch API** | **50% discount** on both input and output for requests that tolerate ≤24-hour turnaround. | **50% discount** for asynchronous batch requests. | Not publicly documented as of 2026-08-30. |
 | **Combined (cache + batch)** | Stackable: a cached-input batch request pays ~5% of the base input rate and 50% of the base output rate — up to ~55% total savings on a cache-heavy workload. | Similar stacking applies; verify per model. | n/a |
 
@@ -147,19 +147,21 @@ All three providers offer cost-reduction mechanisms layered on top of the base r
 - **Batch-mode evaluation or doc pipelines** — Workloads that tolerate ≤24-hour turnaround (e.g.
   a nightly evaluation run over many issues) benefit from the batch 50% discount. Running
   haiku-class tasks in batch is the lowest-cost option across all providers ($0.045 × 50% = ~$0.022).
-- **xAI cached input** — grok-4.6's cached input rate ($0.50/1M) undercuts even Anthropic Haiku's
-  standard input rate ($1.00/1M) for workloads with a large, repeated context prefix. Use
-  `model:grok-4.6` for context-heavy tasks where the cache-eligible prefix is large and stable.
+- **xAI cached input** — grok-4.5 (cached $0.30/1M, 85% discount) and grok-4.6 (cached $0.50/1M,
+  75% discount) both undercut Anthropic Haiku's standard input rate ($1.00/1M) for workloads with
+  a large, repeated context prefix. Use `model:grok-4.5` or `model:grok-4.6` for context-heavy
+  tasks where the cache-eligible prefix is large and stable; grok-4.5 offers a steeper cached
+  discount but grok-4.6 is the broader-capability model.
 
 ### Cross-vendor capability tiers at a glance
 
-| Capability tier | Best-value pick per tier (Aug 2026) | Alternatives |
+| Capability tier | Best-value pick per tier (Sep 2026) | Alternatives |
 |---|---|---|
 | **Fast / cheap** (mechanical tasks, docs-only) | `model:gpt-5.6-luna` — $0.010/task | `model:grok-build-0.1` ($0.030/task‡), `model:grok-4.3` ($0.038/task‡), `model:haiku` ($0.045/task) |
 | **Balanced** (most `do` issues, typical implementation) | `model:sonnet` — $0.090/task (repo default) | `model:grok-4.20-0309-non-reasoning` ($0.038/task‡), `model:grok-4.5` ($0.070/task‡), `model:gpt-5.6-terra` ($0.100/task) |
 | **High capability** (`plan` issues, cross-cutting, under-specified) | `model:opus` — $0.225/task | `model:grok-4.20-0309-reasoning` ($0.038/task‡), `model:grok-4.20-multi-agent-0309` ($0.038/task‡), `model:grok-4.6` ($0.070/task‡), `model:gpt-5.6-sol` ($0.180/task), `model:gpt-6-astra` ($0.450/task) |
 
-**‡ xAI pricing note.** Prices shown are standard-tier rates as of August 2026; xAI pricing changes frequently. Verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning. Known reference: grok-4.6 standard input $2.00/1M (cached $0.50/1M).
+**‡ xAI pricing note.** Prices shown are standard-tier rates as of September 2026; xAI pricing changes frequently. Verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning. Known references: grok-4.5 standard input $2.00/1M (cached $0.30/1M); grok-4.6 standard input $2.00/1M (cached $0.50/1M).
 
 **Apply cross-vendor picks only when there is a specific reason** — capability evaluation, provider
 redundancy testing, or a cost experiment. The grooming agent and the repo-wide default remain
@@ -180,7 +182,7 @@ applied and the PR merged cleanly. Where a task class can fall into more than on
 driving factor is noted in the *Notes* column.
 
 **Cost/task key:** All figures use the standard 20k-input / 5k-output token benchmark.
-Figures marked ‡ are xAI (Grok) models priced at standard-tier rates as of August 2026; xAI
+Figures marked ‡ are xAI (Grok) models priced at standard-tier rates as of September 2026; xAI
 pricing changes frequently — verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning.
 Cross-vendor alternatives are listed cheapest-first within the same capability tier.
 
@@ -397,6 +399,19 @@ All eight workflows are aligned with the guidance. No disagreements were found; 
 ---
 
 ## Change Log
+
+- **2026-09-12 (rev 7)** — xAI Grok model audit (Issue #460): confirmed `grok models` at Grok
+  Build CLI v1.0.13 is unchanged from the rev 6 refresh — 7 text/coding models
+  (`grok-4.20-0309-non-reasoning`, `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`,
+  `grok-4.3`, `grok-4.5`, `grok-4.6`, `grok-build-0.1`) with no additions or retirements.
+  No discrepancy between the Grok Build CLI v1.0.13 model list and the vendor docs at
+  [docs.x.ai/docs/models](https://docs.x.ai/docs/models). No label changes to
+  `terraform/modules/labels/main.tf` or entrypoint arms (already in sync). Added grok-4.5
+  cached input pricing ($0.30/1M; 85% discount vs $2.00/1M standard input) to Tier Summary,
+  pricing reference, billing-plan table, practical guidance, and cross-vendor notes, per vendor
+  docs update confirmed at implementation time. Retired-label sweep: no labels retired; sweep
+  is a no-op (0 open issues carry any of the 7 Grok labels).
+  Addresses [Issue #460](https://github.com/mfrancza/agentic-development-workflow/issues/460).
 
 - **2026-08-30 (rev 6)** — Updated xAI label set: replaced retired `model:grok-3` /
   `model:grok-3-mini` / `model:grok-code-fast-1` labels (which routed to grok-4.3) with the
