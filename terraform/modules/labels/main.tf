@@ -310,7 +310,7 @@ locals {
     }
     "do" = {
       color       = "0e8a16"
-      description = "Simple, well-defined; implementable in a single easy-to-review commit."
+      description = "Simple, well-defined task; implementable in a single easy-to-review commit."
     }
     "plan" = {
       color       = "fbca04"
