@@ -19,7 +19,7 @@ helper action runs, each affected job resolves the requested ref to a commit,
 checks out that commit, and fails unless the checkout HEAD equals it. This removes
 the undocumented context dependency and makes version skew observable.
 
-This document supersedes its retracted earlier revision and corrects the
+This document supersedes its retracted earlier revision and plans to correct the
 follow-up incident record in
 [`job-workflow-sha-linter-trap.md`](job-workflow-sha-linter-trap.md).
 
@@ -209,13 +209,14 @@ the requested selector and the two commit SHAs but no credentials.
 
 | Issue | Task | Dependencies |
 |---|---|---|
-| Issue [#537](https://github.com/mfrancza/agentic-development-workflow/issues/537) | Add the required `helpers-ref` input, independently resolved SHA checkout, and pre-helper HEAD equality guard to every affected reusable workflow; update all repository-owned callers to pass `github.sha`. | — |
+| Issue [#537](https://github.com/mfrancza/agentic-development-workflow/issues/537) | Add the required `helpers-ref` input, independently resolved SHA checkout, and pre-helper HEAD equality guard to every affected reusable workflow; update all repository-owned callers to pass `github.sha`. | Issue #538 |
 | Issue [#538](https://github.com/mfrancza/agentic-development-workflow/issues/538) | Correct the helper-checkout contract and incident record in `AGENTS.md`, the related design docs, `.github/actionlint.yaml`, workflow comments, and `docs/adopting.md`, including explicit `helpers-ref` in every external caller example. | — |
 | Issue [#539](https://github.com/mfrancza/agentic-development-workflow/issues/539) | Extend static portability coverage and add a minimal in-repository runtime fixture that proves requested ref, resolved SHA, and helper HEAD equality. | Issue #537 |
 | Issue [#540](https://github.com/mfrancza/agentic-development-workflow/issues/540) | Publish the next patch release, advance `v0`, and verify release artifacts and notes. This task requires a maintainer. | Issues #537, #538, #539 |
 | Issue [#541](https://github.com/mfrancza/agentic-development-workflow/issues/541) | Run the external-consumer end-to-end regression: invoke the released reusable workflow with an explicit release ref, prove helper HEAD identity, advance upstream `main` without moving that ref, repeat, and record evidence. This task requires a maintainer with consumer-repository access. | Issues #537, #538, #539, #540 |
 
-The workflow and documentation tasks touch separate surfaces and can proceed in
-parallel. Automated regression follows the workflow contract so it never creates
-an intentionally failing mainline state. Release is serialized after all code and
-documentation, and the external validation is the final end-to-end gate.
+The documentation correction lands before the workflow task so implementing
+agents are no longer instructed to preserve the broken expression. Automated
+regression follows the workflow contract so it never creates an intentionally
+failing mainline state. Release is serialized after all code and documentation,
+and the external validation is the final end-to-end gate.
