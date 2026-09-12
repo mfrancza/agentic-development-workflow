@@ -34,6 +34,16 @@ outputs:
 runs:
   using: composite
   steps:
+    # TEMPORARY MARKER — validation scratch branch for Issue #551.
+    # This step is intentionally added to verify the trust-boundary regression
+    # test fails when the action file contains a step that creates marker-ran.txt.
+    # This branch is NOT merged; it is closed after confirming the test failure.
+    - name: MARKER CHECK (trust-boundary regression test — scratch branch only)
+      shell: bash
+      run: |
+        echo "MARKER-PR-HEAD-RAN"
+        touch "$GITHUB_WORKSPACE/marker-ran.txt"
+
     # setup-node's cache-dependency-path is a glob resolved by @actions/glob,
     # which rejects '.' / '..' path segments, so the action-relative scripts
     # path must be normalized to an absolute path before it is used there.
