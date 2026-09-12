@@ -1,3 +1,18 @@
+> ## ⚠ RETRACTED
+>
+> This design is retracted in full. It was premised on an actionlint false positive that reported
+> `github.job_workflow_sha` as an undefined property. That report was incorrect:
+> **`github.job_workflow_sha` is the correct, GitHub-documented expression** for reusable-workflow
+> runs, and it was the expression originally written in the parent design. Every PR this design
+> spawned (#522–#525) was reverted in #527, which restored the original working state.
+>
+> **Do not follow the recommendations in this document.**
+>
+> For the full postmortem and preventive follow-ups, see:
+> - [`docs/design/job-workflow-sha-linter-trap.md`](job-workflow-sha-linter-trap.md)
+>   (Issue [#526](https://github.com/mfrancza/agentic-development-workflow/issues/526))
+> - `AGENTS.md` § Known traps
+
 # Design: Correct helper-checkout context expression to `job.workflow_sha`
 
 **Issue:** [#513](https://github.com/mfrancza/agentic-development-workflow/issues/513)
