@@ -12,24 +12,38 @@ name: Test reusable-workflow helper resolution
 #   uses: mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@<ref>
 # the runner populates $GITHUB_WORKSPACE with the caller's repository — not
 # this repo — so any "uses: ./.github/actions/<name>" step would resolve
-# against a tree that lacks those actions. The fix (Decision 1 in
-# docs/design/reusable-workflow-helper-resolution.md) is a self-checkout at
-# github.job_workflow_sha into a _agentic-workflow/ subdirectory before any
-# composite action is invoked; every subsequent step references helpers via
-# "./_agentic-workflow/.github/actions/<name>".
+# against a tree that lacks those actions. The fix is a self-checkout into
+# _agentic-workflow/ using an explicit, verified helpers-ref input; every
+# subsequent step references helpers via "./_agentic-workflow/.github/actions/<name>".
+# See docs/design/helper-checkout-job-workflow-sha-context.md for the full rationale.
 #
-# This workflow contains two jobs:
-#   reusable-portability-test  — shell simulation of the cross-repo call;
-#                                asserts the _agentic-workflow/ layout resolves
-#                                correctly from an empty caller workspace.
-#   static-lint                — grep scan that fails if any *-reusable.yml
-#                                file contains a "uses: ./.github/actions/"
-#                                reference outside the documented exceptions.
+# This workflow contains six jobs:
+#   reusable-portability-test        — shell simulation of the cross-repo call;
+#                                      asserts the _agentic-workflow/ layout resolves
+#                                      correctly from an empty caller workspace.
+#   static-lint                      — grep scan that fails if any *-reusable.yml
+#                                      file contains a "uses: ./.github/actions/"
+#                                      reference outside the documented exceptions.
+#   static-helpers-ref-contract      — inventory check: every helper-consuming
+#                                      reusable workflow must declare helpers-ref
+#                                      as a required input.
+#   static-ban-disproven-contexts    — grep scan that fails if any workflow YAML
+#                                      uses github.job_workflow_sha or
+#                                      job.workflow_sha in live expressions.
+#   static-caller-sha-pass          — checks that every repository-owned caller stub
+#                                      that delegates to a helper-consuming reusable
+#                                      passes helpers-ref: ${{ github.sha }}.
+#   static-bootstrap-ordering        — checks that the four bootstrap steps appear
+#                                      in the correct sequence (validate → resolve →
+#                                      checkout → verify-HEAD) in every
+#                                      helper-consuming reusable workflow.
 
 on:
   pull_request:
     paths:
       - '.github/workflows/*-reusable.yml'
+      - '.github/workflows/agent-*.yml'
+      - '.github/workflows/test-helper-ref*.yml'
       - '.github/actions/*/action.yml'
       - '.github/scripts/**'
       - '.github/workflows/test-reusable-portability.yml'
@@ -243,6 +257,265 @@ jobs:
               STATUS=1
             else
               echo "OK: $f"
+            fi
+          done
+
+          exit "$STATUS"
+
+  static-helpers-ref-contract:
+    name: Static inventory — helpers-ref required input on every helper-consuming reusable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      # Verify that every helper-consuming reusable workflow declares helpers-ref
+      # as a required input.  This is the version-pinning contract documented in
+      # docs/design/helper-checkout-job-workflow-sha-context.md Decision 1:
+      # callers must explicitly supply the ref; a missing or empty input triggers
+      # fail-loud validation rather than an uncontrolled fallback.
+      #
+      # Non-helper-consuming exceptions (no bootstrap; external-consumer patterns
+      # do not apply):
+      #   ci-reusable.yml            — runs tsc + vitest; no local composite actions
+      #   secret-scan-reusable.yml   — runs gitleaks; no local composite actions
+      #   agent-pr-merged-reusable.yml — no checkout; permanent security exception
+      #   terraform-ci-reusable.yml  — consumer-only; scoped to this repo's Terraform
+      - name: Fail if any helper-consuming reusable is missing helpers-ref with required:true
+        run: |
+          set -euo pipefail
+          STATUS=0
+
+          # Reusable workflows that do NOT use the helpers-ref bootstrap.
+          NO_BOOTSTRAP_EXCEPTIONS=(
+            "ci-reusable.yml"
+            "secret-scan-reusable.yml"
+            "agent-pr-merged-reusable.yml"
+            "terraform-ci-reusable.yml"
+          )
+
+          for f in .github/workflows/*-reusable.yml; do
+            base="$(basename "$f")"
+
+            is_exception=false
+            for ex in "${NO_BOOTSTRAP_EXCEPTIONS[@]}"; do
+              if [[ "$base" == "$ex" ]]; then
+                is_exception=true
+                break
+              fi
+            done
+
+            if "$is_exception"; then
+              echo "SKIP (no-bootstrap exception): $f"
+              continue
+            fi
+
+            # Check 1: helpers-ref: key exists as an input declaration.
+            # The input key ends with ':' and no other value on the same line,
+            # unlike env references such as HELPERS_REF: ${{ inputs.helpers-ref }}.
+            if ! grep -qE '^\s+helpers-ref:\s*$' "$f"; then
+              echo "::error::${f}: missing helpers-ref input declaration. Every helper-consuming reusable workflow must declare helpers-ref as an input."
+              STATUS=1
+              continue
+            fi
+
+            # Check 2: required: true appears within 20 lines after the
+            # helpers-ref: key (covers the description block + property lines).
+            helpers_ref_line="$(grep -nE '^\s+helpers-ref:\s*$' "$f" | head -1 | cut -d: -f1)"
+            if ! awk -v start="$helpers_ref_line" 'NR>start && NR<=start+20 {print}' "$f" \
+                 | grep -q 'required: true'; then
+              echo "::error::${f}: helpers-ref input exists but 'required: true' not found in its declaration block."
+              STATUS=1
+              continue
+            fi
+
+            echo "OK: $f — helpers-ref declared with required: true"
+          done
+
+          exit "$STATUS"
+
+  static-ban-disproven-contexts:
+    name: Static lint — ban github.job_workflow_sha and job.workflow_sha expressions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      # Grep all workflow YAML files for live ${{ ... }} expressions that use the
+      # two disproven context forms documented in AGENTS.md § Known traps:
+      #
+      #   github.job_workflow_sha — GitHub defines this property but runtime evidence
+      #     (run 34303371563) shows it evaluated to an empty string; actions/checkout
+      #     silently fell back to main. The expression has been retired and replaced
+      #     by the helpers-ref input pattern.
+      #
+      #   job.workflow_sha — does not exist. The 'job' context exposes only
+      #     container, services, and status. Using it invalidates the reusable
+      #     workflow at parse time, causing zero-job failure runs (PRs #522–#525).
+      #
+      # Matching on ${{ ... <pattern> }} ensures comment lines (which lack ${{)
+      # are not flagged; the check targets live expression uses only.
+      - name: Fail if any workflow uses github.job_workflow_sha or job.workflow_sha in an expression
+        run: |
+          set -euo pipefail
+          STATUS=0
+
+          for f in .github/workflows/*.yml; do
+            # github.job_workflow_sha — retired; evaluated empty at runtime
+            if grep -nE '\$\{\{[^}]*github\.job_workflow_sha' "$f"; then
+              echo "::error::${f}: uses \${{ github.job_workflow_sha }} — this expression evaluated to an empty string at runtime (see AGENTS.md § Known traps). Use the helpers-ref input pattern instead."
+              STATUS=1
+            fi
+
+            # job.workflow_sha — does not exist; invalidates the workflow at parse time
+            if grep -nE '\$\{\{[^}]*job\.workflow_sha' "$f"; then
+              echo "::error::${f}: uses \${{ job.workflow_sha }} — this property does not exist (see AGENTS.md § Known traps). Use the helpers-ref input pattern instead."
+              STATUS=1
+            fi
+          done
+
+          if [[ "$STATUS" -eq 0 ]]; then
+            echo "OK: no workflow files use github.job_workflow_sha or job.workflow_sha in expressions"
+          fi
+
+          exit "$STATUS"
+
+  static-caller-sha-pass:
+    name: Static inventory — caller stubs must pass helpers-ref github.sha
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      # Verify that every repository-owned caller stub that delegates to a
+      # helper-consuming reusable workflow passes helpers-ref: ${{ github.sha }}.
+      #
+      # Decision 1 in docs/design/helper-checkout-job-workflow-sha-context.md:
+      # "Every repository-owned caller passes: helpers-ref: ${{ github.sha }}"
+      # This ensures helpers and the calling workflow always run at the same commit.
+      - name: Fail if any caller stub does not pass helpers-ref github.sha
+        run: |
+          set -euo pipefail
+          STATUS=0
+
+          # Caller stubs that delegate to helper-consuming reusable workflows.
+          # Each must contain helpers-ref: ${{ github.sha }} in its with: block.
+          CALLER_STUBS=(
+            ".github/workflows/agent-auto-trigger.yml"
+            ".github/workflows/agent-design.yml"
+            ".github/workflows/agent-fix-checks.yml"
+            ".github/workflows/agent-fix-deployment.yml"
+            ".github/workflows/agent-groom.yml"
+            ".github/workflows/agent-implement.yml"
+            ".github/workflows/agent-resolve-conflicts.yml"
+            ".github/workflows/agent-respond-review.yml"
+            ".github/workflows/agent-review.yml"
+            ".github/workflows/test-helper-ref.yml"
+          )
+
+          for f in "${CALLER_STUBS[@]}"; do
+            if [[ ! -f "$f" ]]; then
+              echo "::error::${f}: file not found — add it to the CALLER_STUBS list or remove it if deleted."
+              STATUS=1
+              continue
+            fi
+
+            if ! grep -qF 'helpers-ref: ${{ github.sha }}' "$f"; then
+              echo "::error::${f}: does not pass 'helpers-ref: \${{ github.sha }}'. Repository-owned callers must pass the current commit SHA so helpers and the calling workflow run at the same commit."
+              STATUS=1
+            else
+              echo "OK: $f — passes helpers-ref: \${{ github.sha }}"
+            fi
+          done
+
+          exit "$STATUS"
+
+  static-bootstrap-ordering:
+    name: Static inventory — bootstrap steps in correct order in every helper-consuming reusable
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      # Verify that the four bootstrap steps appear in the required order in every
+      # helper-consuming reusable workflow:
+      #   1. Validate helpers-ref input
+      #   2. Resolve helpers-ref to commit SHA
+      #   3. Check out upstream helper actions
+      #   4. Verify helper checkout HEAD matches resolved SHA
+      #
+      # This guards against accidental reordering that would break the security
+      # property: the checkout must use the resolved SHA (not the symbolic input),
+      # and the HEAD comparison must run after the checkout, not before.
+      # See docs/design/helper-checkout-job-workflow-sha-context.md Decision 2.
+      - name: Fail if any helper-consuming reusable has bootstrap steps out of order
+        run: |
+          set -euo pipefail
+          STATUS=0
+
+          # Reusable workflows that do NOT use the helpers-ref bootstrap.
+          NO_BOOTSTRAP_EXCEPTIONS=(
+            "ci-reusable.yml"
+            "secret-scan-reusable.yml"
+            "agent-pr-merged-reusable.yml"
+            "terraform-ci-reusable.yml"
+          )
+
+          for f in .github/workflows/*-reusable.yml; do
+            base="$(basename "$f")"
+
+            is_exception=false
+            for ex in "${NO_BOOTSTRAP_EXCEPTIONS[@]}"; do
+              if [[ "$base" == "$ex" ]]; then
+                is_exception=true
+                break
+              fi
+            done
+
+            if "$is_exception"; then
+              echo "SKIP (no-bootstrap exception): $f"
+              continue
+            fi
+
+            # Get the line number of the FIRST occurrence of each bootstrap step name.
+            # For files with multiple jobs (e.g. agent-auto-trigger-reusable.yml),
+            # the first occurrence is in the first helper-consuming job, which is
+            # sufficient to verify ordering.
+            validate_line="$(grep -n 'name: Validate helpers-ref input' "$f" | head -1 | cut -d: -f1)"
+            resolve_line="$(grep -n 'name: Resolve helpers-ref to commit SHA' "$f" | head -1 | cut -d: -f1)"
+            checkout_line="$(grep -n 'name: Check out upstream helper actions' "$f" | head -1 | cut -d: -f1)"
+            verify_line="$(grep -n 'name: Verify helper checkout HEAD matches resolved SHA' "$f" | head -1 | cut -d: -f1)"
+
+            # All four steps must be present.
+            if [[ -z "$validate_line" || -z "$resolve_line" || -z "$checkout_line" || -z "$verify_line" ]]; then
+              echo "::error::${f}: one or more bootstrap steps are missing."
+              [[ -z "$validate_line" ]]  && echo "  Missing: 'name: Validate helpers-ref input'"
+              [[ -z "$resolve_line" ]]   && echo "  Missing: 'name: Resolve helpers-ref to commit SHA'"
+              [[ -z "$checkout_line" ]]  && echo "  Missing: 'name: Check out upstream helper actions'"
+              [[ -z "$verify_line" ]]    && echo "  Missing: 'name: Verify helper checkout HEAD matches resolved SHA'"
+              STATUS=1
+              continue
+            fi
+
+            # Steps must appear in strict order: validate < resolve < checkout < verify.
+            ordering_ok=true
+            if [[ "$validate_line" -ge "$resolve_line" ]]; then
+              echo "::error::${f}: 'Validate helpers-ref input' (line ${validate_line}) must appear before 'Resolve helpers-ref to commit SHA' (line ${resolve_line})."
+              ordering_ok=false
+            fi
+            if [[ "$resolve_line" -ge "$checkout_line" ]]; then
+              echo "::error::${f}: 'Resolve helpers-ref to commit SHA' (line ${resolve_line}) must appear before 'Check out upstream helper actions' (line ${checkout_line})."
+              ordering_ok=false
+            fi
+            if [[ "$checkout_line" -ge "$verify_line" ]]; then
+              echo "::error::${f}: 'Check out upstream helper actions' (line ${checkout_line}) must appear before 'Verify helper checkout HEAD matches resolved SHA' (line ${verify_line})."
+              ordering_ok=false
+            fi
+
+            if "$ordering_ok"; then
+              echo "OK: $f — bootstrap ordering correct (validate@${validate_line} < resolve@${resolve_line} < checkout@${checkout_line} < verify@${verify_line})"
+            else
+              STATUS=1
             fi
           done
 

@@ -1,0 +1,97 @@
+name: test-helper-ref (reusable fixture)
+
+# Minimal reusable-workflow runtime fixture for the helpers-ref bootstrap contract
+# described in docs/design/helper-checkout-job-workflow-sha-context.md Decision 3.
+#
+# Exercises the four-step bootstrap (validate → resolve → checkout → verify-HEAD)
+# without minting a GitHub App token or invoking any composite action from the
+# checked-out tree. The caller (test-helper-ref.yml) passes
+# helpers-ref: ${{ github.sha }} and then asserts that the requested ref, the
+# GitHub API-resolved SHA, and the _agentic-workflow/ checkout HEAD are all equal.
+#
+# This fixture is a test of the bootstrap contract itself, not a consumer of the
+# helper composite actions. It has no secrets dependency and no agent-container run.
+# A green checkout-step conclusion alone is not sufficient evidence; the verify-HEAD
+# step and the caller's equality assertion are the actual regression guards.
+
+on:
+  workflow_call:
+    inputs:
+      helpers-ref:
+        description: >
+          Git ref (tag, branch, or full commit SHA) of
+          mfrancza/agentic-development-workflow to resolve, check out, and
+          verify. Must not be empty. Repository-owned callers pass
+          github.sha; external callers pass the same ref used in the uses:
+          selector (e.g. v0, v0.0.2, or a full SHA).
+        required: true
+        type: string
+    outputs:
+      resolved-sha:
+        description: 'Full 40-character commit SHA that helpers-ref resolved to (GitHub API)'
+        value: ${{ jobs.verify-helper-ref.outputs.resolved-sha }}
+      checkout-head:
+        description: 'Actual HEAD SHA of the _agentic-workflow/ checkout (git rev-parse HEAD)'
+        value: ${{ jobs.verify-helper-ref.outputs.checkout-head }}
+
+permissions:
+  contents: read
+
+jobs:
+  verify-helper-ref:
+    name: Bootstrap — validate, resolve, checkout, verify HEAD
+    runs-on: ubuntu-latest
+    outputs:
+      resolved-sha: ${{ steps.resolve-ref.outputs.sha }}
+      checkout-head: ${{ steps.verify-head.outputs.sha }}
+
+    steps:
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+          echo "Requested ref: ${HELPERS_REF}"
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        id: verify-head
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          echo "sha=$(printf '%s' "${actual_sha}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+          echo "Checkout HEAD : ${actual_sha}"
+          echo "Resolved SHA  : ${EXPECTED_SHA}"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Bootstrap contract violated."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
