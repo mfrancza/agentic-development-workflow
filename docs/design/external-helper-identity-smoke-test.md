@@ -174,7 +174,7 @@ Post two separate comments on Issue #541 with the following structure.
 
 **Comment 1 — Run 1 (initial):**
 
-```
+````
 ## External helper identity test — Run 1 (initial)
 
 Workflow run: <URL>
@@ -191,11 +191,11 @@ Fixture checkout HEAD       : <sha>
 **Result:** all three match ✅ — bootstrap contract verified.
 
 Cross-reference: #455
-```
+````
 
 **Comment 2 — Run 2 (after main advance):**
 
-```
+````
 ## External helper identity test — Run 2 (after main advance)
 
 Workflow run: <URL>
@@ -214,13 +214,16 @@ Fixture checkout HEAD       : <sha>
 helper checkout is anchored to the release ref; bootstrap stability verified.
 
 Cross-reference: #455
-```
+````
 
 ## Completion
 
-When both comments are posted on Issue #541 and both runs have succeeded,
-this issue can be closed. The evidence is part of the permanent record on
-Issue #541 and completes Issue #513's release-contract validation.
+Issue #541 closes automatically when this PR merges (`Addresses #541` in the
+PR body — the auto-close keyword was removed to keep the issue open for
+evidence tracking). When both comments are posted on Issue #541 and both runs
+have succeeded, close Issue #541 manually. The evidence is part of the
+permanent record on Issue #541 and completes Issue #513's release-contract
+validation.
 
 ## Out of scope
 
