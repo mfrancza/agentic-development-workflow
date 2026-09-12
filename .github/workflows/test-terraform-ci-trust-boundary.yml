@@ -71,6 +71,7 @@ jobs:
       # See docs/design/terraform-ci-plan-checkout-isolation.md Decision 3.
       - name: Lint plan job — no ./.github/actions/ refs or bare terraform working-dirs
         run: |
+          set -euo pipefail
           python3 - << 'PYEOF'
           import sys
           import yaml
@@ -175,6 +176,7 @@ jobs:
       # creates marker-ran.txt.  The assertion step below then fails loudly.
       - name: Inject marker into PR-head action copy (_pr/ only)
         run: |
+          set -euo pipefail
           python3 - << 'PYEOF'
           # Marker step to prepend as the first step in the composite action.
           # Uses shell: bash and run: so it is valid across all runner OSes.
