@@ -251,17 +251,14 @@ The [`.github/workflows/ci.yml`](.github/workflows/ci.yml) workflow (name: `CI`)
 
 Reusable workflows (`*-reusable.yml`) that reference local composite actions must **not** rely on the caller's workspace to resolve those actions. When an external consumer invokes `mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@<ref>`, the runner populates `$GITHUB_WORKSPACE` with the **caller's** repository — not this repo — so workspace-relative paths like `uses: ./.github/actions/<name>` will not resolve.
 
-The fix is a self-checkout at the exact SHA the caller pinned to, into a dedicated subdirectory, before any composite action is invoked:
+The fix is an explicit, required `helpers-ref` reusable-workflow input. Each affected reusable workflow declares `helpers-ref` as a required string input with no default. Repository-owned caller stubs pass `helpers-ref: ${{ github.sha }}`; external callers pass the same tag or SHA they use in their `uses:` line — e.g. `helpers-ref: v0` alongside `uses: ...@v0`. An exact-tag or SHA caller passes the identical selector to both.
 
-```yaml
-- name: Check out upstream helper actions
-  uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-  with:
-    repository: mfrancza/agentic-development-workflow
-    ref: ${{ github.job_workflow_sha }}
-    path: _agentic-workflow
-    persist-credentials: false
-```
+Each helper-consuming job runs the following bootstrap sequence before any composite action is loaded:
+
+1. Reject an empty `helpers-ref` with an Actions error annotation.
+2. Resolve the ref against `mfrancza/agentic-development-workflow` to a full commit SHA using the GitHub commits API.
+3. Check out that resolved SHA — not the symbolic ref — into `_agentic-workflow/`, with `persist-credentials: false`.
+4. Read `_agentic-workflow` HEAD and require exact equality with the resolved SHA. Only after this check may steps reference `./_agentic-workflow/.github/actions/…`.
 
 Every subsequent step references helpers via the `_agentic-workflow/` prefix:
 
@@ -271,12 +268,13 @@ uses: ./_agentic-workflow/.github/actions/<name>
 
 Key properties of this pattern:
 
-- **`github.job_workflow_sha` is the trust anchor.** GitHub sets this context value to the resolved SHA of the reusable workflow file — the SHA the caller's `@<ref>` resolved to at dispatch time. It is not attacker-influenceable; it matches the caller's intent exactly (e.g. `@v1.0.0` → that tag's SHA, `@v1` → the current SHA behind the moving tag). If actionlint reports this expression as undefined, that is a known false positive — see `## Known traps`.
+- **`helpers-ref` is the explicit version-coherence contract.** Repository-owned callers pass `github.sha`; external callers pass the same release selector they used on the `uses:` line (`v0`, `v0.0.2`, or a commit SHA). There is no implicit fallback. See `## Known traps` for why `github.job_workflow_sha` (the earlier approach) resolved to an empty value in practice.
+- **Resolve first, then checkout at the resolved SHA.** This removes any symbolic-ref ambiguity and makes version skew observable — a mismatch fails before any helper action loads.
 - **`_agentic-workflow/` is the fixed subdirectory convention.** The leading underscore signals "not part of the caller's repo"; the fixed name makes the pattern uniformly grep-able across all reusable workflows.
 - **The caller's workspace is not populated** for jobs that previously checked out the caller's workspace only to resolve local-action paths. The upstream subdirectory is the only tree the reusable's steps touch, keeping the trust surface minimal.
 - **`persist-credentials: false`** is required so the checkout token is not retained after the step completes — the minted developer-agent token is the only credential in scope thereafter.
 
-This pattern is applied to every reusable workflow that references local composite actions and is intended for external consumption. See [`docs/design/reusable-workflow-helper-resolution.md`](docs/design/reusable-workflow-helper-resolution.md) Decisions 1, 3, and 4 for the full rationale and audit inventory.
+This pattern is applied to every reusable workflow that references local composite actions and is intended for external consumption. See [`docs/design/helper-checkout-job-workflow-sha-context.md`](docs/design/helper-checkout-job-workflow-sha-context.md) for the full design rationale and [`docs/design/reusable-workflow-helper-resolution.md`](docs/design/reusable-workflow-helper-resolution.md) for the audit inventory.
 
 ## Code Review Standards
 
@@ -286,7 +284,7 @@ This section defines what a pull-request review — by either the reviewer agent
 
 - **Adherence to the linked issue.** The PR is scoped to the requirements of the issue it claims to close (via `Closes #N`). Flag scope creep (unrelated changes bundled in), missing requirements, and acceptance-criteria gaps. If the issue is ambiguous, the PR description should say how the ambiguity was resolved.
 - **Correctness.** Logic does what the PR claims. Consider edge cases, error handling, idempotency, and behaviour under concurrent runs. Verify that referenced APIs, CLI flags, environment variables, secrets, and Actions variables actually exist and behave as described.
-- **Runtime evidence for correctness claims.** A proposed change that would replace, revert, or "fix" code that has a passing live-run history must be accompanied by runtime evidence of the failure it claims to fix — a linter warning, a static type error, a code-review preference, or a schema-based guess is not sufficient grounds on its own. Cite a failed workflow run, a reproducible local failure, or a documented breaking change from an upstream dependency. If the only evidence is a linter or schema warning, treat it as a hypothesis until it produces a runtime failure — the linter may be wrong (see `## Known traps`).
+- **Runtime evidence for correctness claims.** A proposed change that would replace, revert, or "fix" code that has a passing live-run history must be accompanied by runtime evidence of the failure it claims to fix — a linter warning, a static type error, a code-review preference, or a schema-based guess is not sufficient grounds on its own. Cite a failed workflow run, a reproducible local failure, or a documented breaking change from an upstream dependency. If the only evidence is a linter or schema warning, treat it as a hypothesis until it produces a runtime failure — the linter may be wrong (see `## Known traps`). Runtime evidence means the resolved values and actual effects are inspected, not merely that a step concluded with a green status — a step can complete successfully while an expression evaluated to an empty value or an action operated on an unintended ref (see `## Known traps` for the `github.job_workflow_sha` incident).
 - **Security.** No hardcoded credentials, no unsanitized user input flowing into shell, YAML, or Actions expression contexts, no privilege escalation, no unsafe network or git operations. See "Repo-specific security defaults" below for the concrete patterns this repo already relies on.
 - **Style and conventions.** Matches the conventions in this file (see **Shell Script Conventions** above) and the style of surrounding code. New files follow the layout described in **Repository Layout**. Do not introduce a competing convention when an existing one already covers the case.
 - **Test coverage.** New behaviour is exercised by tests where practical. For code that is hard to unit-test (workflow YAML, Terraform, container entrypoints), the PR description explains how the change was verified — e.g. a manual dry-run, a local `docker run` invocation, or a `terraform plan` excerpt.
@@ -313,21 +311,23 @@ The following patterns are already used across this repo. A review must flag any
 
 #### Reverting or replacing code with a passing live-run history
 
-A proposed change that would replace, revert, or "fix" code that has a passing live-run history must be accompanied by runtime evidence of the failure it claims to fix — a linter warning, a static type error, a code-review preference, or a schema-based guess is not sufficient grounds on its own. Cite a failed workflow run, a reproducible local failure, or a documented breaking change from an upstream dependency. If the only evidence is a linter or schema warning, treat it as a hypothesis until it produces a runtime failure — the linter may be wrong (see `## Known traps`). This rule applies across all review-adjacent activities: grooming (a linter-only "bug" report should be labelled as a hypothesis or `question`, not a confirmed bug), design (a design that proposes to change working code must cite a runtime failure in its requirements section), and review (reject or request evidence for proposed reverts or replacements that lack a runtime-failure citation).
+A proposed change that would replace, revert, or "fix" code that has a passing live-run history must be accompanied by runtime evidence of the failure it claims to fix — a linter warning, a static type error, a code-review preference, or a schema-based guess is not sufficient grounds on its own. Cite a failed workflow run, a reproducible local failure, or a documented breaking change from an upstream dependency. If the only evidence is a linter or schema warning, treat it as a hypothesis until it produces a runtime failure — the linter may be wrong (see `## Known traps`). This rule applies across all review-adjacent activities: grooming (a linter-only "bug" report should be labelled as a hypothesis or `question`, not a confirmed bug), design (a design that proposes to change working code must cite a runtime failure in its requirements section), and review (reject or request evidence for proposed reverts or replacements that lack a runtime-failure citation). Critically: runtime evidence means the resolved values and actual effects have been inspected — a step that completed with a green status is not evidence of the resolved ref or the operation actually performed (see `## Known traps` for the `github.job_workflow_sha` incident where a checkout step completed successfully while the ref evaluated to empty and checkout silently used the default branch).
 
 ## Known traps
 
 These are documented gotchas that have caused real incidents or are structurally likely to recur. Each entry states what is correct, what the wrong alternative is, why the wrong path looks plausible, and where the full history lives. Future traps can be appended here without restructuring the section.
 
-### `github.job_workflow_sha` — actionlint false positive
+### `github.job_workflow_sha` and `job.workflow_sha` — expressions to avoid
 
-**Correct expression:** `${{ github.job_workflow_sha }}` — GitHub defines `job_workflow_sha` on the `github` context for reusable-workflow runs. It resolves to the SHA the caller's `@<ref>` resolved to at dispatch time and is the trust anchor for the self-checkout pattern (see "Reusable workflows: self-checkout for helper actions" above).
+**Runtime evidence:** `${{ github.job_workflow_sha }}` is a valid context property that actionlint's bundled schema does not know about. However, runtime evidence from agent-groom run [34303371563](https://github.com/mfrancza/agentic-development-workflow/actions/runs/34303371563) shows the expression evaluated to an empty value in practice — the checkout input dump omitted `ref` entirely, and `actions/checkout` fell back to the `main` branch with `-B main` rather than detaching at the intended SHA. The green step conclusion was not evidence of the resolved ref. Actionlint's diagnostic was accidentally correct: the expression had a real problem that a green step masked.
 
-**Wrong alternative:** `${{ job.workflow_sha }}` does not exist. The `job` context exposes only `container`, `services`, and `status`; `workflow_sha` is not a property. Using `job.workflow_sha` evaluates to an empty string. In the specific case of a reusable workflow file (not just a step-level expression), an empty ref invalidates the file at parse time and yields a zero-job failure run with the file path shown in place of the workflow name — breaking every event that dispatches the workflow.
+**Invalid alternative:** `${{ job.workflow_sha }}` does not exist. The `job` context exposes only `container`, `services`, and `status`; `workflow_sha` is not a property. Using `job.workflow_sha` evaluates to an empty string. In the specific case of a reusable workflow file (not just a step-level expression), an empty ref invalidates the file at parse time and yields a zero-job failure run with the file path shown in place of the workflow name — breaking every event that dispatches the workflow. PRs #522–#525 replaced `github.job_workflow_sha` with `job.workflow_sha` and caused exactly this fleet-wide failure; PR #527 reverted all four.
 
-**False positive:** actionlint's bundled context schema is outdated and reports `${{ github.job_workflow_sha }}` as an undefined property. **Do not act on this warning.** The expression is correct, and a pre-emptive ignore in `.github/actionlint.yaml` suppresses the diagnostic for any actionlint run that picks up the repo config. If you encounter the warning without the repo config loaded, treat it as a known false positive and keep the correct expression.
+**Correct approach:** The correct mechanism is the explicit required `helpers-ref` input — see "Reusable workflows: self-checkout for helper actions" above and [`docs/design/helper-checkout-job-workflow-sha-context.md`](docs/design/helper-checkout-job-workflow-sha-context.md) for the full design. Do not restore `github.job_workflow_sha` and do not replace it with `job.workflow_sha`.
 
-**Incident anchor:** On 2026-09-09 this false positive triggered a four-PR cascade (`#522`–`#525`) that replaced the correct expression across every reusable workflow and stalled the entire agent fleet for six minutes. PR [#527](https://github.com/mfrancza/agentic-development-workflow/issues/527) reverted all four. See Issue [#526](https://github.com/mfrancza/agentic-development-workflow/issues/526) and [`docs/design/job-workflow-sha-linter-trap.md`](docs/design/job-workflow-sha-linter-trap.md) for the full postmortem and preventive follow-ups.
+**Actionlint config:** `.github/actionlint.yaml` suppresses the `job_workflow_sha` undefined-property diagnostic so no future agent or CI run is tempted to act on the warning in isolation. The suppress is retained while the migration to `helpers-ref` is in progress.
+
+**Incident anchor:** On 2026-09-09 an actionlint diagnostic triggered a four-PR cascade (`#522`–`#525`) that replaced `github.job_workflow_sha` with the invalid `job.workflow_sha` across every reusable workflow and stalled the entire agent fleet for six minutes. PR [#527](https://github.com/mfrancza/agentic-development-workflow/issues/527) reverted all four. See Issue [#526](https://github.com/mfrancza/agentic-development-workflow/issues/526) and [`docs/design/job-workflow-sha-linter-trap.md`](docs/design/job-workflow-sha-linter-trap.md) for the postmortem; that postmortem has been corrected to reflect that actionlint was accidentally right about `github.job_workflow_sha` — the expression parsed but evaluated empty.
 
 ## Adding a New Agent Action
 

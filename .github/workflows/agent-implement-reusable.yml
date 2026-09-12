@@ -78,13 +78,12 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      # Check out this repo's own helper actions at the exact SHA the caller
-      # pinned to.  github.job_workflow_sha is GitHub's trust anchor: it
-      # resolves the ref the caller used in `uses: …@<ref>` at dispatch time
-      # and is not influenceable by the caller's workspace.  Using a dedicated
-      # subdirectory (_agentic-workflow/) avoids overwriting the caller's
-      # workspace and keeps the helper checkout clearly separate.
-      # See docs/design/reusable-workflow-helper-resolution.md Decisions 1, 3, 4.
+      # Check out this repo's own helper actions. Previously this step used
+      # github.job_workflow_sha as the checkout ref, but that expression resolved
+      # to an empty value in practice (run 34303371563; see AGENTS.md § Known traps).
+      # The correct mechanism — the explicit helpers-ref input — is being added in
+      # Issue #537. Until that migration lands this step retains github.job_workflow_sha.
+      # See docs/design/helper-checkout-job-workflow-sha-context.md for the design.
       - name: Check out upstream helper actions
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:

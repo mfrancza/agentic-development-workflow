@@ -1,28 +1,44 @@
-# actionlint configuration — shipped as a pre-emptive guard against the
-# github.job_workflow_sha false-positive incident (Issue #526).
+# actionlint configuration — shipped as a guard against the
+# github.job_workflow_sha incident (Issue #526, corrected in Issue #538).
 #
 # Background
 # ----------
 # actionlint's bundled context schema does not yet include job_workflow_sha
-# on the github context. It therefore reports a spurious "undefined"
-# diagnostic whenever a workflow file references github.job_workflow_sha.
-# That diagnostic is a FALSE POSITIVE — github.job_workflow_sha is a
-# GitHub-documented context property populated for reusable-workflow runs
-# to the SHA the caller's @<ref> resolved to at dispatch time. The correct
-# expression is github.job_workflow_sha. Do NOT "fix" the code by removing
-# or renaming it.
+# on the github context. It therefore reports an "undefined" diagnostic
+# whenever a workflow file references github.job_workflow_sha.
 #
-# On 2026-09-09 a previous agent chain took this false positive as ground
-# truth, replaced the working expression with the non-existent
+# Originally this diagnostic was dismissed as a false positive. Runtime
+# evidence from agent-groom run 34303371563 has since shown that
+# github.job_workflow_sha parsed but evaluated to an empty value in
+# practice — the checkout input dump omitted `ref` and actions/checkout
+# fell back to the main branch. Actionlint's diagnostic was accidentally
+# correct: the expression had a real problem that a green step masked.
+#
+# The correct replacement is the explicit required `helpers-ref` input
+# (see docs/design/helper-checkout-job-workflow-sha-context.md and
+# AGENTS.md § Known traps). The ignore patterns below are retained while
+# the reusable workflows migrate from github.job_workflow_sha to
+# helpers-ref (Issue #537) so that actionlint does not resurface the
+# diagnostic during the transition and prompt an incorrect restoration of
+# the old expression.
+#
+# Do NOT restore github.job_workflow_sha and do NOT replace it with
+# job.workflow_sha (the latter is not a valid job-context property and
+# causes parse-time workflow failures — see AGENTS.md § Known traps).
+#
+# On 2026-09-09 a previous agent chain took the actionlint diagnostic as
+# ground truth, replaced github.job_workflow_sha with the non-existent
 # job.workflow_sha, and cascaded the error across four PRs (#522–#525)
-# before a revert (#527) restored the working state. This ignore is
-# present so that no future agent or CI run is tempted to repeat that
-# mistake.
+# before a revert (#527) restored the working state. These ignore patterns
+# are present so that no future agent or CI run is tempted to repeat that
+# mistake before the helpers-ref migration completes.
 #
 # References
 # ----------
-# - docs/design/job-workflow-sha-linter-trap.md (Issue #526 postmortem
-#   and all four preventive decisions)
+# - docs/design/job-workflow-sha-linter-trap.md (Issue #526 postmortem,
+#   corrected in Issue #538)
+# - docs/design/helper-checkout-job-workflow-sha-context.md (Issue #513,
+#   revised design — the correct helpers-ref mechanism)
 # - AGENTS.md § Known traps (authoritative gotcha entry; read this before
 #   acting on any actionlint diagnostic involving job_workflow_sha)
 self-hosted-runner:
