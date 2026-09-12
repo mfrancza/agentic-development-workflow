@@ -35,6 +35,8 @@ on:
       - '.github/workflows/terraform-ci-reusable.yml'
       - '.github/actions/terraform-plan-comment/**'
       - '.github/workflows/test-terraform-ci-trust-boundary.yml'
+      - '.github/scripts/terraform-ci-lint-plan-job.py'
+      - '.github/scripts/terraform-ci-inject-marker.py'
   workflow_dispatch:
 
 permissions:
@@ -69,61 +71,11 @@ jobs:
       #      steps operate on the PR-head checkout and not the base-branch tree.
       #
       # See docs/design/terraform-ci-plan-checkout-isolation.md Decision 3.
+      # Script source: .github/scripts/terraform-ci-lint-plan-job.py
       - name: Lint plan job — no ./.github/actions/ refs or bare terraform working-dirs
         run: |
           set -euo pipefail
-          python3 - << 'PYEOF'
-          import sys
-          import yaml
-
-          with open('.github/workflows/terraform-ci-reusable.yml', 'r') as f:
-              workflow = yaml.safe_load(f)
-
-          plan_job = workflow.get('jobs', {}).get('plan', {})
-          steps = plan_job.get('steps', [])
-
-          errors = []
-
-          for step in steps:
-              step_name = step.get('name', '(unnamed)')
-
-              # Check for disallowed ./.github/actions/ references.
-              # Only ./_base/.github/actions/ is permitted in the plan job so that
-              # composite actions always load from the trusted base-branch checkout.
-              uses = step.get('uses', '') or ''
-              if './.github/actions/' in str(uses):
-                  errors.append(
-                      f"plan job step {step_name!r}: "
-                      f"uses './.github/actions/' — only './_base/.github/actions/' is permitted "
-                      f"in the plan job (found: {uses!r}). "
-                      f"See docs/design/terraform-ci-plan-checkout-isolation.md Decision 3."
-                  )
-
-              # Check for disallowed bare 'working-directory: terraform'.
-              # Only 'working-directory: _pr/terraform' is permitted in the plan job
-              # so that Terraform CLI steps operate on the PR-head checkout.
-              wd = step.get('working-directory', '') or ''
-              if str(wd) == 'terraform':
-                  errors.append(
-                      f"plan job step {step_name!r}: "
-                      f"working-directory is 'terraform' — only '_pr/terraform' is permitted "
-                      f"in the plan job. "
-                      f"See docs/design/terraform-ci-plan-checkout-isolation.md Decision 3."
-                  )
-
-          if errors:
-              for err in errors:
-                  print(f"::error::{err}")
-              print('')
-              print(
-                  'FAILED: The plan job contains steps that violate the trust-boundary '
-                  'invariant. The apply job is not in scope for this lint — see Decision 3 '
-                  'in docs/design/terraform-ci-plan-checkout-isolation.md.'
-              )
-              sys.exit(1)
-
-          print(f"OK: plan job has {len(steps)} step(s); no trust-boundary violations found.")
-          PYEOF
+          python3 .github/scripts/terraform-ci-lint-plan-job.py
 
   # ── Runtime marker regression test ──────────────────────────────────────────
   # Proves at runtime that the plan-comment composite action resolves from
@@ -174,40 +126,14 @@ jobs:
       # uses: ./.github/actions/terraform-plan-comment  (or any path that
       # resolves against _pr/ rather than _base/), the marker step runs and
       # creates marker-ran.txt.  The assertion step below then fails loudly.
+      #
+      # The script is loaded from _base/ (the trusted base-branch checkout)
+      # so that the injection logic itself cannot be tampered with by a PR.
+      # Script source: .github/scripts/terraform-ci-inject-marker.py
       - name: Inject marker into PR-head action copy (_pr/ only)
         run: |
           set -euo pipefail
-          python3 - << 'PYEOF'
-          # Marker step to prepend as the first step in the composite action.
-          # Uses shell: bash and run: so it is valid across all runner OSes.
-          # The touch command creates the sentinel file that the assertion checks.
-          marker_step = (
-              "    - name: MARKER CHECK (must not run — proves _pr/ was loaded instead of _base/)\n"
-              "      shell: bash\n"
-              "      run: |\n"
-              '        echo "MARKER-PR-HEAD-RAN"\n'
-              '        touch "$GITHUB_WORKSPACE/marker-ran.txt"\n'
-          )
-
-          path = '_pr/.github/actions/terraform-plan-comment/action.yml'
-          with open(path, 'r') as f:
-              content = f.read()
-
-          # Insert the marker immediately after the "  steps:" line so it
-          # becomes the first composite-action step.  The sentinel "  steps:\n"
-          # (2-space indent) appears exactly once in the file under runs:, so
-          # the replace(…, 1) is unambiguous.
-          if '  steps:\n' not in content:
-              print('ERROR: expected "  steps:\\n" in action.yml — injection point not found.')
-              raise SystemExit(1)
-
-          content = content.replace('  steps:\n', '  steps:\n' + marker_step, 1)
-
-          with open(path, 'w') as f:
-              f.write(content)
-
-          print(f'Marker step injected as first step in {path}')
-          PYEOF
+          python3 _base/.github/scripts/terraform-ci-inject-marker.py
 
       # Create a minimal scratch plan file so the terraform-plan-comment action
       # has something to read for its plan-file input.  The content does not
