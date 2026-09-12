@@ -431,7 +431,7 @@ jobs:
             fi
 
             # Build the search string in two fragments so GitHub Actions does not
-            # pre-evaluate the ${{ }} token before bash runs the script.
+            # pre-evaluate the dollar-double-brace token before bash runs the script.
             NEEDLE='helpers-ref: $'
             NEEDLE+='{{ github.sha }}'
             if ! grep -qF "$NEEDLE" "$f"; then
