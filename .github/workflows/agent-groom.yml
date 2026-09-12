@@ -34,4 +34,5 @@ jobs:
       default-model: ${{ vars.DEFAULT_MODEL }}
       admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}
       logs-retention-days: 30
+      helpers-ref: ${{ github.sha }}
     secrets: inherit

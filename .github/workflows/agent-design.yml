@@ -40,6 +40,7 @@ jobs:
       image: ${{ vars.DEVELOPER_IMAGE }}
       default-model: ${{ vars.DEFAULT_MODEL }}
       logs-retention-days: 30
+      helpers-ref: ${{ github.sha }}
     secrets: inherit
 
   call-undraft:
@@ -55,4 +56,5 @@ jobs:
       run-undraft: true
       pr-head-ref: ${{ github.event.pull_request.head.ref }}
       repo: ${{ github.repository }}
+      helpers-ref: ${{ github.sha }}
     secrets: inherit
