@@ -4,6 +4,17 @@
 **Related:** [#256](https://github.com/mfrancza/agentic-development-workflow/issues/256) (publish reusable workflows and modules), [#455](https://github.com/mfrancza/agentic-development-workflow/issues/455) (external adoption smoke test), [#451](https://github.com/mfrancza/agentic-development-workflow/issues/451) (initial release), [#496](https://github.com/mfrancza/agentic-development-workflow/issues/496) (documentation still referencing v1)
 **Parent design:** [docs/design/publish-reusable-workflows-and-modules.md](publish-reusable-workflows-and-modules.md)
 
+> **Correction note (Issue [#526](https://github.com/mfrancza/agentic-development-workflow/issues/526)):**
+> A subsequent design ([`docs/design/helper-checkout-job-workflow-sha-context.md`](helper-checkout-job-workflow-sha-context.md),
+> Issue [#513](https://github.com/mfrancza/agentic-development-workflow/issues/513)) proposed
+> renaming `github.job_workflow_sha` to `job.workflow_sha` throughout this design and its
+> implementation. That proposal was based on an actionlint false positive and was incorrect:
+> **`github.job_workflow_sha` as originally written in this design is the correct expression.**
+> Every PR spawned by Issue #513 (#522–#525) was reverted by #527, which restored the working
+> state. The retracted design is preserved in place for historical reference but must not be
+> followed. See [`docs/design/job-workflow-sha-linter-trap.md`](job-workflow-sha-linter-trap.md)
+> (Issue #526) for the full postmortem and preventive follow-ups.
+
 ## Summary
 
 The v0 reusable workflows fail for any external consumer because they reference
