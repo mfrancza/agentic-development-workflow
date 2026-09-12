@@ -1,0 +1,37 @@
+# actionlint configuration — shipped as a pre-emptive guard against the
+# github.job_workflow_sha false-positive incident (Issue #526).
+#
+# Background
+# ----------
+# actionlint's bundled context schema does not yet include job_workflow_sha
+# on the github context. It therefore reports a spurious "undefined"
+# diagnostic whenever a workflow file references github.job_workflow_sha.
+# That diagnostic is a FALSE POSITIVE — github.job_workflow_sha is a
+# GitHub-documented context property populated for reusable-workflow runs
+# to the SHA the caller's @<ref> resolved to at dispatch time. The correct
+# expression is github.job_workflow_sha. Do NOT "fix" the code by removing
+# or renaming it.
+#
+# On 2026-09-09 a previous agent chain took this false positive as ground
+# truth, replaced the working expression with the non-existent
+# job.workflow_sha, and cascaded the error across four PRs (#522–#525)
+# before a revert (#527) restored the working state. This ignore is
+# present so that no future agent or CI run is tempted to repeat that
+# mistake.
+#
+# References
+# ----------
+# - docs/design/job-workflow-sha-linter-trap.md (Issue #526 postmortem
+#   and all four preventive decisions)
+# - AGENTS.md § Known traps (authoritative gotcha entry; read this before
+#   acting on any actionlint diagnostic involving job_workflow_sha)
+self-hosted-runner:
+  # (default; kept explicit so this file is grep-able as an actionlint config)
+  labels: []
+paths:
+  ".github/workflows/**/*.yml":
+    ignore:
+      # Current actionlint wording for an unknown property on a typed context object:
+      - 'property "job_workflow_sha" is not defined in object type'
+      # Older actionlint phrasing (kept for version tolerance):
+      - 'undefined variable "job_workflow_sha"'
