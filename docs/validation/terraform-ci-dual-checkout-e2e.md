@@ -55,7 +55,7 @@ Plan: 0 to add, 1 to change, 0 to destroy.
 
 ## Step 3 — Regression test verification
 
-### Passing case (trust-boundary tests on canary PR #557)
+### Passing case (trust-boundary tests on fix PRs #553 / #554)
 
 The trust-boundary regression tests (`test-terraform-ci-trust-boundary.yml`) ran on
 previous PRs that changed the relevant paths and **passed**:
