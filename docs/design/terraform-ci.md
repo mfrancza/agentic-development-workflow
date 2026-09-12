@@ -217,6 +217,23 @@ new App identity. Three options were considered:
        runs `terraform plan` against the PR-head Terraform code
        without giving that code access to the workflow's own
        credentials via checkout persistence.
+
+       **Structural enforcement (Issue [#549](https://github.com/mfrancza/agentic-development-workflow/issues/549)):**
+       `pull_request_target` guarantees that the *workflow YAML itself*
+       is loaded from the base branch, but a second `actions/checkout`
+       call within the job can overwrite the workspace, causing a
+       subsequent `uses: ./.github/actions/…` step to resolve the
+       composite action from PR-head content rather than the base
+       branch. The plan job in `terraform-ci-reusable.yml` is
+       restructured to use two distinct checkout paths — `_base/` for
+       the trusted base-branch tree (helper actions and their sibling
+       `.github/scripts/` package) and `_pr/` for the PR-head
+       Terraform code — so the PR-head checkout can never overwrite the
+       tree that contains the composite actions invoked with the
+       App-minted token. Every plan-job `uses:` reference is
+       `uses: ./_base/.github/actions/<name>`. See
+       [`docs/design/terraform-ci-plan-checkout-isolation.md`](terraform-ci-plan-checkout-isolation.md)
+       for the full rationale (Decisions 1 and 2).
     2. **Fork-headed PRs are excluded on the plan job.** Under
        `pull_request_target`, secrets are available to same-repo
        PRs by default; fork PRs go through the fork-PR approval

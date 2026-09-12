@@ -15,6 +15,18 @@ name: Terraform CI (reusable)
 #   - Pass secrets: inherit so TF_API_TOKEN and the TERRAFORM_APP_* secrets
 #     are available here.
 #
+# Plan job workspace layout:
+#   _base/  — base-branch tip checkout (trusted helper actions and scripts).
+#             All composite actions in the plan job are invoked via
+#             ./_base/.github/actions/<name> so they are always loaded from
+#             base-branch code, even after the PR-head checkout below.
+#   _pr/    — PR-head checkout (the Terraform code being reviewed).
+#             All Terraform CLI steps and the provider-allowlist gate operate
+#             on this tree. working-directory is _pr/terraform throughout.
+#
+# See docs/design/terraform-ci-plan-checkout-isolation.md for the full
+# rationale behind the dual-checkout layout (Decisions 1 and 2).
+#
 # !! CONSUMER-ONLY — NOT PART OF THE EXTERNALLY PUBLISHED SURFACE IN v0 !!
 #
 # This workflow is not intended for use by external repositories in v0.  Its
@@ -80,37 +92,47 @@ jobs:
       TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
 
     steps:
-      # Checkout the base branch first so local composite actions
-      # (./.github/actions/**) resolve from trusted base-branch code.
-      # On pull_request_target the default ref is GITHUB_SHA = current
-      # base branch HEAD (not a merge commit). See agent-review-reusable.yml
-      # for the same pattern and rationale.
-      - name: Checkout base branch (local actions)
+      # Check out the base branch into _base/ so trusted composite actions
+      # (./_base/.github/actions/**) are isolated from the PR-head checkout
+      # that follows. On pull_request_target the default ref is GITHUB_SHA =
+      # current base-branch HEAD (not a merge commit). Every plan-job
+      # composite action is invoked via ./_base/.github/actions/<name> so it
+      # always loads from trusted base-branch code regardless of what the
+      # PR-head checkout contains.
+      # See docs/design/terraform-ci-plan-checkout-isolation.md Decision 1.
+      - name: Checkout base branch (trusted helper actions)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
+          # No ref: — pull_request_target's default is GITHUB_SHA (base-branch HEAD).
+          path: _base
           persist-credentials: false
 
       - name: Mint terraform-ci App token
         id: token
-        uses: ./.github/actions/agent-token
+        uses: ./_base/.github/actions/agent-token
         with:
           client-id: ${{ secrets.TERRAFORM_APP_ID }}
           private-key: ${{ secrets.TERRAFORM_APP_PRIVATE_KEY }}
 
-      # Check out the PR head so the Terraform steps run against the PR's
-      # changes. persist-credentials: false prevents git credential helpers
-      # from seeing the minted token after the checkout.
+      # Check out the PR head into _pr/ so Terraform steps run against the
+      # PR's changes. Using a separate path keeps the trusted _base/ tree
+      # intact and prevents the PR-head content from overwriting the composite
+      # actions that run with the minted App token.
+      # See docs/design/terraform-ci-plan-checkout-isolation.md Decision 1.
       - name: Checkout PR head (Terraform code)
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           ref: ${{ inputs.head-sha }}
+          path: _pr
           persist-credentials: false
 
       # Provider allowlist gate — runs from base-branch workflow YAML so a PR
       # cannot modify the gate that inspects it.  Fails if any provider source
       # in .terraform.lock.hcl or required_providers blocks is not on the
-      # explicit allowlist.  See docs/design/terraform-ci.md Decision 2,
-      # mitigation 4 for the full rationale.
+      # explicit allowlist.  Reads from _pr/ (PR-head content) because that is
+      # the surface being defended.  See docs/design/terraform-ci.md Decision 2,
+      # mitigation 4 and docs/design/terraform-ci-plan-checkout-isolation.md
+      # Decision 2 for the full rationale.
       - name: Terraform provider allowlist gate
         run: |
           set -euo pipefail
@@ -129,7 +151,8 @@ jobs:
           sources = set()
 
           # 1. Provider blocks in .terraform.lock.hcl (canonical registry form)
-          lockfile = pathlib.Path("terraform/.terraform.lock.hcl")
+          # Read from _pr/ — this is the PR-head content being inspected.
+          lockfile = pathlib.Path("_pr/terraform/.terraform.lock.hcl")
           if lockfile.exists():
               for m in re.finditer(
                   r'^provider\s+"([^"]+)"', lockfile.read_text(), re.MULTILINE
@@ -137,7 +160,8 @@ jobs:
                   sources.add(m.group(1))
 
           # 2. source = "..." inside required_providers { } blocks in all .tf files
-          for tf_path in glob.glob("terraform/**/*.tf", recursive=True):
+          # Read from _pr/ — this is the PR-head content being inspected.
+          for tf_path in glob.glob("_pr/terraform/**/*.tf", recursive=True):
               content = pathlib.Path(tf_path).read_text()
               for rp_match in re.finditer(
                   r'required_providers\s*\{([^}]*(?:\{[^}]*\}[^}]*)*)\}',
@@ -156,10 +180,12 @@ jobs:
           print(f"Provider allowlist gate passed. Sources checked: {sources or '(none)'}")
           PYEOF
 
+      # Read from _pr/.tool-versions (Decision 2) so a PR that bumps the
+      # Terraform version is validated with the version it intends to use.
       - name: Read Terraform version from .tool-versions
         run: |
           set -euo pipefail
-          TF_VERSION=$(grep '^terraform ' .tool-versions | awk '{print $2}')
+          TF_VERSION=$(grep '^terraform ' _pr/.tool-versions | awk '{print $2}')
           echo "TF_VERSION=${TF_VERSION}" >> "$GITHUB_ENV"
 
       - name: Setup Terraform
@@ -169,7 +195,7 @@ jobs:
           terraform_version: ${{ env.TF_VERSION }}
 
       - name: Terraform init
-        working-directory: terraform
+        working-directory: _pr/terraform
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         run: |
@@ -177,13 +203,13 @@ jobs:
           terraform init -input=false
 
       - name: Terraform fmt check
-        working-directory: terraform
+        working-directory: _pr/terraform
         run: |
           set -euo pipefail
           terraform fmt -check -recursive
 
       - name: Terraform validate
-        working-directory: terraform
+        working-directory: _pr/terraform
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         run: |
@@ -191,7 +217,7 @@ jobs:
           terraform validate
 
       - name: Terraform plan
-        working-directory: terraform
+        working-directory: _pr/terraform
         env:
           GITHUB_TOKEN: ${{ steps.token.outputs.token }}
         run: |
@@ -199,18 +225,18 @@ jobs:
           terraform plan -input=false -out=tfplan
 
       - name: Show plan as text
-        working-directory: terraform
+        working-directory: _pr/terraform
         run: |
           set -euo pipefail
-          terraform show -no-color tfplan > "$GITHUB_WORKSPACE/terraform/tfplan.txt"
+          terraform show -no-color tfplan > "$GITHUB_WORKSPACE/_pr/terraform/tfplan.txt"
 
       - name: Post Terraform plan comment
-        uses: ./.github/actions/terraform-plan-comment
+        uses: ./_base/.github/actions/terraform-plan-comment
         with:
           token: ${{ steps.token.outputs.token }}
           repo: ${{ github.repository }}
           pr-number: ${{ inputs.pr-number }}
-          plan-file: ${{ github.workspace }}/terraform/tfplan.txt
+          plan-file: ${{ github.workspace }}/_pr/terraform/tfplan.txt
           bot-login: "terraform-ci[bot]"
 
   # ── Apply job ───────────────────────────────────────────────────────────────
