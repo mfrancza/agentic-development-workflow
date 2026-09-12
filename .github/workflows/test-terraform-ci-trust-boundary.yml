@@ -1,0 +1,258 @@
+name: Test Terraform CI trust boundary
+
+# Tests the trust-boundary invariant for the Terraform CI plan job, as
+# specified in docs/design/terraform-ci-plan-checkout-isolation.md Decision 3.
+#
+# Two jobs:
+#
+#   static-lint — YAML-parse terraform-ci-reusable.yml, restrict inspection to
+#                 the plan job's steps, and fail if any step contains:
+#                 - uses: ./.github/actions/  (only ./_base/.github/actions/ is
+#                   permitted in the plan job)
+#                 - working-directory: terraform  (only _pr/terraform is
+#                   permitted in the plan job)
+#                 The apply job is not in scope for this lint. YAML-parse
+#                 rather than grep so comments and apply-job steps are excluded
+#                 by construction.
+#
+#   runtime-marker-test — proves at runtime that the plan-comment composite
+#                 action is loaded from _base/ (trusted) rather than _pr/
+#                 (PR-head, untrusted):
+#                 1. Check out the repository twice: _base/ at github.sha,
+#                    _pr/ at the PR-head SHA.
+#                 2. Inject a sentinel marker step as the first step of the
+#                    _pr/ copy of terraform-plan-comment (on-disk only; not
+#                    pushed back).
+#                 3. Invoke the action via ./_base/.github/actions/terraform-plan-comment
+#                    with a dummy invalid token so the API call fails. The marker
+#                    step (if loaded from _pr/) would have run before that failure.
+#                 4. Assert that the sentinel file was NOT created — proving the
+#                    action loaded from _base/, not _pr/.
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/terraform-ci-reusable.yml'
+      - '.github/actions/terraform-plan-comment/**'
+      - '.github/workflows/test-terraform-ci-trust-boundary.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Static lint ──────────────────────────────────────────────────────────────
+  # YAML-parse terraform-ci-reusable.yml and inspect only the plan job's steps.
+  # Fails loudly if any plan-job step contains:
+  #   - uses: ./.github/actions/  (violates the _base/ isolation invariant)
+  #   - working-directory: terraform  (violates the _pr/terraform invariant)
+  # The apply job is explicitly excluded: it does not use the dual-checkout
+  # pattern, so working-directory: terraform there is correct and expected.
+  static-lint:
+    name: Static lint — plan job trust-boundary invariants
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      # Parse terraform-ci-reusable.yml as YAML so comments and apply-job steps
+      # are excluded by construction (not by pattern matching).  The plan job's
+      # steps are inspected for two invariants:
+      #
+      #   1. No step may reference uses: ./.github/actions/<name>.  Only
+      #      uses: ./_base/.github/actions/<name> is permitted, so that composite
+      #      actions always load from the trusted base-branch checkout regardless
+      #      of the PR-head checkout that follows.
+      #
+      #   2. No step may set working-directory: terraform.  Only
+      #      working-directory: _pr/terraform is permitted, so that Terraform CLI
+      #      steps operate on the PR-head checkout and not the base-branch tree.
+      #
+      # See docs/design/terraform-ci-plan-checkout-isolation.md Decision 3.
+      - name: Lint plan job — no ./.github/actions/ refs or bare terraform working-dirs
+        run: |
+          python3 - << 'PYEOF'
+          import sys
+          import yaml
+
+          with open('.github/workflows/terraform-ci-reusable.yml', 'r') as f:
+              workflow = yaml.safe_load(f)
+
+          plan_job = workflow.get('jobs', {}).get('plan', {})
+          steps = plan_job.get('steps', [])
+
+          errors = []
+
+          for step in steps:
+              step_name = step.get('name', '(unnamed)')
+
+              # Check for disallowed ./.github/actions/ references.
+              # Only ./_base/.github/actions/ is permitted in the plan job so that
+              # composite actions always load from the trusted base-branch checkout.
+              uses = step.get('uses', '') or ''
+              if './.github/actions/' in str(uses):
+                  errors.append(
+                      f"plan job step {step_name!r}: "
+                      f"uses './.github/actions/' — only './_base/.github/actions/' is permitted "
+                      f"in the plan job (found: {uses!r}). "
+                      f"See docs/design/terraform-ci-plan-checkout-isolation.md Decision 3."
+                  )
+
+              # Check for disallowed bare 'working-directory: terraform'.
+              # Only 'working-directory: _pr/terraform' is permitted in the plan job
+              # so that Terraform CLI steps operate on the PR-head checkout.
+              wd = step.get('working-directory', '') or ''
+              if str(wd) == 'terraform':
+                  errors.append(
+                      f"plan job step {step_name!r}: "
+                      f"working-directory is 'terraform' — only '_pr/terraform' is permitted "
+                      f"in the plan job. "
+                      f"See docs/design/terraform-ci-plan-checkout-isolation.md Decision 3."
+                  )
+
+          if errors:
+              for err in errors:
+                  print(f"::error::{err}")
+              print('')
+              print(
+                  'FAILED: The plan job contains steps that violate the trust-boundary '
+                  'invariant. The apply job is not in scope for this lint — see Decision 3 '
+                  'in docs/design/terraform-ci-plan-checkout-isolation.md.'
+              )
+              sys.exit(1)
+
+          print(f"OK: plan job has {len(steps)} step(s); no trust-boundary violations found.")
+          PYEOF
+
+  # ── Runtime marker regression test ──────────────────────────────────────────
+  # Proves at runtime that the plan-comment composite action resolves from
+  # _base/ (trusted base-branch checkout) and not from _pr/ (PR-head checkout).
+  #
+  # The test runs under the standard pull_request token — no App credentials
+  # are needed because what we are verifying is the *resolution path* of
+  # uses:, not the token handoff.  The token handoff is covered by the parent
+  # design's Decision 2 threat model; this test pins the previously-unverified
+  # invariant that the plan job's composite action loads from _base/.
+  runtime-marker-test:
+    name: Runtime marker — _base/ action is used, not _pr/
+    runs-on: ubuntu-latest
+    steps:
+      # Check out the base at github.sha into _base/.
+      # On pull_request, github.sha is the synthetic merge commit (base + PR
+      # head merged).  On workflow_dispatch it is the dispatched commit.
+      # In either case this checkout does NOT contain the marker that the next
+      # step injects into _pr/ — the marker exists only on disk, in _pr/.
+      - name: Checkout base into _base/
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          path: _base
+          persist-credentials: false
+
+      # Check out the PR head into _pr/.
+      # On pull_request, github.event.pull_request.head.sha is the actual
+      # PR-branch HEAD commit.  On workflow_dispatch it is empty, so github.sha
+      # is used as the fallback — both trees contain the same code, but the
+      # marker is only injected into _pr/, so the test remains valid.
+      - name: Checkout PR head into _pr/
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: _pr
+          persist-credentials: false
+
+      # Inject a sentinel marker step as the FIRST step of the PR-head copy of
+      # the terraform-plan-comment composite action.  The mutation is on-disk
+      # only — it is never staged or pushed back to the repository.
+      #
+      # Inserting the marker as the first step ensures it runs before any step
+      # that could fail (e.g. the API-call step), so the sentinel file is
+      # written whenever the _pr/ action is loaded.
+      #
+      # If the plan job (or this test workflow) ever regresses to loading
+      # uses: ./.github/actions/terraform-plan-comment  (or any path that
+      # resolves against _pr/ rather than _base/), the marker step runs and
+      # creates marker-ran.txt.  The assertion step below then fails loudly.
+      - name: Inject marker into PR-head action copy (_pr/ only)
+        run: |
+          python3 - << 'PYEOF'
+          # Marker step to prepend as the first step in the composite action.
+          # Uses shell: bash and run: so it is valid across all runner OSes.
+          # The touch command creates the sentinel file that the assertion checks.
+          marker_step = (
+              "    - name: MARKER CHECK (must not run — proves _pr/ was loaded instead of _base/)\n"
+              "      shell: bash\n"
+              "      run: |\n"
+              '        echo "MARKER-PR-HEAD-RAN"\n'
+              '        touch "$GITHUB_WORKSPACE/marker-ran.txt"\n'
+          )
+
+          path = '_pr/.github/actions/terraform-plan-comment/action.yml'
+          with open(path, 'r') as f:
+              content = f.read()
+
+          # Insert the marker immediately after the "  steps:" line so it
+          # becomes the first composite-action step.  The sentinel "  steps:\n"
+          # (2-space indent) appears exactly once in the file under runs:, so
+          # the replace(…, 1) is unambiguous.
+          if '  steps:\n' not in content:
+              print('ERROR: expected "  steps:\\n" in action.yml — injection point not found.')
+              raise SystemExit(1)
+
+          content = content.replace('  steps:\n', '  steps:\n' + marker_step, 1)
+
+          with open(path, 'w') as f:
+              f.write(content)
+
+          print(f'Marker step injected as first step in {path}')
+          PYEOF
+
+      # Create a minimal scratch plan file so the terraform-plan-comment action
+      # has something to read for its plan-file input.  The content does not
+      # matter — the action will fail at the API-call step due to the dummy
+      # token below, long after the marker step (if loaded from _pr/) would
+      # have already run.
+      - name: Create scratch plan file
+        run: echo "(test plan output — not a real plan)" > "$GITHUB_WORKSPACE/tfplan.txt"
+
+      # Invoke the composite action via the same path the restructured plan job
+      # uses: uses: ./_base/.github/actions/terraform-plan-comment
+      #
+      # An intentionally invalid token is supplied so the API call fails at the
+      # authentication boundary.  continue-on-error: true allows the assertion
+      # step to run regardless of this expected failure.
+      #
+      # Trust-boundary invariant:
+      #   _base/ loaded (correct) — the marker step does not exist in _base/;
+      #       marker-ran.txt is never created; assertion passes.
+      #   _pr/ loaded (regression) — the marker step runs first and creates
+      #       marker-ran.txt before the API-call failure; assertion fails loudly.
+      - name: Invoke terraform-plan-comment from _base/
+        id: invoke-action
+        uses: ./_base/.github/actions/terraform-plan-comment
+        continue-on-error: true
+        with:
+          token: dummy-invalid-token-for-trust-boundary-test
+          repo: ${{ github.repository }}
+          pr-number: 0
+          plan-file: ${{ github.workspace }}/tfplan.txt
+          bot-login: terraform-ci[bot]
+
+      # Assert that the sentinel file was NOT created.
+      #
+      # Absent  →  the composite action was loaded from _base/ (trusted
+      #            checkout); the marker step never existed; invariant holds.
+      # Present →  the composite action was loaded from _pr/ (PR-head
+      #            checkout); the marker step ran; this is the regression the
+      #            test is designed to catch.
+      - name: Assert MARKER-PR-HEAD-RAN is absent (marker-ran.txt must not exist)
+        run: |
+          if [ -f "$GITHUB_WORKSPACE/marker-ran.txt" ]; then
+            echo "::error::MARKER-PR-HEAD-RAN was written — the composite action ran from _pr/ (PR-head checkout) instead of _base/ (trusted base checkout)."
+            echo "::error::This is a trust-boundary regression: the plan job is loading terraform-plan-comment from PR-head content, which could allow a same-repo PR to execute modified helper code with the terraform-ci App token."
+            echo "::error::See docs/design/terraform-ci-plan-checkout-isolation.md Decision 3."
+            exit 1
+          fi
+          echo "OK: marker-ran.txt is absent."
+          echo "The composite action was loaded from _base/ (trusted base-branch checkout)."
+          echo "Trust-boundary invariant holds: MARKER-PR-HEAD-RAN was not emitted."
