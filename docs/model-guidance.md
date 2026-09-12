@@ -13,10 +13,30 @@ the runtime routing authorities; see [Provider Notes](#provider-notes).
 
 ## Tier Summary
 
-The groomer selects only `model:haiku`, `model:sonnet`, or `model:opus`.
-Named OpenAI, xAI, and Claude models are **operator overrides**, not additional grooming tiers.
-The rationale for Anthropic-only grooming remains
+Grooming guidance covers **Anthropic, OpenAI, and xAI**. Select exactly one generic
+model label from the criteria for the chosen provider; do not invent cross-provider aliases.
+The workload categories below are repository selection guidance, not claims of equivalent
+capability across vendors. This supersedes the Anthropic-only scope of
 [Decision 6 of the usage-guidance design](design/agent-usage-guidance.md).
+
+### Provider selection during grooming
+
+1. Preserve any existing generic model label and all per-agent overrides. An existing generic
+   label ends model selection, regardless of provider.
+2. With no generic label, honor an explicit execution-provider preference in the issue or
+   repository instructions. Merely mentioning a vendor as the subject of a task is not a
+   provider preference; neither is a per-agent override a preference for all other agents.
+   With no explicit preference, retain Anthropic as the fallback rather than silently switching
+   vendors on price alone. This does not change `DEFAULT_MODEL`.
+3. Use that provider's column in the Task-Class Matrix and the model-specific criteria below.
+   For Anthropic, choose a tier alias; for OpenAI and xAI, choose a provisioned named model.
+   Record the provider, task class, and reason in the grooming comment. For example, a scoped
+   fix explicitly requesting OpenAI selects `model:gpt-5.6-terra`; an xAI architectural plan
+   can select `model:grok-4.20-0309-reasoning`.
+4. A provider preference does not establish account access. Operators must configure its key
+   for downstream runs; the groomer's own provider/key does not prove downstream availability.
+   Never inspect or print secret values. If the requested provider is known to be unavailable
+   or preferences conflict, ask for clarification instead of silently substituting a vendor.
 
 ### Anthropic tier aliases (grooming-agent picks)
 
@@ -24,7 +44,7 @@ The rationale for Anthropic-only grooming remains
 |---|---|---|
 | `model:haiku` | Claude Haiku 4.5 | Clearly mechanical changes: typo, comment, single config value, or a small documentation correction with no research or design decisions. If uncertain, choose Sonnet. |
 | `model:sonnet` | Claude Sonnet 5 | Non-trivial but well-specified implementation, scoped debugging, or a straightforward dependency upgrade. This remains the repository default. |
-| `model:opus` | Claude Opus 5 | Deep reasoning, architectural design, cross-cutting refactors, new agent types, security-sensitive changes, ambiguous scope, or issues classified `plan`. Highest capability among the three grooming choices, not the entire vendor catalog. |
+| `model:opus` | Claude Opus 5 | Deep reasoning, architectural design, cross-cutting refactors, new agent types, security-sensitive changes, ambiguous scope, or issues classified `plan`. Highest capability among the three Anthropic grooming choices, not the entire vendor catalog. |
 
 Aliases float with the Claude Code CLI; the repository passes them through rather than pinning
 these series. A generic series label such as `model:claude-haiku-4-5` floats within that series;
@@ -36,7 +56,7 @@ tiers, including Fable 5.1. It now recommends starting with Opus 5 for most work
 **Sonnet is this repository's cost-conscious policy, not Anthropic's current default recommendation.**
 Do not extend grooming to additional families just because the vendor offers them.
 
-### OpenAI models (manual selection)
+### OpenAI models (grooming and manual selection)
 
 The repository's September refresh ([PR #547](https://github.com/mfrancza/agentic-development-workflow/pull/547))
 provisions the GPT-5.6 family and GPT-6 Astra. The removed `model:gpt-5` and `model:o3` labels
@@ -53,7 +73,7 @@ These are workload analogies, **not demonstrated equivalence** to Anthropic tier
 Astra costs 2.5× Sol for the normalized token budget below; evaluate whether fewer retries or
 better outcomes justify the premium rather than selecting it for every `plan` issue.
 
-### xAI (Grok) models (manual selection)
+### xAI (Grok) models (grooming and manual selection)
 
 The [September audit, PR #546](https://github.com/mfrancza/agentic-development-workflow/pull/546)
 confirmed the repository's Grok Build CLI inventory. Refer to Terraform for the exact label set
@@ -146,31 +166,32 @@ Grok 4.5 and 4.6 all-hit examples cost $0.036 and $0.040 respectively: useful fo
 stable-prefix workloads, not proof that either has the lowest total cost per successful issue.
 
 Choose by measured completion quality, total billed tokens, latency, and retry rate. Price alone
-does not establish a best-value capability tier, and a vendor switch is an operator decision.
+does not establish a best-value capability tier. Honor the provider-selection rules above
+rather than switching vendors solely for a lower token price.
 
 ## Task-Class Matrix
 
-The Anthropic column is the **grooming policy**, not an instruction to replace an existing label.
-Cross-vendor entries are representative evaluation candidates, not exhaustive inventory or
-benchmark-proven substitutes. Compare their token costs in the single pricing table above.
+All three provider columns inform **grooming selection** within the chosen provider, not
+replacement of an existing label. Entries are representative candidates, not exhaustive
+inventory or benchmark-proven substitutes. Compare their token costs in the pricing table above.
 Task complexity matters more than file count: documentation research and a one-file security
 change are not automatically mechanical work.
 
-| Task class | Anthropic default | Operator alternatives to evaluate | Selection boundary |
-|---|---|---|---|
-| `do` — mechanical; typo, single value, small doc correction | `model:haiku` | `model:gpt-5.6-luna`, `model:grok-build-0.1` | No research, ambiguity, or design decisions; otherwise use Sonnet. |
-| `bug` — scoped diagnosis and fix | `model:sonnet` | `model:gpt-5.6-terra`, `model:grok-4.3` | A small diff alone does not make diagnosis trivial. |
-| `enhancement` / `do` — typical scoped implementation | `model:sonnet` | `model:gpt-5.6-terra`, `model:grok-4.6`, `model:grok-4.20-0309-non-reasoning` | Clear requirements and a bounded implementation path. |
-| `dependency upgrade` | `model:sonnet` | `model:gpt-5.6-terra`, `model:grok-4.5` | Escalate breaking migrations with architectural trade-offs to Opus. |
-| Documentation audit, pricing research, bounded validation without `plan` | `model:sonnet` | `model:gpt-5.6-terra`, `model:grok-4.6` | Research is non-mechanical even if only Markdown changes; ambiguous scope needs Opus. |
-| `plan` — design, architecture, or validation planning | `model:opus` | `model:gpt-5.6-sol`, `model:grok-4.20-0309-reasoning` | Matches the criteria's `plan` rule; a human may deliberately choose a cheaper model for a procedural plan. |
-| Cross-cutting refactor or under-specified bug / enhancement | `model:opus` | `model:gpt-5.6-sol`, `model:grok-4.6` | Multiple interacting components or unresolved trade-offs. |
-| New agent type or decomposition-heavy design | `model:opus` | `model:gpt-5.6-sol`, `model:grok-4.20-multi-agent-0309` | Model selection does not change workflow topology or permissions. |
-| Hardest long-horizon implementation or system design | `model:opus` | `model:gpt-6-astra`, `model:gpt-5.6-sol`, `model:grok-4.6` | Evaluate Astra as a premium escalation, not an automatic default. |
-| Code review — targeted mechanical check | `model:haiku` | `model:gpt-5.6-luna`, `model:grok-build-0.1` | Small, isolated change with no security or cross-component implications. |
-| Code review — standard multi-file PR | `model:sonnet` | `model:gpt-5.6-terra`, `model:grok-4.6` | Correctness, tests, and repository conventions. |
-| Code review — architectural / security-sensitive | `model:opus` | `model:gpt-5.6-sol`, `model:gpt-6-astra`, `model:grok-4.6` | Human review remains necessary where required; model capability is not authorization. |
-| Design — bounded feature specification without `plan` | `model:sonnet` | `model:gpt-5.6-terra`, `model:grok-4.6` | If classified `plan`, use the `plan` row instead. |
+| Task class | Anthropic | OpenAI | xAI (Grok) | Selection boundary |
+|---|---|---|---|---|
+| `do` — mechanical; typo, single value, small doc correction | `model:haiku` | `model:gpt-5.6-luna` | `model:grok-build-0.1` | No research, ambiguity, or design decisions; otherwise use a scoped-work model. |
+| `bug` — scoped diagnosis and fix | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.3` | A small diff alone does not make diagnosis trivial. |
+| `enhancement` / `do` — typical scoped implementation | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.6`, `model:grok-4.20-0309-non-reasoning` | Clear requirements and a bounded implementation path. |
+| `dependency upgrade` | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.5` | Escalate breaking migrations with architectural trade-offs to a design-capable model. |
+| Documentation audit, pricing research, bounded validation without `plan` | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.6` | Research is non-mechanical even if only Markdown changes; ambiguous scope needs a design-capable model. |
+| `plan` — design, architecture, or validation planning | `model:opus` | `model:gpt-5.6-sol` | `model:grok-4.20-0309-reasoning` | Use a design-capable model within the chosen provider; a human may deliberately choose a cheaper model for a procedural plan. |
+| Cross-cutting refactor or under-specified bug / enhancement | `model:opus` | `model:gpt-5.6-sol` | `model:grok-4.6` | Multiple interacting components or unresolved trade-offs. |
+| New agent type or decomposition-heavy design | `model:opus` | `model:gpt-5.6-sol` | `model:grok-4.20-multi-agent-0309` | Model selection does not change workflow topology or permissions. |
+| Hardest long-horizon implementation or system design | `model:opus` | `model:gpt-6-astra`, `model:gpt-5.6-sol` | `model:grok-4.6` | Evaluate Astra as a premium escalation, not an automatic default. |
+| Code review — targeted mechanical check | `model:haiku` | `model:gpt-5.6-luna` | `model:grok-build-0.1` | Small, isolated change with no security or cross-component implications. |
+| Code review — standard multi-file PR | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.6` | Correctness, tests, and repository conventions. |
+| Code review — architectural / security-sensitive | `model:opus` | `model:gpt-5.6-sol`, `model:gpt-6-astra` | `model:grok-4.6` | Human review remains necessary where required; model capability is not authorization. |
+| Design — bounded feature specification without `plan` | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.6` | If classified `plan`, use the `plan` row instead. |
 
 ## Evidence
 
@@ -206,16 +227,19 @@ which model actually runs. The earlier August sample is historical, not a curren
 - **Preserve intentional choices.** If any generic label matching `^model:[^:]+$` exists,
   the groomer must not add, remove, or replace it. This includes named vendor models and snapshots.
 - **Per-agent overrides may coexist.** A label such as `model:review:opus` alone does not block
-  selection of one generic tier alias. Preserve all existing per-agent labels too.
-- **When selecting, emit exactly one generic alias:** mechanical → Haiku; scoped, non-trivial
-  work → Sonnet; design-heavy, cross-cutting, security-sensitive, ambiguous, or `plan` → Opus.
-- **When unsure, prefer Sonnet over Haiku.** Documentation-only is not synonymous with trivial.
+  selection of one generic model label. Preserve all existing per-agent labels too.
+- **When selecting, emit exactly one generic model label** from the chosen provider's criteria.
+  For Anthropic: mechanical → Haiku; scoped, non-trivial work → Sonnet; design-heavy,
+  cross-cutting, security-sensitive, ambiguous, or `plan` → Opus. OpenAI and xAI follow their
+  task-matrix columns, including reasoning-capable choices for `plan` work.
+- **When unsure, move beyond the mechanical category within the chosen provider.**
+  Documentation-only is not synonymous with trivial.
 - **Manual exceptions are not grooming rules.** A human may override a bounded procedural plan
   to Sonnet; the groomer preserves it rather than creating an exception to the criteria.
 
 ## Provider Notes
 
-The tier-alias vocabulary is Anthropic-specific; the operator guidance spans all three providers.
+The tier-alias vocabulary is Anthropic-specific; grooming and operator guidance span all three providers.
 Read `resolve_provider()` in the [developer entrypoint](../docker/scripts/entrypoint.sh) and
 [reviewer entrypoint](../docker/reviewer/entrypoint.sh) for accepted model names and key validation.
 Anthropic names route to Claude Code, OpenAI names to Codex, and xAI names to Grok Build CLI.
@@ -265,6 +289,11 @@ on the PR too: an issue's review override alone is not read by the reviewer work
 
 Entries below record changes at their original dates; historical model lists and prices are not
 current selection guidance.
+
+- **2026-09-12 (rev 9)** — Addressed PR #567 review: included Anthropic, OpenAI, and xAI in
+  grooming selection, aligned the prompt and label criteria, and added cross-provider coverage.
+  Preserved existing overrides and the no-preference Anthropic fallback; no workflow defaults,
+  provider credentials, or provisioned labels changed.
 
 - **2026-09-12 (rev 8)** — End-to-end review for Issue #564 against Terraform and official
   vendor sources. Consolidated pricing and recomputed normalized costs; corrected cache-write,

@@ -9,6 +9,10 @@ const terraform = readFileSync(
   new URL("../../../terraform/modules/labels/main.tf", import.meta.url),
   "utf8",
 );
+const groomPrompt = readFileSync(
+  new URL("../../../docker/scripts/prompts/groom.md", import.meta.url),
+  "utf8",
+);
 const criteria = JSON.parse(
   readFileSync(
     new URL("../../../agents/grooming/label-criteria.json", import.meta.url),
@@ -43,9 +47,32 @@ describe("model guidance consistency", () => {
     const expectedLabels = [...provisionedLabels].filter(
       (label) => label.startsWith("model:gpt-") || label.startsWith("model:grok-"),
     );
-    expectedLabels.push(...Object.keys(criteria).filter((label) => label.startsWith("model:")));
+    expectedLabels.push("model:haiku", "model:sonnet", "model:opus");
 
     expect(pricingRows.map((row) => row.label).sort()).toEqual(expectedLabels.sort());
+  });
+
+  it("provides grooming criteria for all priced models across all providers", () => {
+    const modelLabels = Object.keys(criteria).filter((label) => label.startsWith("model:"));
+    expect(modelLabels.sort()).toEqual(pricingRows.map((row) => row.label).sort());
+    for (const label of modelLabels) {
+      expect(provisionedLabels.has(label), label).toBe(true);
+      expect(criteria[label]).toMatchObject({
+        criteria: expect.stringContaining("chosen provider under docs/model-guidance.md"),
+        guidance: expect.stringContaining("docs/model-guidance.md"),
+      });
+    }
+  });
+
+  it("wires provider selection into grooming while preserving override guards", () => {
+    expect(groomPrompt).toContain("Provider selection during grooming");
+    expect(groomPrompt).toContain("a provisioned OpenAI model, or a provisioned xAI model");
+    expect(groomPrompt).toContain("otherwise retain the Anthropic fallback");
+    expect(groomPrompt).toContain("skip model label selection entirely");
+    expect(groomPrompt).toContain("Preserve them unchanged");
+    expect(groomPrompt).toContain("not one per provider");
+    expect(groomPrompt).not.toContain("never a named vendor model");
+    expect(guidance).not.toContain("The groomer selects only");
   });
 
   it.each(pricingRows)("recomputes the uncached token budget for $label", ({ cells, rates }) => {
@@ -57,14 +84,17 @@ describe("model guidance consistency", () => {
     expect(total).toBeCloseTo((20_000 * input + 5_000 * output) / 1_000_000, 4);
   });
 
-  it("uses only provisioned labels and grooming tiers in the task matrix", () => {
+  it("provides provisioned grooming choices for every provider in each task class", () => {
     expect(matrixRows.length).toBeGreaterThan(0);
     for (const row of matrixRows) {
       const cells = row.split("|").slice(1, -1).map((cell) => cell.trim());
-      const tier = cells[1].replaceAll("`", "");
-      expect(criteria).toHaveProperty(tier);
+      expect(cells).toHaveLength(5);
+      expect(cells[1]).toMatch(/`model:(haiku|sonnet|opus)`/);
+      expect(cells[2]).toContain("`model:gpt-");
+      expect(cells[3]).toContain("`model:grok-");
       for (const match of row.matchAll(/`(model:[^`]+)`/g)) {
         expect(provisionedLabels.has(match[1]), match[1]).toBe(true);
+        expect(Object.hasOwn(criteria, match[1]), match[1]).toBe(true);
       }
     }
   });
