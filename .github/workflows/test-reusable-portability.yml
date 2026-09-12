@@ -13,10 +13,12 @@ name: Test reusable-workflow helper resolution
 # the runner populates $GITHUB_WORKSPACE with the caller's repository — not
 # this repo — so any "uses: ./.github/actions/<name>" step would resolve
 # against a tree that lacks those actions. The fix (Decision 1 in
-# docs/design/reusable-workflow-helper-resolution.md) is a self-checkout at
-# github.job_workflow_sha into a _agentic-workflow/ subdirectory before any
-# composite action is invoked; every subsequent step references helpers via
-# "./_agentic-workflow/.github/actions/<name>".
+# docs/design/reusable-workflow-helper-resolution.md) is a self-checkout into
+# a _agentic-workflow/ subdirectory before any composite action is invoked;
+# every subsequent step references helpers via
+# "./_agentic-workflow/.github/actions/<name>". The checkout ref is governed by
+# the helpers-ref input (see docs/design/helper-checkout-job-workflow-sha-context.md
+# and AGENTS.md § Known traps for why github.job_workflow_sha is being replaced).
 #
 # This workflow contains two jobs:
 #   reusable-portability-test  — shell simulation of the cross-repo call;
