@@ -179,6 +179,16 @@ locals {
       description = "Run agents pinned to Claude 3 Haiku snapshot 2024-03-07 (overrides DEFAULT_MODEL)."
     }
 
+    # OpenAI models — flat allowlist kept in one-to-one sync with the openai)
+    # case-arm in resolve_provider() in both entrypoints per
+    # docs/design/multi-provider-models.md. Add new models to all three in the
+    # same PR. Sourced from https://platform.openai.com/docs/models at
+    # implementation time (September 2026); focus on models useful for software
+    # tasks per docs/design/multi-provider-models.md requirement 4.
+    "model:gpt-6-astra" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with OpenAI gpt-6-astra (overrides DEFAULT_MODEL)."
+    }
     "model:gpt-5.6-sol" = {
       color       = "1d76db"
       description = "Run agents on this issue with OpenAI gpt-5.6-sol (overrides DEFAULT_MODEL)."
@@ -190,14 +200,6 @@ locals {
     "model:gpt-5.6-luna" = {
       color       = "1d76db"
       description = "Run agents on this issue with OpenAI gpt-5.6-luna (overrides DEFAULT_MODEL)."
-    }
-    "model:gpt-5" = {
-      color       = "1d76db"
-      description = "Run agents on this issue with OpenAI gpt-5 (overrides DEFAULT_MODEL)."
-    }
-    "model:o3" = {
-      color       = "1d76db"
-      description = "Run agents on this issue with OpenAI o3 (overrides DEFAULT_MODEL)."
     }
 
     # xAI Grok models — sourced from `grok models` at Grok Build CLI v1.0.13

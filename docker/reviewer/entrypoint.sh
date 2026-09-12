@@ -56,14 +56,14 @@ resolve_provider() {
         sonnet|opus|haiku|claude-*)
             echo "anthropic"
             ;;
-        gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-5|o3)
+        gpt-6-astra|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna)
             echo "openai"
             ;;
         grok-4.20-0309-non-reasoning|grok-4.20-0309-reasoning|grok-4.20-multi-agent-0309|grok-4.3|grok-4.5|grok-4.6|grok-build-0.1)
             echo "xai"
             ;;
         *)
-            log "ERROR: Unknown model '${model}'. Anthropic models must be one of the aliases 'sonnet', 'opus', 'haiku', or a model ID beginning with 'claude-' (e.g. 'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', 'claude-3-5-haiku-latest'). Other supported values: gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-5, o3, grok-4.20-0309-non-reasoning, grok-4.20-0309-reasoning, grok-4.20-multi-agent-0309, grok-4.3, grok-4.5, grok-4.6, grok-build-0.1" >&2
+            log "ERROR: Unknown model '${model}'. Anthropic models must be one of the aliases 'sonnet', 'opus', 'haiku', or a model ID beginning with 'claude-' (e.g. 'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', 'claude-3-5-haiku-latest'). Other supported values: gpt-6-astra, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, grok-4.20-0309-non-reasoning, grok-4.20-0309-reasoning, grok-4.20-multi-agent-0309, grok-4.3, grok-4.5, grok-4.6, grok-build-0.1" >&2
             exit 1
             ;;
     esac
