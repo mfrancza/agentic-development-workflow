@@ -70,6 +70,8 @@ describe("model guidance consistency", () => {
     expect(groomPrompt).toContain("otherwise retain the Anthropic fallback");
     expect(groomPrompt).toContain("skip model label selection entirely");
     expect(groomPrompt).toContain("Preserve them unchanged");
+    expect(groomPrompt).toContain("Existing per-agent overrides also block generic model selection");
+    expect(groomPrompt).toContain("do not add a generic model label alongside them");
     expect(groomPrompt).toContain("not one per provider");
     expect(groomPrompt).not.toContain("never a named vendor model");
     expect(guidance).not.toContain("The groomer selects only");

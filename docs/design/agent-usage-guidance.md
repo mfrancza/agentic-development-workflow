@@ -229,7 +229,7 @@ and confusing.
 ### Decision 6: Anthropic tiers only; cross-provider mapping deferred
 
 **Status (September 12, 2026).** Superseded by the cross-provider grooming guidance in
-[`docs/model-guidance.md`](../model-guidance.md), following the review on PR #567.
+[`docs/model-guidance.md`](../model-guidance.md), following the model-guidance refresh.
 Grooming now supports provisioned OpenAI and xAI models as well as Anthropic tier aliases,
 while preserving existing labels and the Anthropic fallback when no provider is requested.
 The original decision and rationale below are retained as history.
