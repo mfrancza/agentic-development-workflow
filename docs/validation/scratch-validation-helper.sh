@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # scratch-validation-helper.sh
 #
 # Scratch helper used during end-to-end validation of the respond-review
@@ -11,7 +12,7 @@
 fetch_runs() {
     pr=$1
     gh run list --workflow=agent-respond-review.yml \
-        --branch "$(gh pr view $pr --json headRefName --jq .headRefName)" \
+        --branch "$(gh pr view "$pr" --json headRefName --jq .headRefName)" \
         --limit 10 \
         --json databaseId,conclusion,status,createdAt
 }
@@ -21,8 +22,8 @@ fetch_runs() {
 # present in the run's job list at all (or has status 'skipped').
 check_guard1() {
     run_id=$1
-    jobs=$(gh run view $run_id --json jobs)
-    echo $jobs | python3 -c "
+    jobs=$(gh run view "$run_id" --json jobs)
+    echo "$jobs" | python3 -c "
 import sys, json
 d = json.load(sys.stdin)
 for job in d['jobs']:
@@ -35,6 +36,6 @@ summarize() {
     echo "=== Guard validation summary ==="
     echo "Case 1 (Guard 1): run IDs where respond-review job was skipped:"
     for run in "$@"; do
-        check_guard1 $run
+        check_guard1 "$run"
     done
 }
