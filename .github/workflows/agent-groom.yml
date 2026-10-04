@@ -7,10 +7,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: agent-groom-issue-${{ github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
   groom:
     # Gate on the agent:groom label name and sender allowlist. Triggering on
@@ -26,6 +22,9 @@ jobs:
       github.event.label.name == 'agent:groom' &&
       github.event.issue.state == 'open' &&
       contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+    concurrency:
+      group: agent-groom-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
     uses: ./.github/workflows/agent-groom-reusable.yml
     with:
       issue-number: ${{ github.event.issue.number }}

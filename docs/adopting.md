@@ -531,16 +531,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: agent-groom-issue-${{ github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
   groom:
     if: >
       github.event.label.name == 'agent:groom' &&
       github.event.issue.state == 'open' &&
       contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+    concurrency:
+      group: agent-groom-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-groom-reusable.yml@v0
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -674,16 +673,15 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: agent-implement-issue-${{ github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
   implement:
     if: >
       github.event.label.name == 'agent:developer' &&
       github.event.issue.state == 'open' &&
       contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+    concurrency:
+      group: agent-implement-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@v0
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -736,10 +734,6 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: agent-review-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   review:
     # Exclude fork-headed PRs on both event paths.
@@ -753,6 +747,9 @@ jobs:
         (github.event.action == 'synchronize' &&
          contains(github.event.pull_request.labels.*.name, 'agent:review'))
       )
+    concurrency:
+      group: agent-review-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write

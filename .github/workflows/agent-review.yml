@@ -15,10 +15,6 @@ on:
 # with no permissions.
 permissions: {}
 
-concurrency:
-  group: agent-review-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   review:
     # Gate differently per event type:
@@ -62,6 +58,9 @@ jobs:
         (github.event.action == 'synchronize' &&
          contains(github.event.pull_request.labels.*.name, 'agent:review'))
       )
+    concurrency:
+      group: agent-review-pr-${{ github.event.pull_request.number }}
+      cancel-in-progress: false
     # contents: write + pull-requests: write are forwarded to the reusable so
     # the resolve-review-threads step can call the resolveReviewThread GraphQL
     # mutation with the workflow GITHUB_TOKEN (see agent-review-reusable.yml).

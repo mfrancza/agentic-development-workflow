@@ -7,10 +7,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: agent-implement-issue-${{ github.event.issue.number }}
-  cancel-in-progress: false
-
 jobs:
   implement:
     # Gate on the user who applied the label, not who opened the issue. The
@@ -26,6 +22,9 @@ jobs:
       github.event.label.name == 'agent:developer' &&
       github.event.issue.state == 'open' &&
       contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+    concurrency:
+      group: agent-implement-issue-${{ github.event.issue.number }}
+      cancel-in-progress: false
     uses: ./.github/workflows/agent-implement-reusable.yml
     with:
       issue-number: ${{ github.event.issue.number }}
