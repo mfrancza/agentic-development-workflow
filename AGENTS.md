@@ -57,17 +57,22 @@ See [`requirements.md`](requirements.md) for the full project specification and 
      condition where a human approves and merges within seconds, the head branch is auto-deleted, and the
      container would otherwise fail at checkout. On API error the check fails open and proceeds to the
      feedback checks below.
-   - **Non-approval states** (changes_requested, commented, …) always proceed.
-   - **Zero unresolved PR review threads** (primary check for approved reviews): threads are the ground
-     truth for outstanding feedback; body text and inline comments on an approval are advisory when nothing
-     remains open, so this check comes first and covers summary-carrying clean approvals too.
-   - **Bare approval** (no body text, no inline review comments): fallback used when the unresolved-thread
-     query fails, to skip when there is provably nothing to respond to.
+   - **Self-authored review** (Guard 2, defence in depth): if the review author equals the PR author, skip
+     unconditionally regardless of review state. This closes the self-trigger loop at the activity layer as
+     a second defence behind the workflow-level allowlist gate.
+   - **Non-approval, non-commented states** (changes_requested, dismissed, …) always proceed.
+   - **Zero unresolved PR review threads** (primary check for `approved` and `commented` reviews): threads
+     are the ground truth for outstanding feedback; body text and inline comments are advisory when nothing
+     remains open, so this check comes first and covers both summary-carrying clean approvals and comment-
+     only reviews where all threads have been resolved.
+   - **Bare approval** (no body text, no inline review comments): fallback used only for `approved` reviews
+     when the unresolved-thread query fails, to skip when there is provably nothing to respond to.
 
-   The unresolved-thread and bare-approval checks have distinct error behaviors: a GraphQL error on the
-   primary check falls through to the bare-approval fallback (which may still skip) rather than proceeding
-   immediately; an inline-comment API error on the fallback check fails open so the workflow proceeds
-   rather than silently suppress a response.
+   The unresolved-thread and bare-approval checks have distinct error behaviors that differ by review state:
+   for `commented` reviews a GraphQL error on the primary check fails open immediately — there is no
+   bare-approval fallback; for `approved` reviews a GraphQL error falls through to the bare-approval
+   fallback (which may still skip) rather than proceeding immediately. An inline-comment API error on the
+   bare-approval fallback fails open so the workflow proceeds rather than silently suppress a response.
 6. A push to `main` that makes one or more open developer-agent PRs conflicted triggers the `agent-resolve-conflicts` workflow (`AGENT_ACTION=resolve-conflicts`). The workflow enumerates open PRs authored by the developer agent, polls each PR's `mergeable` field until GitHub finishes computing it, and runs the developer container once per conflicted PR. Each conflicted PR is resolved in its own parallel matrix job; a per-PR concurrency group (`agent-resolve-conflicts-pr-<N>`, `cancel-in-progress: false`) ensures a subsequent push to `main` does not cancel an already-running resolution, and `fail-fast: false` ensures a failed resolution for one PR does not abort the others. The container attempts a semantic merge (Claude resolves the conflict markers), verifies no markers remain, and pushes the merge commit. If the agent exits unexpectedly or verification fails, the merge is aborted, both `conflicts-escalated` and `human-required` labels are applied (and the configured `ESCALATION_ASSIGNEE` assigned), and a PR comment describes which files need manual attention. PRs already carrying `conflicts-escalated` are skipped (a prior resolution attempt already escalated; remove the label to re-attempt); PRs carrying only `human-required` are resolved normally. `workflow_dispatch` with a `pr_number` input is available as a manual backstop; when provided, enumeration is skipped and only that PR is resolved.
 7. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
 
