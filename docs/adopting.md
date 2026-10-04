@@ -199,28 +199,38 @@ gh secret set OPENAI_API_KEY            --body "<key>"   # required for OpenAI m
 gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok models
 ```
 
-> **Which keys do I need?** Set only the LLM API keys for the providers you use.
-> If your `DEFAULT_MODEL` is `sonnet`, `opus`, `haiku`, or any `claude-*` model,
-> set `ANTHROPIC_API_KEY` only. Set `OPENAI_API_KEY` only if you plan to use
-> OpenAI models, and `XAI_API_KEY` only for Grok models. The caller stubs pass
-> every provider key by name: `${{ secrets.OPENAI_API_KEY }}` evaluates to an
-> empty string when the secret is unset, the reusable's `required: false`
-> declaration accepts the empty value, and the container validates at runtime that
-> the key for the selected model is present. See the per-reusable **Prerequisites**
-> sections below for which secrets each reusable requires.
->
-> **Cross-org constraint:** `secrets: inherit` only propagates secrets to a
-> reusable workflow when both the caller and the reusable live in the **same**
-> GitHub organization. Because the reusables in this project live in the
-> `mfrancza` organization, callers in any other org must pass each secret
-> explicitly by name — `secrets: inherit` silently passes nothing, and the
-> reusable fails immediately with:
+> **Which keys do I need?** These reusable workflows live in the `mfrancza`
+> organization. If your repository is in a **different organization** (or is a
+> personal-account repo), `secrets: inherit` does not propagate any secrets
+> across the org boundary — the reusable will fail immediately with:
 > ```
 > Secret DEVELOPER_APP_ID is required, but not provided while calling
 > ```
-> The caller stubs in this guide already use the explicit form. **Do not replace
-> the explicit `secrets:` blocks with `secrets: inherit`** — it will break for
-> any caller outside the `mfrancza` org.
+> The caller stubs in this guide therefore use an explicit `secrets:` block that
+> names every secret by name, which works for both same-org and cross-org callers:
+>
+> ```yaml
+> secrets:
+>   DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+>   DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+>   ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+>   OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+>   XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+> ```
+>
+> **Do not replace the explicit `secrets:` blocks with `secrets: inherit`** — it
+> will break for any caller outside the `mfrancza` org.
+>
+> **Which provider keys do you actually need to set?** Only the key for the
+> provider(s) you use. If your `DEFAULT_MODEL` is `sonnet`, `opus`, or `haiku`
+> (or any `claude-*` model), set `ANTHROPIC_API_KEY` only. Set `OPENAI_API_KEY`
+> only for OpenAI models and `XAI_API_KEY` only for Grok models. The explicit
+> `secrets:` block still names all three keys, but
+> `${{ secrets.OPENAI_API_KEY }}` evaluates to an empty string when the secret
+> is unset — the reusable declares those keys `required: false` and the
+> container validates only that the key for the *selected* model is present.
+> Per-reusable required/optional splits are listed in the **Prerequisites**
+> section of each reusable below.
 
 **Secrets inventory per reusable** (source of truth: each reusable's own `secrets:` block)
 
