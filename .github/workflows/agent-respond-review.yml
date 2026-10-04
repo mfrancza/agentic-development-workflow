@@ -14,12 +14,17 @@ concurrency:
 
 jobs:
   respond-review:
-    # Only respond to submitted reviews on PRs authored by the developer agent
-    # AND written by a trusted review author. Both gates are required:
+    # Only respond to submitted reviews on PRs authored by the developer agent,
+    # where the review was NOT authored by the PR author, AND where the review
+    # was written by a trusted review author. All three gates are required:
     #
     #   PR-author gate — restricts responses to agent-authored PRs so the
     #     developer agent never spends its Anthropic budget or contents-write
     #     token responding to reviews on human-authored PRs.
+    #
+    #   PR-author self-review exclusion — rejects reviews authored by the PR
+    #     author (the developer agent in every eligible case today), closing the
+    #     respond-review self-trigger loop (issue #570).
     #
     #   Review-author gate — the review body and inline comments are
     #     attacker-controlled text that flows into a Claude prompt with a
@@ -42,6 +47,7 @@ jobs:
     # reviews, so no need to repeat that check here.
     if: >
       github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]' &&
+      github.event.review.user.login != github.event.pull_request.user.login &&
       (
         contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.review.user.login) ||
         github.event.review.user.login == 'mfrancza-reviewer-agent[bot]' ||
@@ -56,6 +62,8 @@ jobs:
       review-body: ${{ github.event.review.body }}
       review-id: ${{ github.event.review.id }}
       repo-name: ${{ github.event.repository.name }}
+      review-author: ${{ github.event.review.user.login }}
+      pr-author: ${{ github.event.pull_request.user.login }}
       image: ''
       helpers-ref: ${{ github.sha }}
     secrets: inherit

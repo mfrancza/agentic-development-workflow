@@ -39,6 +39,14 @@ on:
         description: 'Repository name without owner prefix (github.event.repository.name)'
         type: string
         required: true
+      review-author:
+        description: 'GitHub login of the review author (github.event.review.user.login)'
+        type: string
+        required: true
+      pr-author:
+        description: 'GitHub login of the PR author (github.event.pull_request.user.login)'
+        type: string
+        required: true
       image:
         description: >
           Pre-built agent image reference to pull (e.g.
@@ -160,6 +168,8 @@ jobs:
           pr-number: ${{ inputs.pr-number }}
           repo-owner: ${{ github.repository_owner }}
           repo-name: ${{ inputs.repo-name }}
+          review-author: ${{ inputs.review-author }}
+          pr-author: ${{ inputs.pr-author }}
 
       # Mint only after we've decided to proceed — no installation token for runs we skip.
       - name: Mint installation token for developer-agent

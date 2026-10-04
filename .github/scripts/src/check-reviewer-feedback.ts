@@ -19,6 +19,10 @@ export interface FeedbackCheckInput {
   owner: string;
   /** Repository name. */
   repo: string;
+  /** GitHub login of the review author (github.event.review.user.login). */
+  reviewAuthor: string;
+  /** GitHub login of the PR author (github.event.pull_request.user.login). */
+  prAuthor: string;
 }
 
 /**
@@ -55,16 +59,22 @@ export interface FeedbackCheckResult {
 
 /**
  * Determines whether the `agent-respond-review` workflow should proceed or
- * skip, replicating the ~85-line inline shell script in agent-respond-review.yml.
+ * skip, applying defence-in-depth guards to close the respond-review self-trigger
+ * loop at the activity layer.
  *
  * Decision flow:
  *  0. PR is not open (closed or merged) — skip immediately; a review on a
  *     closed/merged PR never needs a response. On API error, fail open and
  *     continue to the feedback checks.
- *  1. Non-approval reviews always proceed (changes_requested, commented, …).
- *  2. Approved review — primary check: count unresolved PR review threads via
- *     GraphQL. Zero threads → skip; non-zero → proceed. On error, fall through.
- *  3. Approved review — bare-approval fallback (only reached when step 2 errored):
+ *  1. Review author equals PR author — skip unconditionally (defence in depth;
+ *     the PR author's own reviews require no response regardless of state).
+ *  2. Non-approval, non-commented states (changes_requested, dismissed, …) —
+ *     always proceed.
+ *  3. Commented or approved review — count unresolved PR review threads via
+ *     GraphQL. Zero threads → skip; non-zero → proceed. On error:
+ *       - commented: fail open (proceed) immediately — no bare-approval fallback.
+ *       - approved: fall through to the bare-approval fallback (step 4).
+ *  4. Approved review — bare-approval fallback (only reached when step 3 errored):
  *       - No body text AND inline comment count is zero and confirmed → skip.
  *       - Body present, inline count > 0, or inline count unknown → proceed.
  *     Inline-comment API errors fail open (proceed) to avoid silently suppressing
@@ -74,7 +84,7 @@ export async function checkReviewerFeedback(
   input: FeedbackCheckInput,
   deps: FeedbackCheckDeps,
 ): Promise<FeedbackCheckResult> {
-  const { state, body } = input;
+  const { state, body, reviewAuthor, prAuthor } = input;
 
   // --- Step 0: skip if PR is no longer open (closed or merged) ---
   let prState: string | undefined;
@@ -92,15 +102,26 @@ export async function checkReviewerFeedback(
     };
   }
 
-  // --- Step 1: non-approval states always proceed ---
-  if (state.toLowerCase() !== "approved") {
+  // --- Step 1: skip if the review was authored by the PR author (defence in depth) ---
+  if (reviewAuthor === prAuthor) {
+    return {
+      proceed: false,
+      reason: `Review author '${reviewAuthor}' is the same as PR author '${prAuthor}'; skipping respond-review — self-authored reviews require no response.`,
+    };
+  }
+
+  const stateLower = state.toLowerCase();
+
+  // --- Step 2: non-approval, non-commented states always proceed ---
+  if (stateLower !== "approved" && stateLower !== "commented") {
     return {
       proceed: true,
       reason: `Review state is '${state}'; proceeding.`,
     };
   }
 
-  // --- Step 2: primary check — unresolved thread count via GraphQL ---
+  // --- Step 3: primary check — unresolved thread count via GraphQL ---
+  // Applies to both 'approved' and 'commented' reviews.
   let unresolvedCount: number | undefined;
   try {
     unresolvedCount = await deps.countUnresolvedThreads();
@@ -108,7 +129,6 @@ export async function checkReviewerFeedback(
     core.warning(
       `Failed to fetch unresolved thread count: ${err instanceof Error ? err.message : String(err)}`,
     );
-    // Fall through to the bare-approval fallback below.
   }
 
   if (unresolvedCount !== undefined) {
@@ -116,20 +136,36 @@ export async function checkReviewerFeedback(
       return {
         proceed: false,
         reason:
-          "Approval with zero unresolved threads; skipping respond-review.",
+          stateLower === "commented"
+            ? "Commented review with zero unresolved threads; skipping respond-review."
+            : "Approval with zero unresolved threads; skipping respond-review.",
       };
     }
     return {
       proceed: true,
-      reason: `Approval with ${unresolvedCount} unresolved thread(s); proceeding.`,
+      reason:
+        stateLower === "commented"
+          ? `Commented review with ${unresolvedCount} unresolved thread(s); proceeding.`
+          : `Approval with ${unresolvedCount} unresolved thread(s); proceeding.`,
     };
   }
 
+  // Thread count is unavailable (GraphQL error or unexpected undefined).
+  if (stateLower === "commented") {
+    // Fail open for 'commented' — no bare-approval fallback.
+    return {
+      proceed: true,
+      reason:
+        "Commented review; unresolved thread count unavailable; proceeding.",
+    };
+  }
+
+  // Only reached for 'approved' with an unavailable thread count.
   core.info(
     "Unresolved thread count is non-numeric or unavailable; falling through to bare-approval check.",
   );
 
-  // --- Step 3: bare-approval fallback ---
+  // --- Step 4: bare-approval fallback (approved only) ---
 
   // Check whether the review body carries any non-whitespace content.
   const hasBody = body.replace(/\s/g, "").length > 0;
@@ -295,11 +331,13 @@ async function run(): Promise<void> {
   const prNumber = parseInt(core.getInput("pr_number", { required: true }), 10);
   const owner = core.getInput("repo_owner", { required: true });
   const repo = core.getInput("repo_name", { required: true });
+  const reviewAuthor = core.getInput("review_author", { required: true });
+  const prAuthor = core.getInput("pr_author", { required: true });
 
   const octokit = getOctokit(token);
 
   const result = await checkReviewerFeedback(
-    { state, body, reviewId, prNumber, owner, repo },
+    { state, body, reviewId, prNumber, owner, repo, reviewAuthor, prAuthor },
     {
       getPrState: makePrStateGetter(octokit, owner, repo, prNumber),
       countUnresolvedThreads: makeUnresolvedThreadCounter(
