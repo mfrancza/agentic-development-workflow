@@ -199,12 +199,33 @@ gh secret set OPENAI_API_KEY            --body "<key>"   # required for OpenAI m
 gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok models
 ```
 
-> **Which keys do I need?** If your `DEFAULT_MODEL` is `sonnet`, `opus`, or `haiku`
+> **Which keys do I need?** These reusable workflows live in the `mfrancza`
+> organization. If your repository is in a **different organization** (or is a
+> personal-account repo), `secrets: inherit` does not propagate any secrets
+> across the org boundary — the reusable will fail immediately with "Secret
+> DEVELOPER_APP_ID is required, but not provided." The caller stubs in this
+> guide therefore use an explicit `secrets:` block that names every secret by
+> name, which works for both same-org and cross-org callers:
+>
+> ```yaml
+> secrets:
+>   DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+>   DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+>   ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+>   OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+>   XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+> ```
+>
+> **Which provider keys do you actually need to set?** Only the key for the
+> provider(s) you use. If your `DEFAULT_MODEL` is `sonnet`, `opus`, or `haiku`
 > (or any `claude-*` model), set `ANTHROPIC_API_KEY` only. Set `OPENAI_API_KEY`
-> only if you plan to use OpenAI models via `model:o3` labels, and `XAI_API_KEY`
-> only for Grok models. The reusable workflows use `secrets: inherit`, so any
-> secret not set in your repository is simply absent — the validation happens
-> inside the container, not at workflow-dispatch time.
+> only for OpenAI models and `XAI_API_KEY` only for Grok models. The explicit
+> `secrets:` block still names all three keys, but
+> `${{ secrets.OPENAI_API_KEY }}` evaluates to an empty string when the secret
+> is unset — the reusable declares those keys `required: false` and the
+> container validates only that the key for the *selected* model is present.
+> Per-reusable required/optional splits are listed in the **Prerequisites**
+> section of each reusable below.
 
 ### Terraform provider config
 
@@ -549,7 +570,12 @@ jobs:
       admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}
       logs-retention-days: 30
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** The reusable mints a short-lived developer-agent
@@ -619,7 +645,12 @@ jobs:
       default-model: ${{ vars.DEFAULT_MODEL }}
       logs-retention-days: 30
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 
   call-undraft:
     if: >
@@ -632,7 +663,12 @@ jobs:
       pr-head-ref: ${{ github.event.pull_request.head.ref }}
       repo: ${{ github.repository }}
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** Same as `agent-groom`: short-lived token minted from
@@ -691,7 +727,12 @@ jobs:
       code-reviewers: ${{ vars.CODE_REVIEWERS }}
       logs-retention-days: 30
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
@@ -761,7 +802,12 @@ jobs:
       default-model: ${{ vars.DEFAULT_MODEL }}
       logs-retention-days: 30
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      REVIEWER_APP_ID:          ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:        ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:           ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:              ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** The reviewer App token has Contents (R) only — the
@@ -827,7 +873,12 @@ jobs:
       repo-name: ${{ github.event.repository.name }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
 
 > **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` and
@@ -888,7 +939,12 @@ jobs:
       agent-login: <developer-agent-slug>[bot]
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
 
 > **Adapt `agent-login`** to your developer-agent App's bot login (e.g.
@@ -946,7 +1002,12 @@ jobs:
       deployment-sha: ${{ github.event.deployment.sha }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** The reusable requires `actions: read` (to list
@@ -1000,7 +1061,12 @@ jobs:
       escalation-assignee: ${{ github.repository_owner }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
@@ -1078,7 +1144,9 @@ jobs:
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-pr-merged-reusable.yml@v0
     with:
       issue-number: ${{ needs.extract-issue-number.outputs.issue_number }}
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 ```
 
 > **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` with
@@ -1148,7 +1216,9 @@ jobs:
       transition: auto-groom
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   auto-design:
     if: >
@@ -1163,7 +1233,9 @@ jobs:
       transition: auto-design
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   auto-developer-do:
     if: >
@@ -1179,7 +1251,9 @@ jobs:
       transition: auto-developer-do
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   auto-developer-undraft:
     if: >
@@ -1194,7 +1268,9 @@ jobs:
       transition: auto-developer-undraft
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   auto-review:
     if: >
@@ -1210,7 +1286,9 @@ jobs:
       transition: auto-review
       pr-number: ${{ github.event.pull_request.number }}
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   auto-developer-unblock:
     if: >
@@ -1224,7 +1302,9 @@ jobs:
       transition: auto-developer-unblock
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 ```
 
 **Trust considerations.** Each transition mints a short-lived developer-agent
