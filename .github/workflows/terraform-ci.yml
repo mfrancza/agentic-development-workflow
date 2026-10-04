@@ -58,7 +58,10 @@ jobs:
       event: pull_request
       pr-number: ${{ github.event.pull_request.number }}
       head-sha: ${{ github.event.pull_request.head.sha }}
-    secrets: inherit
+    secrets:
+      TERRAFORM_APP_ID:          ${{ secrets.TERRAFORM_APP_ID }}
+      TERRAFORM_APP_PRIVATE_KEY: ${{ secrets.TERRAFORM_APP_PRIVATE_KEY }}
+      TF_API_TOKEN:              ${{ secrets.TF_API_TOKEN }}
 
   apply:
     if: github.event_name == 'push'
@@ -72,4 +75,7 @@ jobs:
     uses: ./.github/workflows/terraform-ci-reusable.yml
     with:
       event: push
-    secrets: inherit
+    secrets:
+      TERRAFORM_APP_ID:          ${{ secrets.TERRAFORM_APP_ID }}
+      TERRAFORM_APP_PRIVATE_KEY: ${{ secrets.TERRAFORM_APP_PRIVATE_KEY }}
+      TF_API_TOKEN:              ${{ secrets.TF_API_TOKEN }}

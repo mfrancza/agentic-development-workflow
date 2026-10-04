@@ -71,4 +71,6 @@ jobs:
     uses: ./.github/workflows/agent-pr-merged-reusable.yml
     with:
       issue-number: ${{ needs.extract-issue-number.outputs.issue_number }}
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}

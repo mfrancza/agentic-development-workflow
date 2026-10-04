@@ -75,4 +75,9 @@ jobs:
       default-model: ${{ vars.DEFAULT_MODEL }}
       logs-retention-days: 30
       helpers-ref: ${{ github.sha }}
-    secrets: inherit
+    secrets:
+      REVIEWER_APP_ID:          ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:        ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:           ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:              ${{ secrets.XAI_API_KEY }}

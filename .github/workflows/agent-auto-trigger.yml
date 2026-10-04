@@ -56,7 +56,9 @@ jobs:
       transition: auto-groom
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 2 ─────────────────────────────────────────────────────────────
   # issues.labeled (plan) → agent:design
@@ -77,7 +79,9 @@ jobs:
       transition: auto-design
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 3 ─────────────────────────────────────────────────────────────
   # issues.labeled (do) → agent:developer
@@ -107,7 +111,9 @@ jobs:
       transition: auto-developer-do
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 4 ─────────────────────────────────────────────────────────────
   # issues.unlabeled (draft) → agent:developer
@@ -129,7 +135,9 @@ jobs:
       transition: auto-developer-undraft
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 5 ─────────────────────────────────────────────────────────────
   # pull_request.opened on an agent/… or design/… branch (same-repo) → agent:review
@@ -156,7 +164,9 @@ jobs:
       transition: auto-review
       pr-number: ${{ github.event.pull_request.number }}
       helpers-ref: ${{ github.sha }}
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 6 ─────────────────────────────────────────────────────────────
   # issues.closed → agent:developer (cascade on newly-unblocked issues)
@@ -195,4 +205,6 @@ jobs:
       transition: auto-developer-unblock
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
-    secrets: inherit
+    secrets:
+      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
