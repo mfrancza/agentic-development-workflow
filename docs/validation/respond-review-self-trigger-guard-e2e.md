@@ -4,7 +4,8 @@
 guards introduced in issues #571, #572, and #573.  All three implementation PRs
 merged before this validation began (#576 Guard 1, #577 AGENTS.md, #578 Guard 2).
 
-**Issue:** [#574](https://github.com/mfrancza/agentic-development-workflow/issues/574)
+**Issue:** [#574](https://github.com/mfrancza/agentic-development-workflow/issues/574)  
+**Scratch PR:** [#579](https://github.com/mfrancza/agentic-development-workflow/pull/579)
 
 ---
 
@@ -12,89 +13,81 @@ merged before this validation began (#576 Guard 1, #577 AGENTS.md, #578 Guard 2)
 
 Six cases, as specified in issue #574.
 
-| Case | Guard | Trigger | Expected outcome |
-|------|-------|---------|-----------------|
-| 1 | Guard 1 (caller `if:`) | Developer-agent thread reply on own PR | `respond-review` job skipped at gate |
-| 2 | Guard 2 (activity) | Human `COMMENTED` review, 0 unresolved threads | `check-reviewer-feedback` skips; no token minted |
-| 3 | Guard 2 (positive path) | Human `COMMENTED` review, ≥1 unresolved thread | Container runs; agent posts reply |
-| 4 | Regression | Human `CHANGES_REQUESTED` review | Agent proceeds unconditionally |
-| 5 | Regression | Human `APPROVED`, 0 threads | `check-reviewer-feedback` skips (existing zero-threads path) |
-| 6 | Doc check | Spot-check AGENTS.md § step 5 | Matches live run behaviour |
+| Case | Guard | Trigger | Expected outcome | Status |
+|------|-------|---------|-----------------|--------|
+| 1 | Guard 1 (caller `if:`) | Developer-agent thread reply on own PR | `respond-review` job skipped at gate | ✅ PASS |
+| 2 | Guard 2 (activity) | Human `COMMENTED` review, 0 unresolved threads | `check-reviewer-feedback` skips; no token minted | ⏳ pending mfrancza action |
+| 3 | Guard 2 (positive path) | Human `COMMENTED` review, ≥1 unresolved thread | Container runs; agent posts reply | ⏳ pending mfrancza action |
+| 4 | Regression | Human `CHANGES_REQUESTED` review | Agent proceeds unconditionally | ✅ PASS |
+| 5 | Regression | Human `APPROVED`, 0 threads | `check-reviewer-feedback` skips (existing zero-threads path) | ✅ PASS |
+| 6 | Doc check | Spot-check AGENTS.md § step 5 | Matches live run behaviour | ✅ PASS |
 
 ---
 
 ## Evidence
 
-### Case 6 — AGENTS.md § MVP Workflow step 5 spot-check
+### Case 1 — Guard 1 (caller `if:`) catches the self-reply loop ✅ PASS
 
-**Result: PASS (pre-computed; no live run needed)**
+**Run URL:** https://github.com/mfrancza/agentic-development-workflow/actions/runs/37171225727
 
-`AGENTS.md` lines 52–79 (as of commit merged via PR #577) describe the
-`check-reviewer-feedback` decision flow in the following order, which matches
-the implementation in `.github/scripts/src/check-reviewer-feedback.ts`:
+**Mechanism:**
+1. The reviewer agent posted `CHANGES_REQUESTED` review 5403922423 with 5 inline comments on `docs/validation/scratch-validation-helper.sh` at 2026-10-04T02:27:57Z.
+2. Run 37171137502 fired (CHANGES_REQUESTED → Guard 2 proceeds unconditionally).
+3. The developer agent container ran, replied to all 5 inline threads via `gh api … /comments/{id}/replies`, and pushed fixes.
+4. GitHub synthesised 5 `COMMENTED` reviews from the replies (IDs 5403931934 through 5403932614, all authored by `mfrancza-developer-agent[bot]`), each firing `pull_request_review: submitted`.
+5. The last `COMMENTED` review triggered run 37171225727.
 
-1. **PR not open** → skip immediately (fail-open on API error).
-2. **Author equality** (Guard 2, defence in depth) → if `review-author ==
-   pr-author`, skip unconditionally regardless of review state.
-3. **Non-approval, non-commented states** (`changes_requested`, `dismissed`)
-   → proceed unconditionally.
-4. **Zero unresolved threads** (primary check for `approved` and `commented`)
-   → skip; non-zero → proceed.
-5. **Bare-approval fallback** (`approved` only, when GraphQL errors) → skip
-   if no body and no inline comments.
-
-This matches Decision 4 from the design doc and the updated AGENTS.md wording
-introduced by PR #577 / issue #573. ✓
+**Key evidence:**
+- **Run conclusion:** `skipped`
+- **Job conclusion:** `skipped`
+- **Steps executed:** `[]` (empty — zero steps ran; no runner was allocated for the job)
+- **Guard 1 condition that evaluated false:** `github.event.review.user.login ('mfrancza-developer-agent[bot]') != github.event.pull_request.user.login ('mfrancza-developer-agent[bot]')` → `false` → job skipped.
 
 ---
 
-### Case 4 — CHANGES_REQUESTED no regression
+### Case 2 — Guard 2: COMMENTED with zero unresolved threads ⏳ PENDING
 
-**Result: PASS — evidence from PR #578 (implementation branch)**
+Awaiting human `COMMENTED` review from `mfrancza` on scratch PR #579 with no body text and all threads resolved. See evidence request in issue comment.
 
-- **Run:** https://github.com/mfrancza/agentic-development-workflow/actions/runs/37169059936
-- **Branch:** `agent/issue-572`
-- **Trigger:** `mfrancza-reviewer-agent[bot]` submitted a `CHANGES_REQUESTED`
-  review (state appears as `changes_requested` in the event payload; the
-  review was later dismissed by `mfrancza`, which changes its REST state to
-  `DISMISSED` but does not alter the original event).
+---
+
+### Case 3 — Guard 2: COMMENTED with ≥1 unresolved thread ⏳ PENDING
+
+Awaiting human `COMMENTED` review from `mfrancza` on scratch PR #579 with at least one open inline thread. See evidence request in issue comment.
+
+---
+
+### Case 4 — No regression on `CHANGES_REQUESTED` ✅ PASS (scratch PR #579)
+
+**Run URL:** https://github.com/mfrancza/agentic-development-workflow/actions/runs/37171137502
+
+- **Trigger:** `mfrancza-reviewer-agent[bot]` submitted `CHANGES_REQUESTED` on scratch PR #579 with 5 inline comments on `docs/validation/scratch-validation-helper.sh`.
 - **Key log line:** `Review state is 'changes_requested'; proceeding.`
-- **`run-agent` step:** present (job ran 2m 7s; developer-agent container
-  executed and responded to the review).
-
-Guard 2 correctly let the `CHANGES_REQUESTED` state proceed unconditionally.
-No regression. ✓
+- **Mint installation token:** ✅ ran (token minted; `proceed=true` confirmed)
+- **Run agent step:** ✅ present (developer container ran, fixed shell script issues, pushed commit)
 
 ---
 
-### Case 5 — APPROVED with zero threads no regression
+### Case 5 — No regression on `APPROVED` with zero threads ✅ PASS (scratch PR #579)
 
-**Result: PASS — evidence from PR #578 (implementation branch)**
+**Run URL:** https://github.com/mfrancza/agentic-development-workflow/actions/runs/37170959770
 
-- **Run:** https://github.com/mfrancza/agentic-development-workflow/actions/runs/37169323229
-- **Branch:** `agent/issue-572`
-- **Trigger:** `mfrancza-reviewer-agent[bot]` submitted an `APPROVED` review
-  with zero unresolved threads (the reviewer found no blocking issues on the
-  second pass after the developer agent addressed the AGENTS.md omission).
+- **Trigger:** `mfrancza-reviewer-agent[bot]` submitted `APPROVED` on scratch PR #579 (markdown-only commit; zero unresolved threads).
 - **Key log line:** `Approval with zero unresolved threads; skipping respond-review.`
-- **`run-agent` step:** absent (job completed in 48 s without minting a token
-  or running the container).
-
-Guard 2 correctly skipped the zero-threads approval. ✓
+- **Mint installation token:** ❌ absent (no token minted; 9s total duration)
+- **Run agent step:** ❌ absent (container did not run)
 
 ---
 
-### Cases 1, 2, 3 — pending live-run evidence
+### Case 6 — AGENTS.md § MVP Workflow step 5 spot-check ✅ PASS
 
-Cases 1, 2, and 3 require live runs on this scratch PR:
+**Result:** Pre-verified against `main` commit `5dfc4fd` (merge of PR #577).
 
-- **Case 1** is triggered automatically: `agent:review` applied → reviewer
-  posts inline comments → developer agent replies → GitHub synthesises
-  COMMENTED reviews from the replies → Guard 1 should skip the resulting
-  `agent-respond-review` run.
-- **Cases 2 and 3** require a human account in `vars.AGENT_ALLOWLIST`
-  (i.e. `mfrancza`) to submit `COMMENTED` reviews on this PR — one with all
-  threads resolved (Case 2) and one with at least one unresolved thread open
-  (Case 3).
+`AGENTS.md` lines 52–79 document the `check-reviewer-feedback` ordered checks:
+1. PR not open → skip (fail-open on API error).
+2. Author equality (Guard 2) → if `review-author == pr-author`, skip unconditionally.
+3. Non-approval, non-commented (`changes_requested`, `dismissed`) → proceed.
+4. Zero unresolved threads (`approved` or `commented`) → skip; non-zero → proceed.
+5. Bare-approval fallback (`approved` only, GraphQL error) → skip if nothing to respond to.
 
-Evidence will be appended to the issue comment once the runs complete.
+Matches the implementation in `.github/scripts/src/check-reviewer-feedback.ts` (Decision 4 of the design doc). ✓
