@@ -124,7 +124,7 @@ grouped by what the fix needs to do to it:
 
 | Caller stub | Calls | Current `secrets:` | Action required |
 |-------------|-------|---------------------|-----------------|
-| `agent-auto-trigger.yml` | `agent-auto-trigger-reusable.yml` | `inherit` | Explicit block (2 secrets) |
+| `agent-auto-trigger.yml` | `agent-auto-trigger-reusable.yml` (×6 jobs) | `inherit` | Explicit block (2 secrets) |
 | `agent-design.yml` | `agent-design-reusable.yml` (×2 jobs) | `inherit` | Explicit block (5 secrets) |
 | `agent-fix-checks.yml` | `agent-fix-checks-reusable.yml` | `inherit` | Explicit block (5 secrets) |
 | `agent-fix-deployment.yml` | `agent-fix-deployment-reusable.yml` | `inherit` | Explicit block (5 secrets) |
@@ -141,9 +141,10 @@ grouped by what the fix needs to do to it:
 | `release-images.yml` | *(no reusable)* | — | No change |
 | `release.yml` | *(no reusable)* | — | No change |
 | `test-action-portability.yml` | *(no reusable)* | — | No change |
+| `test-reusable-portability.yml` | *(no reusable call)* | — | No change |
 | `test-terraform-ci-trust-boundary.yml` | *(no reusable)* | — | No change |
 
-11 files change; the static test (Decision 3) covers all 18 for regression.
+11 files change; the static test (Decision 3) covers all 19 for regression.
 
 Current state of `docs/adopting.md`:
 
