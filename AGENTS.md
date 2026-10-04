@@ -57,10 +57,14 @@ See [`requirements.md`](requirements.md) for the full project specification and 
      condition where a human approves and merges within seconds, the head branch is auto-deleted, and the
      container would otherwise fail at checkout. On API error the check fails open and proceeds to the
      feedback checks below.
-   - **Self-authored review** (Guard 2, defence in depth): if the review author equals the PR author, skip
-     unconditionally regardless of review state. This closes the self-trigger loop at the activity layer as
-     a second defence behind the workflow-level allowlist gate.
-   - **Non-approval, non-commented states** (changes_requested, dismissed, …) always proceed.
+   - **Author equality** (Guard 2, defence in depth): if the review author is the same login as the PR author, skip
+     immediately — the developer agent's own thread replies are synthesised by GitHub as `COMMENTED`
+     reviews; responding to them would create a self-triggering loop. This closes the self-trigger loop
+     at the activity layer as a second defence behind the workflow-level allowlist gate.
+   - **Non-approval, non-commented states** (changes_requested, dismissed): always proceed — a `CHANGES_REQUESTED`
+     review inherently expresses dissatisfaction regardless of thread state, and `DISMISSED` typically
+     means a maintainer wants the agent to try again. `commented` is handled by the unresolved-thread
+     check below.
    - **Zero unresolved PR review threads** (primary check for `approved` and `commented` reviews): threads
      are the ground truth for outstanding feedback; body text and inline comments are advisory when nothing
      remains open, so this check comes first and covers both summary-carrying clean approvals and comment-
