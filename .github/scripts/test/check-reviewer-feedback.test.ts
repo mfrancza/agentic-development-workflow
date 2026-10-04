@@ -27,6 +27,8 @@ const BASE_INPUT: FeedbackCheckInput = {
   prNumber: 42,
   owner: "acme",
   repo: "myrepo",
+  reviewAuthor: "reviewer-bot",
+  prAuthor: "developer-bot",
 };
 
 function makeDeps(overrides?: Partial<FeedbackCheckDeps>): FeedbackCheckDeps {
@@ -117,14 +119,18 @@ describe("non-approval review states", () => {
     expect(deps.countInlineComments).not.toHaveBeenCalled();
   });
 
-  it("proceeds for 'commented' without calling any API", async () => {
-    const deps = makeDeps();
+  it("proceeds for 'commented' with unresolved threads (thread check is called)", async () => {
+    // 'commented' is now routed through the unresolved-thread check.
+    // With at least one unresolved thread the workflow proceeds.
+    const deps = makeDeps({
+      countUnresolvedThreads: vi.fn().mockResolvedValue(1),
+    });
     const result = await checkReviewerFeedback(
       { ...BASE_INPUT, state: "commented" },
       deps,
     );
     expect(result.proceed).toBe(true);
-    expect(deps.countUnresolvedThreads).not.toHaveBeenCalled();
+    expect(deps.countUnresolvedThreads).toHaveBeenCalledOnce();
     expect(deps.countInlineComments).not.toHaveBeenCalled();
   });
 
@@ -136,6 +142,94 @@ describe("non-approval review states", () => {
     );
     expect(result.proceed).toBe(true);
     expect(deps.countUnresolvedThreads).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1a. Author-equality guard (defence in depth)
+// ---------------------------------------------------------------------------
+
+describe("author-equality guard", () => {
+  it("skips a COMMENTED review authored by the PR author", async () => {
+    const deps = makeDeps();
+    const result = await checkReviewerFeedback(
+      {
+        ...BASE_INPUT,
+        state: "COMMENTED",
+        reviewAuthor: "developer-bot",
+        prAuthor: "developer-bot",
+      },
+      deps,
+    );
+    expect(result.proceed).toBe(false);
+    expect(result.reason).toMatch(/developer-bot/);
+    expect(deps.countUnresolvedThreads).not.toHaveBeenCalled();
+    expect(deps.countInlineComments).not.toHaveBeenCalled();
+  });
+
+  it("skips an APPROVED review authored by the PR author (author-equality is state-agnostic)", async () => {
+    const deps = makeDeps();
+    const result = await checkReviewerFeedback(
+      {
+        ...BASE_INPUT,
+        state: "APPROVED",
+        reviewAuthor: "developer-bot",
+        prAuthor: "developer-bot",
+      },
+      deps,
+    );
+    expect(result.proceed).toBe(false);
+    expect(result.reason).toMatch(/developer-bot/);
+    expect(deps.countUnresolvedThreads).not.toHaveBeenCalled();
+    expect(deps.countInlineComments).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1b. Commented review — unresolved-thread path
+// ---------------------------------------------------------------------------
+
+describe("commented review — unresolved-thread path", () => {
+  it("skips a COMMENTED review by a distinct reviewer with zero unresolved threads", async () => {
+    const deps = makeDeps({
+      countUnresolvedThreads: vi.fn().mockResolvedValue(0),
+    });
+    const result = await checkReviewerFeedback(
+      { ...BASE_INPUT, state: "COMMENTED" },
+      deps,
+    );
+    expect(result.proceed).toBe(false);
+    expect(result.reason).toMatch(/zero unresolved threads/i);
+    expect(deps.countInlineComments).not.toHaveBeenCalled();
+  });
+
+  it("proceeds for a COMMENTED review by a distinct reviewer with one unresolved thread", async () => {
+    const deps = makeDeps({
+      countUnresolvedThreads: vi.fn().mockResolvedValue(1),
+    });
+    const result = await checkReviewerFeedback(
+      { ...BASE_INPUT, state: "COMMENTED" },
+      deps,
+    );
+    expect(result.proceed).toBe(true);
+    expect(result.reason).toMatch(/unresolved thread/i);
+    expect(deps.countInlineComments).not.toHaveBeenCalled();
+  });
+
+  it("proceeds (fail open) for a COMMENTED review when countUnresolvedThreads rejects — no bare-approval fallback", async () => {
+    const deps = makeDeps({
+      countUnresolvedThreads: vi
+        .fn()
+        .mockRejectedValue(new Error("GraphQL API error")),
+    });
+    const result = await checkReviewerFeedback(
+      { ...BASE_INPUT, state: "COMMENTED" },
+      deps,
+    );
+    expect(result.proceed).toBe(true);
+    expect(result.reason).toMatch(/thread count unavailable/i);
+    // No bare-approval fallback for 'commented': inline comments must not be checked.
+    expect(deps.countInlineComments).not.toHaveBeenCalled();
   });
 });
 

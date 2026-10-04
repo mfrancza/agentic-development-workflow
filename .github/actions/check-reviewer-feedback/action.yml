@@ -1,9 +1,10 @@
 name: 'Check reviewer feedback'
 description: >
-  Decides whether agent-respond-review should proceed or skip based on the
-  submitted review's state, body, inline comments, and unresolved PR threads.
-  Replaces the ~85-line inline shell script in agent-respond-review.yml.
-  Output: proceed=true|false.
+  Decides whether agent-respond-review should proceed or skip. Applies
+  defence-in-depth guards: skips self-authored reviews (review-author equals
+  pr-author), routes commented reviews through the unresolved-thread check,
+  and applies the bare-approval fallback for approved reviews when the thread
+  count is unavailable. Output: proceed=true|false.
 
 inputs:
   token:
@@ -27,6 +28,12 @@ inputs:
     required: true
   repo-name:
     description: 'Repository name'
+    required: true
+  review-author:
+    description: 'GitHub login of the review author (github.event.review.user.login)'
+    required: true
+  pr-author:
+    description: 'GitHub login of the PR author (github.event.pull_request.user.login)'
     required: true
 
 outputs:
@@ -73,3 +80,5 @@ runs:
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         INPUT_REPO_OWNER: ${{ inputs.repo-owner }}
         INPUT_REPO_NAME: ${{ inputs.repo-name }}
+        INPUT_REVIEW_AUTHOR: ${{ inputs.review-author }}
+        INPUT_PR_AUTHOR: ${{ inputs.pr-author }}
