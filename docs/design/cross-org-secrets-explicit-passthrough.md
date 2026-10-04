@@ -108,7 +108,6 @@ reusable exactly (same names, in the same order for readability).
 | `secret-scan-reusable.yml` | — | — |
 | `terraform-ci-reusable.yml` | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | — |
 | `test-helper-ref-reusable.yml` | — | — |
-| `test-reusable-portability.yml` | — | — |
 
 Pattern: eight developer-agent container workflows share the
 `DEVELOPER_APP_ID` / `DEVELOPER_APP_PRIVATE_KEY` + three optional provider
