@@ -202,10 +202,12 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 > **Which keys do I need?** These reusable workflows live in the `mfrancza`
 > organization. If your repository is in a **different organization** (or is a
 > personal-account repo), `secrets: inherit` does not propagate any secrets
-> across the org boundary — the reusable will fail immediately with "Secret
-> DEVELOPER_APP_ID is required, but not provided." The caller stubs in this
-> guide therefore use an explicit `secrets:` block that names every secret by
-> name, which works for both same-org and cross-org callers:
+> across the org boundary — the reusable will fail immediately with:
+> ```
+> Secret DEVELOPER_APP_ID is required, but not provided while calling
+> ```
+> The caller stubs in this guide therefore use an explicit `secrets:` block that
+> names every secret by name, which works for both same-org and cross-org callers:
 >
 > ```yaml
 > secrets:
@@ -215,6 +217,9 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 >   OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
 >   XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 > ```
+>
+> **Do not replace the explicit `secrets:` blocks with `secrets: inherit`** — it
+> will break for any caller outside the `mfrancza` org.
 >
 > **Which provider keys do you actually need to set?** Only the key for the
 > provider(s) you use. If your `DEFAULT_MODEL` is `sonnet`, `opus`, or `haiku`
@@ -226,6 +231,29 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 > container validates only that the key for the *selected* model is present.
 > Per-reusable required/optional splits are listed in the **Prerequisites**
 > section of each reusable below.
+
+**Secrets inventory per reusable** (source of truth: each reusable's own `secrets:` block)
+
+| Reusable | Required secrets | Optional secrets |
+|----------|------------------|------------------|
+| `agent-auto-trigger-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | — |
+| `agent-design-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-fix-checks-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-fix-deployment-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-groom-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-implement-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-pr-merged-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | — |
+| `agent-resolve-conflicts-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-respond-review-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-review-reusable.yml` | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `ci-reusable.yml` | — | — |
+| `secret-scan-reusable.yml` | — | — |
+| `terraform-ci-reusable.yml` | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | — |
+| `test-helper-ref-reusable.yml` | — | — |
+
+> **Note:** `terraform-ci-reusable.yml` is consumer-only for this repo and is not
+> part of the externally published adoption surface in v0 — see the
+> [adoption gotcha](#terraform-ci-reusable-yml-is-not-available-for-external-adoption-in-v0).
 
 ### Terraform provider config
 
@@ -803,11 +831,11 @@ jobs:
       logs-retention-days: 30
       helpers-ref: v0
     secrets:
-      REVIEWER_APP_ID:          ${{ secrets.REVIEWER_APP_ID }}
-      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY:        ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY:           ${{ secrets.OPENAI_API_KEY }}
-      XAI_API_KEY:              ${{ secrets.XAI_API_KEY }}
+      REVIEWER_APP_ID:           ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY:  ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** The reviewer App token has Contents (R) only — the
