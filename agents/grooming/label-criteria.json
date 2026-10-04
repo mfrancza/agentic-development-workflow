@@ -35,21 +35,87 @@
     "action": "Apply this label whenever a human needs to be in the loop. Agents should apply it to their own issues/PRs when they hit an escalation point; humans can apply it too. It is not mutually exclusive with any other label."
   },
   "model:haiku": {
-    "description": "The issue is simple enough to be handled by the latest Claude Haiku — the fastest, lowest-cost model. `model:haiku` is an unqualified tier alias that resolves to the latest snapshot of the Haiku series; `model:claude-haiku-4-5` targets a specific series' latest snapshot, and `model:claude-haiku-4-5-20251001` (or any `model:claude-*-YYYYMMDD` label) pins a reproducible snapshot. As a generic label (no second colon), it sets the issue-wide default model for all agents; per-agent labels (e.g. `model:developer:opus`) can coexist with it to override the model for a specific agent type.",
-    "criteria": "Apply when the change is trivial and mechanical: fixing a typo, tweaking a single config value, updating a comment or a small piece of documentation, or a one-line code change with no design decisions. If in doubt between haiku and sonnet, prefer sonnet.",
+    "description": "The issue is simple enough to be handled by the latest Claude Haiku — the mechanical-work Anthropic tier. `model:haiku` is an unqualified tier alias that resolves to the latest snapshot of the Haiku series; `model:claude-haiku-4-5` targets a specific series' latest snapshot, and `model:claude-haiku-4-5-20251001` (or any `model:claude-*-YYYYMMDD` label) pins a reproducible snapshot. As a generic label (no second colon), it sets the issue-wide default model for all agents; per-agent labels (e.g. `model:developer:opus`) can coexist with it to override the model for a specific agent type.",
+    "criteria": "Select only when Anthropic is the chosen provider under docs/model-guidance.md. Apply when the change is trivial and mechanical: fixing a typo, tweaking a single config value, updating a comment or a small piece of documentation, or a one-line code change with no design decisions. If in doubt between haiku and sonnet, prefer sonnet.",
     "action": "Apply this label when the issue is trivial. Mutually exclusive with the other generic model:* labels — at most one generic model:* label (one with no second colon) may be present on an issue. An issue may carry both a generic `model:*` label and a per-agent `model:*` label simultaneously (they are not mutually exclusive in the label schema — they serve different scopes), but the groomer is not the agent that establishes that state: do not add or change any `model:*` label if one is already present.",
     "guidance": "docs/model-guidance.md — see '## Tier Summary' (Anthropic tier aliases table) and '## Task-Class Matrix' for detailed tier selection guidance and per-task-class examples."
   },
   "model:sonnet": {
     "description": "The issue is a moderate-complexity change best handled by the latest Claude Sonnet — the balanced default for most work. `model:sonnet` is an unqualified tier alias that resolves to the latest snapshot of the Sonnet series; `model:claude-sonnet-4-5` targets a specific series' latest snapshot, and `model:claude-sonnet-4-5-20250929` (or any `model:claude-*-YYYYMMDD` label) pins a reproducible snapshot. As a generic label (no second colon), it sets the issue-wide default model for all agents; per-agent labels (e.g. `model:developer:opus`) can coexist with it to override the model for a specific agent type.",
-    "criteria": "Apply when the change is non-trivial but scoped: implementing a well-specified feature, a straightforward bug fix, a dependency upgrade with obvious next steps, or any 'do'-labeled issue that is more than mechanical but does not require architectural thought. Apply only when the issue clearly does not fit model:haiku (it is too complex to be trivial) **and** clearly does not fit model:opus (it is well-specified enough that deep reasoning or cross-cutting design is not needed). Do not apply this label alongside model:haiku or model:opus.",
+    "criteria": "Select only when Anthropic is the chosen provider under docs/model-guidance.md. Apply when the change is non-trivial but scoped: implementing a well-specified feature, a straightforward bug fix, a dependency upgrade with obvious next steps, or any 'do'-labeled issue that is more than mechanical but does not require architectural thought. Apply only when the issue clearly does not fit model:haiku (it is too complex to be trivial) **and** clearly does not fit model:opus (it is well-specified enough that deep reasoning or cross-cutting design is not needed). Do not apply this label alongside model:haiku or model:opus.",
     "action": "Apply this label for typical implementation work. Mutually exclusive with the other generic model:* labels — at most one generic model:* label (one with no second colon) may be present on an issue. An issue may carry both a generic `model:*` label and a per-agent `model:*` label simultaneously (they are not mutually exclusive in the label schema — they serve different scopes), but the groomer is not the agent that establishes that state: do not add or change any `model:*` label if one is already present.",
     "guidance": "docs/model-guidance.md — see '## Tier Summary' (Anthropic tier aliases table) and '## Task-Class Matrix' for detailed tier selection guidance and per-task-class examples."
   },
   "model:opus": {
-    "description": "The issue is complex enough to warrant the latest Claude Opus — the highest-capability, highest-cost model. `model:opus` is an unqualified tier alias that resolves to the latest snapshot of the Opus series; `model:claude-opus-4-5` targets a specific series' latest snapshot, and `model:claude-opus-4-1-20250805` (or any `model:claude-*-YYYYMMDD` label) pins a reproducible snapshot. As a generic label (no second colon), it sets the issue-wide default model for all agents; per-agent labels (e.g. `model:developer:haiku`) can coexist with it to override the model for a specific agent type.",
-    "criteria": "Apply when the change requires deep reasoning, cross-cutting design, or careful trade-off analysis: high-level design for a new feature, non-trivial refactors, new agent types, work that spans multiple components, security-sensitive changes, or anything the 'plan' label would also apply to. Ambiguous or under-specified issues that require the agent to reason about scope also belong here.",
+    "description": "The issue is complex enough to warrant the latest Claude Opus — the design-heavy Anthropic grooming tier. `model:opus` is an unqualified tier alias that resolves to the latest snapshot of the Opus series; `model:claude-opus-4-5` targets a specific series' latest snapshot, and `model:claude-opus-4-1-20250805` (or any `model:claude-*-YYYYMMDD` label) pins a reproducible snapshot. As a generic label (no second colon), it sets the issue-wide default model for all agents; per-agent labels (e.g. `model:developer:haiku`) can coexist with it to override the model for a specific agent type.",
+    "criteria": "Select only when Anthropic is the chosen provider under docs/model-guidance.md. Apply when the change requires deep reasoning, cross-cutting design, or careful trade-off analysis: high-level design for a new feature, non-trivial refactors, new agent types, work that spans multiple components, security-sensitive changes, or anything the 'plan' label would also apply to. Ambiguous or under-specified issues that require the agent to reason about scope also belong here.",
     "action": "Apply this label for complex or design-heavy work. Mutually exclusive with the other generic model:* labels — at most one generic model:* label (one with no second colon) may be present on an issue. An issue may carry both a generic `model:*` label and a per-agent `model:*` label simultaneously (they are not mutually exclusive in the label schema — they serve different scopes), but the groomer is not the agent that establishes that state: do not add or change any `model:*` label if one is already present.",
     "guidance": "docs/model-guidance.md — see '## Tier Summary' (Anthropic tier aliases table) and '## Task-Class Matrix' for detailed tier selection guidance and per-task-class examples."
+  },
+  "model:gpt-5.6-luna": {
+    "description": "Use OpenAI gpt-5.6-luna as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when OpenAI is the chosen provider under docs/model-guidance.md. Mechanical changes and targeted checks with no research, ambiguity, or design decisions. If uncertain, prefer gpt-5.6-terra.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:gpt-5.6-terra": {
+    "description": "Use OpenAI gpt-5.6-terra as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when OpenAI is the chosen provider under docs/model-guidance.md. Scoped implementation, bug diagnosis, dependency upgrades, documentation research, and standard review. Use gpt-5.6-sol for plan issues, ambiguous scope, or cross-cutting design.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:gpt-5.6-sol": {
+    "description": "Use OpenAI gpt-5.6-sol as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when OpenAI is the chosen provider under docs/model-guidance.md. Plan issues, demanding coding, architectural design, security-sensitive work, cross-cutting refactors, and ambiguous scope. Prefer this over Astra unless the premium escalation is justified.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:gpt-6-astra": {
+    "description": "Use OpenAI gpt-6-astra as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when OpenAI is the chosen provider under docs/model-guidance.md. The hardest long-horizon implementation, system design, or review where a cheaper model failed the quality bar or an operator explicitly requests premium escalation. Do not select automatically for every plan issue.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:grok-build-0.1": {
+    "description": "Use xAI grok-build-0.1 as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when xAI is the chosen provider under docs/model-guidance.md. Mechanical changes, targeted checks, and bounded build-focused coding experiments. Do not use for research, ambiguous scope, or architectural plans.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:grok-4.3": {
+    "description": "Use xAI grok-4.3 as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when xAI is the chosen provider under docs/model-guidance.md. Lower-cost scoped diagnosis or routine implementation with clear requirements. Use a design-capable xAI model for plan issues or ambiguous scope.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:grok-4.20-0309-non-reasoning": {
+    "description": "Use xAI grok-4.20-0309-non-reasoning as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when xAI is the chosen provider under docs/model-guidance.md. Lower-cost routine implementation with a bounded path and no architectural reasoning requirement. Do not use for plan issues or ambiguous scope.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:grok-4.20-0309-reasoning": {
+    "description": "Use xAI grok-4.20-0309-reasoning as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when xAI is the chosen provider under docs/model-guidance.md. Reasoning-heavy diagnosis, plan issues, architectural trade-offs, or ambiguous scope requiring deliberate design.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:grok-4.20-multi-agent-0309": {
+    "description": "Use xAI grok-4.20-multi-agent-0309 as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when xAI is the chosen provider under docs/model-guidance.md. Decomposition-heavy design or plan work when that approach is requested or justified in the grooming note. This model does not create additional repository agent identities or workflow jobs.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:grok-4.5": {
+    "description": "Use xAI grok-4.5 as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when xAI is the chosen provider under docs/model-guidance.md. Scoped implementation or dependency upgrades when a stable prompt prefix makes its cached-input rate relevant. Do not assume a cache hit or choose on price alone.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:grok-4.6": {
+    "description": "Use xAI grok-4.6 as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when xAI is the chosen provider under docs/model-guidance.md. General coding, scoped implementation, research, standard review, complex cross-component work, or architectural plans. A starting candidate when xAI is requested without a narrower model preference.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
   }
 }

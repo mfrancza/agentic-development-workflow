@@ -1,404 +1,306 @@
 # Model Guidance
 
-This document is the **single source of truth** for tier selection in this repository. Humans apply
-it when labeling issues manually or reviewing a labeled issue. The grooming agent reads it at run
-time when selecting a `model:*` label. All other documents that discuss model tiers link back here
-rather than duplicating the guidance.
+This document is the **single source of truth for tier selection** in this repository.
+Humans use it when labeling issues, and the grooming agent reads it alongside
+[`label-criteria.json`](../agents/grooming/label-criteria.json) and its
+[`groom prompt`](../docker/scripts/prompts/groom.md).
 
----
+**Reviewed September 12, 2026.** The authoritative **provisioned model inventory** is
+[`automation_labels` in Terraform](../terraform/modules/labels/main.tf), not the examples here.
+Vendor availability is a separate question: a provisioned label does not guarantee that a
+vendor still serves that model. The developer and reviewer `resolve_provider()` functions are
+the runtime routing authorities; see [Provider Notes](#provider-notes).
 
 ## Tier Summary
 
-The `model:*` labels in this repo span three providers: **Anthropic**, **OpenAI**, and **xAI
-(Grok)**. The grooming agent applies only Anthropic tier aliases (see Decision 6 in
-`docs/design/agent-usage-guidance.md`); OpenAI and xAI labels are applied manually or by
-operator override at the issue level.
+Grooming guidance covers **Anthropic, OpenAI, and xAI**. Select exactly one generic
+model label from the criteria for the chosen provider; do not invent cross-provider aliases.
+The workload categories below are repository selection guidance, not claims of equivalent
+capability across vendors. This supersedes the Anthropic-only scope of
+[Decision 6 of the usage-guidance design](design/agent-usage-guidance.md).
+
+### Provider selection during grooming
+
+1. Preserve any existing generic model label and all per-agent overrides. An existing generic
+   label ends model selection, regardless of provider.
+2. With no generic label, honor an explicit execution-provider preference in the issue or
+   repository instructions. Merely mentioning a vendor as the subject of a task is not a
+   provider preference; neither is a per-agent override a preference for all other agents.
+   With no explicit preference, retain Anthropic as the fallback rather than silently switching
+   vendors on price alone. This does not change `DEFAULT_MODEL`.
+3. Use that provider's column in the Task-Class Matrix and the model-specific criteria below.
+   For Anthropic, choose a tier alias; for OpenAI and xAI, choose a provisioned named model.
+   Record the provider, task class, and reason in the grooming comment. For example, a scoped
+   fix explicitly requesting OpenAI selects `model:gpt-5.6-terra`; an xAI architectural plan
+   can select `model:grok-4.20-0309-reasoning`.
+4. A provider preference does not establish account access. Operators must configure its key
+   for downstream runs; the groomer's own provider/key does not prove downstream availability.
+   Never inspect or print secret values. If the requested provider is known to be unavailable
+   or preferences conflict, ask for clarification instead of silently substituting a vendor.
 
 ### Anthropic tier aliases (grooming-agent picks)
 
-The three Anthropic tier aliases resolve to the latest snapshot of their respective series at run
-time. The table below documents the current stable series floor for each alias and the intended
-use cases. Pricing is per 1 million tokens; see the Cross-Vendor Cost Analysis section for the
-full billing context.
+| Tier alias | Series used for this pricing review | When to reach for it |
+|---|---|---|
+| `model:haiku` | Claude Haiku 4.5 | Clearly mechanical changes: typo, comment, single config value, or a small documentation correction with no research or design decisions. If uncertain, choose Sonnet. |
+| `model:sonnet` | Claude Sonnet 5 | Non-trivial but well-specified implementation, scoped debugging, or a straightforward dependency upgrade. This remains the repository default. |
+| `model:opus` | Claude Opus 5 | Deep reasoning, architectural design, cross-cutting refactors, new agent types, security-sensitive changes, ambiguous scope, or issues classified `plan`. Highest capability among the three Anthropic grooming choices, not the entire vendor catalog. |
 
-| Tier alias | Series floor | When to reach for it | Latency / cost (per 1M tokens) | Repo-standard default? |
-|---|---|---|---|---|
-| `model:haiku` | claude-haiku-4-5 series | Trivial, mechanical changes where the implementation path is unambiguous and no design decisions are required. Examples: a single typo fix, updating one config value, adding or correcting a brief doc note, a one-line code change. | Fastest; $1.00 input / $5.00 output — roughly 5× cheaper than Sonnet on input; suitable for high-volume or latency-sensitive work | No |
-| `model:sonnet` | claude-sonnet-5 series | Non-trivial but well-scoped work: implementing a well-specified feature, a straightforward bug fix, a dependency upgrade with obvious next steps, or any `do`-labeled issue that requires more than mechanical effort but does not call for architectural reasoning. | Balanced latency; $2.00 input / $10.00 output; the right pick for the large middle band of typical implementation tasks | **Yes — repo default** |
-| `model:opus` | claude-opus-5 series | Complex, design-heavy, or under-specified work requiring deep reasoning, cross-cutting analysis, or careful trade-off evaluation. Examples: high-level design for new features, non-trivial refactors that span multiple components, new agent types, security-sensitive changes, or any issue where the agent must reason about scope before it can begin implementing. | Highest Anthropic capability; $5.00 input / $25.00 output; use when reasoning quality matters more than speed or cost | No |
+Aliases float with the Claude Code CLI; the repository passes them through rather than pinning
+these series. A generic series label such as `model:claude-haiku-4-5` floats within that series;
+only a dated snapshot such as `model:claude-haiku-4-5-20251001` pins a specific model version.
+Check the vendor's availability before choosing an older snapshot from Terraform.
 
-**Note on Fable.** A fourth Anthropic tier (`claude-fable-5` series, $10.00/$50.00 per 1M) exists
-as of 2026; no `model:fable` label is provisioned because no use case has been identified that
-Opus does not already cover. Revisit if Opus-class throughput becomes a bottleneck.
+The [current Anthropic overview][anthropic-models] also describes models outside these grooming
+tiers, including Fable 5.1. It now recommends starting with Opus 5 for most workloads.
+**Sonnet is this repository's cost-conscious policy, not Anthropic's current default recommendation.**
+Do not extend grooming to additional families just because the vendor offers them.
 
-**Resolution.** An unqualified tier alias (`model:sonnet`, `model:opus`, `model:haiku`) resolves
-to the latest snapshot of its series at the time the workflow runs. For pinned-reproducibility
-needs, use a generic series tag (`model:claude-sonnet-4-5`) or a snapshot ID
-(`model:claude-sonnet-4-5-20250929`). The grooming agent always emits tier aliases — never pinned
-IDs — so that the running model advances with the series without requiring label maintenance.
+### OpenAI models (grooming and manual selection)
 
-### OpenAI models (manual selection only)
+The repository's September refresh ([PR #547](https://github.com/mfrancza/agentic-development-workflow/pull/547))
+provisions the GPT-5.6 family and GPT-6 Astra. The removed `model:gpt-5` and `model:o3` labels
+are not active recommendations or accepted OpenAI routing choices here.
+Use [OpenAI's current model guidance][openai-models] and task-specific evaluations when choosing:
 
-OpenAI models are available for issue-by-issue override via `model:*` labels but are not selected
-by the grooming agent. The current lineup (September 2026) covers the GPT-5.6 generation plus the
-flagship GPT-6 Astra; treat the four variants as distinct sub-tiers when picking a label. `gpt-5`
-and `o3` were retired by OpenAI (deprecated September 2026; shutdown December 11, 2026 — replaced
-by the GPT-5.6 line).
+- `model:gpt-5.6-luna`: a low-cost candidate for mechanical work and narrowly bounded checks.
+- `model:gpt-5.6-terra`: a candidate for routine implementation and standard review.
+- `model:gpt-5.6-sol`: a candidate for demanding coding and cross-component reasoning.
+- `model:gpt-6-astra`: an escalation candidate for the hardest end-to-end implementation,
+  architectural design, or review when a cheaper model fails your quality bar.
 
-| Model label | When to reach for it | Latency / cost (per 1M tokens) | Analogous Anthropic tier |
-|---|---|---|---|
-| `model:gpt-5.6-luna` | Fast, cost-sensitive tasks; mechanical or exploratory work where low cost is the primary requirement | Fastest variant; $0.20 input / $1.20 output — cheapest label in the repo across all providers | ≈ `model:haiku` |
-| `model:gpt-5.6-terra` | Balanced OpenAI tasks; general-purpose work requiring solid capability at moderate cost | $2.00 input / $12.00 output | ≈ `model:sonnet` |
-| `model:gpt-5.6-sol` | High-demand OpenAI tasks; complex professional work requiring strong capability | $4.00 input / $20.00 output | ≈ `model:opus` |
-| `model:gpt-6-astra` | Most capable OpenAI model; hardest end-to-end work, architectural reasoning, and tasks where raw capability is the primary requirement | $10.00 input / $50.00 output | ≈ `model:opus` (highest capability) |
+These are workload analogies, **not demonstrated equivalence** to Anthropic tiers.
+Astra costs 2.5× Sol for the normalized token budget below; evaluate whether fewer retries or
+better outcomes justify the premium rather than selecting it for every `plan` issue.
 
-### xAI (Grok) models (manual selection)
+### xAI (Grok) models (grooming and manual selection)
 
-The xAI labels provisioned in this repo are sourced from `grok models` at Grok Build CLI v1.0.13
-(the pinned version in both Dockerfiles as of Issue [#356](https://github.com/mfrancza/agentic-development-workflow/issues/356)).
-Grok models are executed by the Grok Build CLI (`grok --prompt-file /dev/stdin`), not by Codex;
-the CLI reads `XAI_API_KEY` directly from the process environment.
+The [September audit, PR #546](https://github.com/mfrancza/agentic-development-workflow/pull/546)
+confirmed the repository's Grok Build CLI inventory. Refer to Terraform for the exact label set
+and the [Dockerfiles](../docker/Dockerfile) ([reviewer](../docker/reviewer/Dockerfile)) for the CLI pin.
+The CLI default and the vendor's recommended model are not necessarily the same.
+[xAI currently recommends Grok 4.6 for coding and general text work][xai-models].
 
-| Model label | When to reach for it | Latency / cost (per 1M tokens, Sep 2026) | Notes |
-|---|---|---|---|
-| `model:grok-build-0.1` | Build-specialized tasks; coding-focused | $1.00 input / $2.00 output — lowest output rate of all Grok labels | Specialized for code generation and build tasks |
-| `model:grok-4.3` | General-purpose xAI tasks; stable mid-tier model | $1.25 input / $2.50 output | Stable release |
-| `model:grok-4.20-0309-non-reasoning` | Default grok model; general-purpose coding and reasoning tasks | $1.25 input / $2.50 output | Default model at CLI v1.0.13 |
-| `model:grok-4.20-0309-reasoning` | Tasks benefiting from explicit chain-of-thought reasoning | $1.25 input / $2.50 output | Reasoning variant of grok-4.20-0309 |
-| `model:grok-4.20-multi-agent-0309` | Multi-agent orchestration and complex agentic task decomposition | $1.25 input / $2.50 output | Optimized for multi-agent workflows |
-| `model:grok-4.5` | General-purpose xAI tasks; newer than grok-4.3 | $2.00 input / $6.00 output (cached input $0.30/1M — 85% discount) | |
-| `model:grok-4.6` | Latest general-purpose xAI model; broadest capability | $2.00 input / $6.00 output (cached input $0.50/1M — 75% discount) | Best for complex cross-cutting tasks |
-
-**Pricing note.** All figures are standard-tier rates (< 200k prompt tokens) as of September 2026. Long-context tier (≥ 200k tokens) rates are 2× input / 2× output. xAI pricing changes frequently — verify against [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning large-scale runs.
-
----
+- `model:grok-build-0.1`: build-focused, bounded coding experiments at a low output rate.
+- `model:grok-4.3` or `model:grok-4.20-0309-non-reasoning`: lower-cost routine implementation candidates.
+- `model:grok-4.20-0309-reasoning`: a reasoning-enabled candidate for diagnosis and design.
+- `model:grok-4.20-multi-agent-0309`: an operator experiment for decomposition-heavy work;
+  selecting the model does not create additional repository agent identities or workflow jobs.
+- `model:grok-4.5`: an alternative when its lower cached-input rate matters for a stable prefix.
+- `model:grok-4.6`: the vendor-recommended starting point for an xAI coding evaluation,
+  including complex work; its standard input/output rates equal Grok 4.5's.
 
 ## Cross-Vendor Cost Analysis
 
-This section provides normalized cost benchmarks, billing-plan details, and a cross-vendor
-comparison to support model selection decisions when cost is a factor.
+### Sources and assumptions
 
-### Pricing reference (per 1M tokens, September 2026)
+Rates were re-read from official sources on **September 12, 2026**:
 
-All prices are USD. API pricing changes frequently; verify against the official provider pricing
-pages before provisioning large-scale runs.
+- [Anthropic model pricing, caching, batch, and long-context billing][anthropic-pricing].
+- [OpenAI API pricing (Standard and Batch)][openai-pricing], with model-specific conditions for
+  [GPT-5.6 Sol][openai-sol] and [GPT-6 Astra][openai-astra].
+- [xAI model prices][xai-models], [batch/priority pricing][xai-pricing], and
+  [Batch API support and turnaround][xai-batch].
 
-| Model label | Provider | Input ($/1M) | Output ($/1M) | Notes |
+All rates below are **USD per one million tokens**, first-party API, standard service tier,
+short-context requests. They are not subscription prices or guarantees of the CLI's actual bill.
+The alias rows use the Claude series in the Tier Summary, not every older provisioned snapshot.
+The table is a dated comparison, not a second model registry.
+
+### Pricing reference and normalized task benchmark
+
+The illustrative token budget is **20,000 uncached input tokens + 5,000 output tokens**:
+
+`cost = (20,000 × input rate + 5,000 × output rate) / 1,000,000`
+
+This is arithmetic, **not a measured average agent run or a performance benchmark**.
+It excludes cache writes, tool/search charges, retries, and additional billed reasoning tokens.
+Count all turns of an agent run, not just the initial prompt; tokenizers also differ across models.
+The cached-input column is informational and is **not** used in the uncached cost calculation.
+
+| Model label | Input $/1M | Cached input $/1M | Output $/1M | Cost per normalized task |
 |---|---|---|---|---|
-| `model:gpt-5.6-luna` | OpenAI | $0.20 | $1.20 | Cheapest GPT-5.6 variant; cheapest label in repo across all providers |
-| `model:haiku` (claude-haiku-4-5) | Anthropic | $1.00 | $5.00 | |
-| `model:grok-build-0.1`‡ | xAI | $1.00 | $2.00 | Build-specialized; lowest output rate of all Grok labels |
-| `model:grok-4.3`‡ | xAI | $1.25 | $2.50 | Stable mid-tier Grok |
-| `model:grok-4.20-0309-non-reasoning`‡ | xAI | $1.25 | $2.50 | Default model at Grok Build CLI v1.0.13 |
-| `model:grok-4.20-0309-reasoning`‡ | xAI | $1.25 | $2.50 | Reasoning variant; same rate as non-reasoning |
-| `model:grok-4.20-multi-agent-0309`‡ | xAI | $1.25 | $2.50 | Multi-agent orchestration; same rate as -non-reasoning |
-| `model:sonnet` (claude-sonnet-5) | Anthropic | $2.00 | $10.00 | Repo default |
-| `model:grok-4.5`‡ | xAI | $2.00 | $6.00 | Same input rate as sonnet; lower output rate; cached input $0.30/1M |
-| `model:grok-4.6`‡ | xAI | $2.00 | $6.00 | Latest general-purpose Grok; cached input $0.50/1M |
-| `model:gpt-5.6-terra` | OpenAI | $2.00 | $12.00 | |
-| `model:gpt-5.6-sol` | OpenAI | $4.00 | $20.00 | |
-| `model:opus` (claude-opus-5) | Anthropic | $5.00 | $25.00 | |
-| `model:gpt-6-astra` | OpenAI | $10.00 | $50.00 | |
-| `claude-fable-5` (no repo label) | Anthropic | $10.00 | $50.00 | No label provisioned |
+| `model:gpt-5.6-luna` | $0.20 | $0.02 | $1.20 | $0.0100 |
+| `model:grok-build-0.1` | $1.00 | $0.20 | $2.00 | $0.0300 |
+| `model:grok-4.3` | $1.25 | $0.20 | $2.50 | $0.0375 |
+| `model:grok-4.20-0309-non-reasoning` | $1.25 | $0.20 | $2.50 | $0.0375 |
+| `model:grok-4.20-0309-reasoning` | $1.25 | $0.20 | $2.50 | $0.0375 |
+| `model:grok-4.20-multi-agent-0309` | $1.25 | $0.20 | $2.50 | $0.0375 |
+| `model:haiku` | $1.00 | $0.10 | $5.00 | $0.0450 |
+| `model:grok-4.5` | $2.00 | $0.30 | $6.00 | $0.0700 |
+| `model:grok-4.6` | $2.00 | $0.50 | $6.00 | $0.0700 |
+| `model:sonnet` | $2.00 | $0.20 | $10.00 | $0.0900 |
+| `model:gpt-5.6-terra` | $2.00 | $0.20 | $12.00 | $0.1000 |
+| `model:gpt-5.6-sol` | $4.00 | $0.40 | $20.00 | $0.1800 |
+| `model:opus` | $5.00 | $0.50 | $25.00 | $0.2250 |
+| `model:gpt-6-astra` | $10.00 | $1.00 | $50.00 | $0.4500 |
 
-**‡ xAI pricing note.** Prices shown are standard-tier rates (< 200k prompt tokens) as of September 2026. Long-context tier (≥ 200k tokens) rates are 2× input and 2× output. xAI pricing changes frequently — verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning large-scale runs.
+**Price conditions:** Sonnet 5's $2/$10 rate is now standard; Anthropic canceled the previously
+announced September 1, 2026 increase. Sol's $4/$20 pricing is promotional, available at least
+through **November 21, 2026**; re-check before budgeting beyond that date.
+Haiku is **2× cheaper** than Sonnet at the listed input/output rates, not 5×.
 
-### Normalized task benchmark
+**Long context:** xAI's listed models charge 2× input, cached input, and output at **≥200k prompt
+tokens**, for the entire request. OpenAI's listed family uses 2× input/cache rates and 1.5×
+output for prompts **>272k input tokens**. Claude Sonnet 5 and Opus 5 include their 1M context
+at standard token rates; do not apply a blanket long-context multiplier across vendors or
+assume every model has a 1M context window. Consult model-specific limits before a large run.
 
-To compare models across providers on a common scale, the **standard coding task** benchmark is
-defined as: **20,000 input tokens** (system prompt + context + instructions) and **5,000 output
-tokens** (code + comments + summary). This represents a mid-size agentic implementation run.
-Actual token counts vary by issue complexity; use this benchmark for order-of-magnitude comparison,
-not precise budgeting.
+### Billing mechanisms and practical implications
 
-| Model label | Input cost | Output cost | Total per standard task | Cross-vendor rank (cheapest first) |
-|---|---|---|---|---|
-| `model:gpt-5.6-luna` | $0.004 | $0.006 | **$0.010** | 1 — cheapest across all providers |
-| `model:grok-build-0.1`‡ | $0.020 | $0.010 | **$0.030** | 2 |
-| `model:grok-4.3`‡ | $0.025 | $0.013 | **$0.038** | 3–6 (tied with other grok-4.20 models) |
-| `model:grok-4.20-0309-non-reasoning`‡ | $0.025 | $0.013 | **$0.038** | 3–6 |
-| `model:grok-4.20-0309-reasoning`‡ | $0.025 | $0.013 | **$0.038** | 3–6 |
-| `model:grok-4.20-multi-agent-0309`‡ | $0.025 | $0.013 | **$0.038** | 3–6 |
-| `model:haiku` | $0.020 | $0.025 | **$0.045** | 7 |
-| `model:grok-4.5`‡ | $0.040 | $0.030 | **$0.070** | 8–9 (tied with grok-4.6) |
-| `model:grok-4.6`‡ | $0.040 | $0.030 | **$0.070** | 8–9 |
-| `model:sonnet` (repo default) | $0.040 | $0.050 | **$0.090** | 10 |
-| `model:gpt-5.6-terra` | $0.040 | $0.060 | **$0.100** | 11 |
-| `model:gpt-5.6-sol` | $0.080 | $0.100 | **$0.180** | 12 |
-| `model:opus` | $0.100 | $0.125 | **$0.225** | 13 |
-| `model:gpt-6-astra` | $0.200 | $0.250 | **$0.450** | 14–15 (tied with claude-fable-5) |
-| `claude-fable-5` (no label) | $0.200 | $0.250 | **$0.450** | 14–15 — no label provisioned |
-
-### Billing plans and discounts
-
-All three providers offer cost-reduction mechanisms layered on top of the base rates above.
-
-| Mechanism | Anthropic | OpenAI | xAI |
+| Mechanism | Anthropic grooming series | Provisioned OpenAI family | xAI |
 |---|---|---|---|
-| **Prompt cache** | Cache hits billed at **10% of the base input rate**; cache write at 25%. Effective for large system prompts or repeated tool schemas. | Cached input typically ~50% discount (model-dependent); check model-specific docs. | grok-4.5 cached input: $0.30/1M vs $2.00/1M standard — an 85% discount; grok-4.6 cached input: $0.50/1M vs $2.00/1M standard — a 75% discount for cache-eligible prefixes. |
-| **Batch API** | **50% discount** on both input and output for requests that tolerate ≤24-hour turnaround. | **50% discount** for asynchronous batch requests. | Not publicly documented as of 2026-08-30. |
-| **Combined (cache + batch)** | Stackable: a cached-input batch request pays ~5% of the base input rate and 50% of the base output rate — up to ~55% total savings on a cache-heavy workload. | Similar stacking applies; verify per model. | n/a |
+| Prompt cache | Hits cost 0.1× base input; 5-minute writes cost **1.25×**, not 0.25×; 1-hour writes cost 2×. | Listed hits cost 0.1× base input (90% discount); listed writes cost 1.25×. | Use the model-specific cached column: Grok 4.5 is 85% below base input, Grok 4.6 is 75% below. |
+| Batch API | 50% off input/output for eligible asynchronous requests. | Listed Batch rates are 50% of Standard. | Documented: 20% off for Grok 4.3 and the three provisioned Grok 4.20 variants; other models have no listed batch discount. Check acceptance per model. |
+| Cache plus batch | Discounts stack; account for cache creation and expiry. | Use the explicit Batch cached/write rates, not an assumed discount. | Batch discounts apply to cached and reasoning tokens too, where the model is eligible. |
 
-**Practical guidance for this repo's workload types:**
+The entrypoints run interactive CLI tool loops, not Batch API jobs. Batch savings require a
+separate asynchronous workload; this document does not enable caching or batching in workflows.
+Repeated grooming prompts may be cache candidates, but minimum prefix length, cache lifetime,
+cache-write charges, and actual hit rates determine savings. Do not assume the whole prompt hits.
 
-- **Grooming runs** — High frequency, repeated system-prompt structure. Anthropic prompt caching
-  captures most of the system-prompt tokens at 10% input cost; effective haiku cost drops from
-  $0.045 to roughly $0.025 per standard task. Enable caching on grooming runs first.
-- **Batch-mode evaluation or doc pipelines** — Workloads that tolerate ≤24-hour turnaround (e.g.
-  a nightly evaluation run over many issues) benefit from the batch 50% discount. Running
-  haiku-class tasks in batch is the lowest-cost option across all providers ($0.045 × 50% = ~$0.022).
-- **xAI cached input** — grok-4.5 (cached $0.30/1M, 85% discount) and grok-4.6 (cached $0.50/1M,
-  75% discount) both undercut Anthropic Haiku's standard input rate ($1.00/1M) for workloads with
-  a large, repeated context prefix. Use `model:grok-4.5` or `model:grok-4.6` for context-heavy
-  tasks where the cache-eligible prefix is large and stable; grok-4.5 offers a steeper cached
-  discount but grok-4.6 is the broader-capability model.
+For an illustrative **all-input-cache-hit** Haiku request with no cache creation cost, the same
+token budget costs `$0.002 + $0.025 = $0.027`, not $0.025. Uncached Haiku Batch costs $0.0225;
+Luna Batch costs $0.0050 for the same budget, so Haiku Batch is not the cheapest option here.
+Grok 4.5 and 4.6 all-hit examples cost $0.036 and $0.040 respectively: useful for comparing
+stable-prefix workloads, not proof that either has the lowest total cost per successful issue.
 
-### Cross-vendor capability tiers at a glance
-
-| Capability tier | Best-value pick per tier (Sep 2026) | Alternatives |
-|---|---|---|
-| **Fast / cheap** (mechanical tasks, docs-only) | `model:gpt-5.6-luna` — $0.010/task | `model:grok-build-0.1` ($0.030/task‡), `model:grok-4.3` ($0.038/task‡), `model:haiku` ($0.045/task) |
-| **Balanced** (most `do` issues, typical implementation) | `model:sonnet` — $0.090/task (repo default) | `model:grok-4.20-0309-non-reasoning` ($0.038/task‡), `model:grok-4.5` ($0.070/task‡), `model:gpt-5.6-terra` ($0.100/task) |
-| **High capability** (`plan` issues, cross-cutting, under-specified) | `model:opus` — $0.225/task | `model:grok-4.20-0309-reasoning` ($0.038/task‡), `model:grok-4.20-multi-agent-0309` ($0.038/task‡), `model:grok-4.6` ($0.070/task‡), `model:gpt-5.6-sol` ($0.180/task), `model:gpt-6-astra` ($0.450/task) |
-
-**‡ xAI pricing note.** Prices shown are standard-tier rates as of September 2026; xAI pricing changes frequently. Verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning. Known references: grok-4.5 standard input $2.00/1M (cached $0.30/1M); grok-4.6 standard input $2.00/1M (cached $0.50/1M).
-
-**Apply cross-vendor picks only when there is a specific reason** — capability evaluation, provider
-redundancy testing, or a cost experiment. The grooming agent and the repo-wide default remain
-Anthropic-only. This table supports operator-driven label overrides, not routine grooming.
-
----
+Choose by measured completion quality, total billed tokens, latency, and retry rate. Price alone
+does not establish a best-value capability tier. Honor the provider-selection rules above
+rather than switching vendors solely for a lower token price.
 
 ## Task-Class Matrix
 
-The table below maps each task class (classification labels the grooming agent already applies,
-plus concrete common flavors) to the recommended tier and lists all suitable models across all
-vendors with per-task cost estimates. Cost figures use the normalized standard coding task
-benchmark (20,000 input + 5,000 output tokens) defined in the Cross-Vendor Cost Analysis section.
-The *Anthropic default* column is what the grooming agent picks; the *Cross-vendor alternatives*
-column supports operator-driven label overrides when cost or provider diversity is a factor.
-The *Example issue* column links to a closed issue from this repo's history where that tier was
-applied and the PR merged cleanly. Where a task class can fall into more than one tier, the
-driving factor is noted in the *Notes* column.
+All three provider columns inform **grooming selection** within the chosen provider, not
+replacement of an existing label. Entries are representative candidates, not exhaustive
+inventory or benchmark-proven substitutes. Compare their token costs in the pricing table above.
+Task complexity matters more than file count: documentation research and a one-file security
+change are not automatically mechanical work.
 
-**Cost/task key:** All figures use the standard 20k-input / 5k-output token benchmark.
-Figures marked ‡ are xAI (Grok) models priced at standard-tier rates as of September 2026; xAI
-pricing changes frequently — verify current rates at [docs.x.ai/docs/models](https://docs.x.ai/docs/models) before provisioning.
-Cross-vendor alternatives are listed cheapest-first within the same capability tier.
-
-| Task class | Anthropic default | Anthropic cost/task | Cross-vendor alternatives (cost/task, cheapest first) | Example issue | Notes |
-|---|---|---|---|---|---|
-| `bug` — single-file or single-component, scoped fix | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | [#284](https://github.com/mfrancza/agentic-development-workflow/issues/284), [#263](https://github.com/mfrancza/agentic-development-workflow/issues/263), [#276](https://github.com/mfrancza/agentic-development-workflow/issues/276) | The implementation path is clear; sonnet handles typical bug fixes efficiently. |
-| `bug` — single-line syntax / typo fix | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | [#243](https://github.com/mfrancza/agentic-development-workflow/issues/243) | Empty `${{ }}` expression in a YAML comment — purely mechanical, no design decisions. |
-| `bug` — cross-cutting, multi-component | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:gpt-5.6-sol` $0.180, `model:gpt-6-astra` $0.450 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Respecting blocked-by dependencies across fail-loud, deferral, and cascade paths required cross-cutting design; carried both `bug` and `plan` labels. |
-| `enhancement` — docs-only | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117), [#224](https://github.com/mfrancza/agentic-development-workflow/issues/224), [#161](https://github.com/mfrancza/agentic-development-workflow/issues/161) | Pure documentation edits with no logic changes. Exception: docs that touch security-sensitive prose (auth, token handling) should use `model:sonnet`. |
-| `enhancement` — well-specified feature | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | [#302](https://github.com/mfrancza/agentic-development-workflow/issues/302), [#301](https://github.com/mfrancza/agentic-development-workflow/issues/301), [#280](https://github.com/mfrancza/agentic-development-workflow/issues/280) | New composite actions, runner support, and Terraform plumbing — implementation paths were clear from the issue description. |
-| `enhancement` — cross-cutting refactor | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:gpt-5.6-sol` $0.180, `model:gpt-6-astra` $0.450 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component changes that span workflow, entrypoint, TypeScript activities, and Terraform. |
-| `enhancement` — new agent type | `model:opus` | $0.225 | `model:grok-4.20-multi-agent-0309` $0.038‡, `model:grok-4.6` $0.070‡, `model:gpt-5.6-sol` $0.180, `model:gpt-6-astra` $0.450 | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#32](https://github.com/mfrancza/agentic-development-workflow/issues/32) | New agent types inherently require design decisions about scope, identity, and integration; always `plan`-class work. |
-| `dependency upgrade` | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | [#30](https://github.com/mfrancza/agentic-development-workflow/issues/30) | Typical version bumps are well-specified; sonnet is sufficient. If the upgrade involves a breaking-change migration across many files, consider `model:opus`. |
-| `do` — mechanical (typo, single config value, comment) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | [#243](https://github.com/mfrancza/agentic-development-workflow/issues/243), [#228](https://github.com/mfrancza/agentic-development-workflow/issues/228) | If `do` and clearly trivial, haiku is appropriate. When in doubt between haiku and sonnet, prefer sonnet. |
-| `do` — typical scoped implementation | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | [#304](https://github.com/mfrancza/agentic-development-workflow/issues/304), [#302](https://github.com/mfrancza/agentic-development-workflow/issues/302), [#263](https://github.com/mfrancza/agentic-development-workflow/issues/263) | The large majority of `do` issues fall here — non-trivial but well-specified. |
-| `plan` — high-level design / architecture | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:gpt-5.6-sol` $0.180, `model:gpt-6-astra` $0.450 | [#262](https://github.com/mfrancza/agentic-development-workflow/issues/262), [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Design documents require cross-cutting analysis and trade-off reasoning; opus is almost always the right pick for `plan`. |
-| `plan` — bounded validation / E2E test | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | [#139](https://github.com/mfrancza/agentic-development-workflow/issues/139), [#57](https://github.com/mfrancza/agentic-development-workflow/issues/57) | E2E validation plans are scoped and procedural; sonnet handles them well despite carrying the `plan` label. |
-| Docs-only enhancement (sub-flavor) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | [#117](https://github.com/mfrancza/agentic-development-workflow/issues/117), [#161](https://github.com/mfrancza/agentic-development-workflow/issues/161) | Subtype of docs-only enhancement — updating `AGENTS.md` or `README.md` for a limitation note or label description. |
-| Single-file config bump (sub-flavor) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | [#225](https://github.com/mfrancza/agentic-development-workflow/issues/225) | Adding `.editorconfig` or updating a single Terraform variable — pure mechanical change. |
-| Cross-cutting refactor (sub-flavor) | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:gpt-5.6-sol` $0.180, `model:gpt-6-astra` $0.450 | [#299](https://github.com/mfrancza/agentic-development-workflow/issues/299) | Multi-component refactors that touch workflow, entrypoint, activities, and infrastructure simultaneously. |
-| New agent type (sub-flavor) | `model:opus` | $0.225 | `model:grok-4.20-multi-agent-0309` $0.038‡, `model:grok-4.6` $0.070‡, `model:gpt-5.6-sol` $0.180, `model:gpt-6-astra` $0.450 | [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41), [#202](https://github.com/mfrancza/agentic-development-workflow/issues/202) | Any issue that adds a new agent identity, container image, or entrypoint dispatch path. |
-| `code review` — targeted (single file, small diff) | `model:haiku` | $0.045 | `model:gpt-5.6-luna` $0.010, `model:grok-build-0.1` $0.030‡, `model:grok-4.3` $0.038‡ | | Mechanical correctness scan of a single-file or small isolated change; no cross-component reasoning required. |
-| `code review` — standard (multi-file PR) | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | | Standard PR review evaluating correctness, style, AGENTS.md compliance, and test coverage across multiple files. |
-| `code review` — architectural / security-sensitive | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:gpt-5.6-sol` $0.180, `model:gpt-6-astra` $0.450 | | Cross-cutting reviews, security-sensitive changes (auth, secrets, tokens), or reviews that require system-wide trade-off reasoning. |
-| `design` — scoped feature design | `model:sonnet` | $0.090 | `model:grok-4.20-0309-non-reasoning` $0.038‡, `model:grok-4.5` $0.070‡, `model:gpt-5.6-terra` $0.100 | | Design for a bounded, well-specified feature where requirements are clear and scope is limited to one or two components. |
-| `design` — system / architectural design | `model:opus` | $0.225 | `model:grok-4.20-0309-reasoning` $0.038‡, `model:grok-4.6` $0.070‡, `model:gpt-5.6-sol` $0.180, `model:gpt-6-astra` $0.450 | [#262](https://github.com/mfrancza/agentic-development-workflow/issues/262), [#275](https://github.com/mfrancza/agentic-development-workflow/issues/275) | Cross-cutting system design, new subsystem architecture, or design work requiring broad contextual reasoning across multiple components. Overlaps with `plan` — high-level design. |
-
----
+| Task class | Anthropic | OpenAI | xAI (Grok) | Selection boundary |
+|---|---|---|---|---|
+| `do` — mechanical; typo, single value, small doc correction | `model:haiku` | `model:gpt-5.6-luna` | `model:grok-build-0.1` | No research, ambiguity, or design decisions; otherwise use a scoped-work model. |
+| `bug` — scoped diagnosis and fix | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.3` | A small diff alone does not make diagnosis trivial. |
+| `enhancement` / `do` — typical scoped implementation | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.6`, `model:grok-4.20-0309-non-reasoning` | Clear requirements and a bounded implementation path. |
+| `dependency upgrade` | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.5` | Escalate breaking migrations with architectural trade-offs to a design-capable model. |
+| Documentation audit, pricing research, bounded validation without `plan` | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.6` | Research is non-mechanical even if only Markdown changes; ambiguous scope needs a design-capable model. |
+| `plan` — design, architecture, or validation planning | `model:opus` | `model:gpt-5.6-sol` | `model:grok-4.20-0309-reasoning` | Use a design-capable model within the chosen provider; a human may deliberately choose a cheaper model for a procedural plan. |
+| Cross-cutting refactor or under-specified bug / enhancement | `model:opus` | `model:gpt-5.6-sol` | `model:grok-4.6` | Multiple interacting components or unresolved trade-offs. |
+| New agent type or decomposition-heavy design | `model:opus` | `model:gpt-5.6-sol` | `model:grok-4.20-multi-agent-0309` | Model selection does not change workflow topology or permissions. |
+| Hardest long-horizon implementation or system design | `model:opus` | `model:gpt-6-astra`, `model:gpt-5.6-sol` | `model:grok-4.6` | Evaluate Astra as a premium escalation, not an automatic default. |
+| Code review — targeted mechanical check | `model:haiku` | `model:gpt-5.6-luna` | `model:grok-build-0.1` | Small, isolated change with no security or cross-component implications. |
+| Code review — standard multi-file PR | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.6` | Correctness, tests, and repository conventions. |
+| Code review — architectural / security-sensitive | `model:opus` | `model:gpt-5.6-sol`, `model:gpt-6-astra` | `model:grok-4.6` | Human review remains necessary where required; model capability is not authorization. |
+| Design — bounded feature specification without `plan` | `model:sonnet` | `model:gpt-5.6-terra` | `model:grok-4.6` | If classified `plan`, use the `plan` row instead. |
 
 ## Evidence
 
-### Anthropic model capability tiers
+[Anthropic's current overview][anthropic-models], [OpenAI's model guidance][openai-models],
+and [xAI's model guidance][xai-models] support the workload descriptions, not a universal
+cross-vendor ranking. This repository has no controlled evaluation demonstrating that the
+September models are interchangeable at a given tier.
 
-Anthropic publishes model capability descriptions, latency profiles, and benchmark results on the
-[Anthropic model documentation page](https://docs.anthropic.com/en/docs/about-claude/models/overview).
-The three tier aliases track these tiers:
+The previous SWE-bench Verified and MMLU-Pro discussion did not identify model versions,
+scores, or comparable agent harnesses. It is not evidence that every Opus beats every Sonnet
+or that the quality gap disappears on single-file changes. Use task-representative evaluations
+with fixed prompts, tool budgets, and success criteria before changing defaults.
 
-- **Haiku** — Anthropic's "fastest and most compact" model family, optimized for near-instant
-  responsiveness and high-throughput tasks where cost and latency matter more than reasoning depth.
-- **Sonnet** — Anthropic's "best combination of speed and intelligence" family, designed as the
-  general-purpose default for the majority of production tasks. Anthropic's own recommendation is
-  to start here for most use cases.
-- **Opus** — Anthropic's "most capable" family, oriented toward tasks requiring "complex analysis,
-  research, and strategic planning." Highest capability, higher cost and latency.
+### Repository history (descriptive, not a success benchmark)
 
-These descriptions come from Anthropic's published model cards and are the primary justification
-for the tier → task-class mapping in the matrix above. Do not over-index on any single benchmark
-score; use the tier descriptions as the mental model and treat benchmarks as order-of-magnitude
-corroboration.
-
-### SWE-Bench Verified (coding benchmark)
-
-[SWE-Bench Verified](https://www.swebench.com/) measures the fraction of real GitHub issues an
-agent can resolve end-to-end — an ecologically valid proxy for the kind of agentic coding work
-this repo performs. Anthropic's published SWE-Bench Verified scores (see model documentation
-linked above) show a consistent ordering across tiers: Opus outperforms Sonnet on harder
-multi-file issues; Sonnet substantially outperforms Haiku on all but the simplest single-file
-tasks. The practical implication: for issues that require reading and modifying multiple files or
-reasoning about architecture, the tier gap is real and measurable. For single-file mechanical
-changes the gap collapses, making Haiku cost-effective.
-
-### MMLU-Pro (general reasoning benchmark)
-
-[MMLU-Pro](https://huggingface.co/datasets/TIGER-Lab/MMLU-Pro) evaluates broad reasoning and
-knowledge. Anthropic's published MMLU-Pro scores (available on the model documentation page)
-confirm the same tier ordering as SWE-Bench. The practical implication for this repo: Opus is
-meaningfully stronger when an issue requires the agent to reason about scope, weigh trade-offs,
-or interpret an ambiguous specification — that is, exactly the conditions that trigger `model:opus`
-in the task-class matrix above.
-
-### Community sources
-
-No stable community source (Anthropic engineering blog posts, "how we use Claude" write-ups from
-other public projects) was identified at time of writing that met the bar for longevity required
-to link from a reference document. This section will be updated if a durable source is found.
-
-### Repo history (last ~50 closed issues)
-
-**Reproducible query:**
+Reproduce a rolling sample with:
 
 ```bash
-gh issue list \
-  --repo mfrancza/agentic-development-workflow \
-  --state closed \
-  --limit 50 \
-  --json number,title,labels,closedAt
+gh issue list --repo mfrancza/agentic-development-workflow \
+  --state closed --limit 50 --json number,title,labels,closedAt
 ```
 
-To see issues by tier:
-
-```bash
-# Opus-labeled issues
-gh issue list --repo mfrancza/agentic-development-workflow \
-  --state closed --limit 50 --label "model:opus" \
-  --json number,title,labels
-
-# Sonnet-labeled issues
-gh issue list --repo mfrancza/agentic-development-workflow \
-  --state closed --limit 50 --label "model:sonnet" \
-  --json number,title,labels
-
-# Haiku-labeled issues
-gh issue list --repo mfrancza/agentic-development-workflow \
-  --state closed --limit 50 --label "model:haiku" \
-  --json number,title,labels
-```
-
-**Summary of findings (sampled 2026-08-30, issues #184–#334):**
-
-Across the last ~50 closed issues with `model:*` labels, the tier assignments produced the
-following pattern: `model:opus` was applied to 11 issues, all of which carried `plan` or
-combined `bug`+`plan` labels and represented cross-cutting design, new agent types, or
-multi-component refactors (examples: #299, #275, #262, #202, #177, #145, #82, #41, #32);
-every opus-labeled PR merged cleanly with no `human-required` escalation attributable to
-model underperformance. `model:sonnet` was applied to roughly 25+ issues — the large majority
-of `do`-labeled enhancements and scoped bug fixes (examples: #304, #302, #301, #284, #280,
-#279, #278, #276, #263) — all of which merged cleanly. `model:haiku` was applied to 7–8 issues
-that were all documentation-only, single-line syntax fixes, or single-file config additions
-(examples: #243, #228, #225, #224, #161, #117); all merged cleanly. Three `plan`-labeled
-issues carried `model:sonnet` instead of `model:opus` (#139, #99, #57) — inspection shows
-these were bounded E2E validation and test-fixture plans, not architectural design work, and
-all three succeeded. The one dependency-upgrade issue in the sample (#30) predates the
-grooming label system and carried no `model:*` label; the task-class matrix assigns it to
-`model:sonnet` by default. Zero issues required escalation due to a tier mismatch; the
-boundary decisions validated by history are: `plan` → opus (with the bounded-validation
-exception), `do`+trivial → haiku, everything else → sonnet.
-
----
+On **September 12, 2026**, the 50 returned closed issues included 7 carrying `model:sonnet`,
+6 carrying `model:opus`, 1 carrying `model:haiku`, 1 carrying `model:gpt-5.6-sol`, and 35 with
+no model label. Examples include scoped work on #492 (Sonnet), an adoption-doc correction
+on #496 (Haiku), and the vendor-refresh issue #448 (Opus).
+These are issue-label observations, not verified execution models or clean-merge outcomes.
+Labels can change, closed issues need not have merged PRs, and per-agent overrides can change
+which model actually runs. The earlier August sample is historical, not a current evaluation.
 
 ## Decision Heuristics
 
-A groomer or a human can apply these rules in ten seconds:
-
-- **`plan` issues are almost always `model:opus`.** The exception is a bounded, procedural plan
-  (E2E validation, test fixture planning) — those can use `model:sonnet`.
-- **`do` + clearly mechanical = `model:haiku`.** Mechanical means: one value changed, a comment
-  added or corrected, a typo fixed, a single config file updated with no logic. If you are not
-  certain, use `model:sonnet`.
-- **`do` + non-trivial = `model:sonnet`.** This is the majority of all `do` issues.
-- **Cross-cutting always escalates to `model:opus`.** If the change touches more than two
-  distinct subsystems (e.g. workflow + entrypoint + TypeScript activities + Terraform), use opus
-  regardless of whether the issue is labeled `do` or `plan`.
-- **Ambiguity escalates.** An under-specified issue whose scope the agent must reason out before
-  implementing belongs on opus, not sonnet, even if the eventual implementation turns out to be
-  small.
-- **Security-sensitive changes use `model:sonnet` at minimum; prefer `model:opus`.** Changes to
-  auth flows, token handling, branch-protection rules, or secret management warrant the higher
-  tier.
-- **Docs-only changes are `model:haiku` unless they touch security prose.** Updating `AGENTS.md`
-  to document a limitation, adding a README subsection, or correcting a doc note is haiku work.
-  Docs that explain token scopes, App permission models, or security defaults should use sonnet.
-- **When in doubt between haiku and sonnet, prefer sonnet.** The cost difference is small; a
-  failed or low-quality haiku run costs more in rework than the token savings.
-- **When in doubt between sonnet and opus, prefer sonnet for `do` and opus for `plan`.** For
-  `do` issues the implementation path should already be clear; if it isn't, the issue may need
-  re-grooming.
-- **Do not change a `model:*` label that is already present.** A human or a previous run has
-  made a deliberate choice. Only override if you can articulate a specific reason (e.g. the
-  issue has been significantly expanded in scope since the label was applied).
-
----
+- **Preserve intentional choices.** If any generic label matching `^model:[^:]+$` exists,
+  the groomer must not add, remove, or replace it. This includes named vendor models and snapshots.
+- **Per-agent overrides may coexist.** A label such as `model:review:opus` alone does not block
+  selection of one generic model label. Preserve all existing per-agent labels too.
+- **When selecting, emit exactly one generic model label** from the chosen provider's criteria.
+  For Anthropic: mechanical → Haiku; scoped, non-trivial work → Sonnet; design-heavy,
+  cross-cutting, security-sensitive, ambiguous, or `plan` → Opus. OpenAI and xAI follow their
+  task-matrix columns, including reasoning-capable choices for `plan` work.
+- **When unsure, move beyond the mechanical category within the chosen provider.**
+  Documentation-only is not synonymous with trivial.
+- **Manual exceptions are not grooming rules.** A human may override a bounded procedural plan
+  to Sonnet; the groomer preserves it rather than creating an exception to the criteria.
 
 ## Provider Notes
 
-The tier aliases (`model:haiku`, `model:sonnet`, `model:opus`) and all guidance in this document
-are **Anthropic-specific**. They resolve via the provider-inference logic in `docker/scripts/entrypoint.sh`
-to the latest snapshot of the corresponding claude series.
+The tier-alias vocabulary is Anthropic-specific; grooming and operator guidance span all three providers.
+Read `resolve_provider()` in the [developer entrypoint](../docker/scripts/entrypoint.sh) and
+[reviewer entrypoint](../docker/reviewer/entrypoint.sh) for accepted model names and key validation.
+Anthropic names route to Claude Code, OpenAI names to Codex, and xAI names to Grok Build CLI.
+The repository accepts the `claude-*` namespace but uses explicit allowlists for OpenAI and xAI;
+routing acceptance is not proof of vendor availability or account access.
 
-OpenAI and xAI (Grok) models use flat `model:*` labels (e.g. `model:gpt-5.6-sol`,
-`model:gpt-6-astra`, `model:grok-4.6`) with no tier-alias vocabulary. The cross-provider label system and
-provider inference are documented in:
-
-- [`docs/design/multi-provider-models.md`](design/multi-provider-models.md) — how the
-  entrypoint maps model names to provider API keys; operator guidance for using non-Anthropic
-  models.
-- [`docs/design/grok-models.md`](design/grok-models.md) — xAI Grok provider integration,
-  `XAI_API_KEY` plumbing, and Grok label conventions.
-
-The grooming agent applies only Anthropic tier aliases. Analogous tiers for OpenAI and xAI models
-(e.g. "which OpenAI model is roughly equivalent to `model:sonnet`?") are documented in the
-Cross-Vendor Cost Analysis section above; the design rationale for keeping grooming
-Anthropic-only is in
-[`docs/design/agent-usage-guidance.md`](design/agent-usage-guidance.md) decision 6.
-
----
+Terraform still contains legacy Claude series/snapshot labels that current Anthropic docs mark
+retired on the first-party API. They are not recommendations here. Consult the
+[vendor deprecation page][anthropic-deprecations] before using a historical label; refreshing that
+inventory and checking affected open issues belongs to the vendor-refresh work, not this pricing review.
+Models present only in a vendor catalog are not automatically provisioned in this repository.
 
 ## Repo Defaults
 
-This section records the configured default model for the repo-wide Actions variable and for each agent workflow, and confirms alignment against the guidance in this document. It is the canonical reference for the end-to-end validation task (issue [#334](https://github.com/mfrancza/agentic-development-workflow/issues/334)).
+The configured fallback remains `sonnet` in
+[`terraform/variables.tf`](../terraform/variables.tf), exported by the
+[`agent-vars` module](../terraform/modules/agent-vars/main.tf).
+It is a fallback, not evidence that every workflow always runs Sonnet, and operators can change it.
 
-### Repo-wide default
+For exact label sources and fallback wiring, read the
+[caller and reusable workflows](../.github/workflows/) and
+[`resolve-model` activity](../.github/scripts/src/resolve-model.ts).
+Where enabled, resolution checks the relevant per-agent label first, then a generic label,
+then the configured default; duplicates fail at the tier being evaluated.
+Issue-driven runs read issue labels; review reads **PR labels**. The two feedback workflows
+resolve developer labels from the linked issue, falling back when none is linked.
+Conflict resolution passes the configured default directly rather than resolving model labels.
 
-`DEFAULT_MODEL` defaults to `"sonnet"` in [`terraform/variables.tf`](../terraform/variables.tf). This matches the guidance: Sonnet is documented as the **repo-standard default** in the Tier Summary above — "the right pick for the large middle band of typical implementation tasks."
+For intentional Astra implementation plus Opus review, keep `model:gpt-6-astra` and
+`model:review:opus` on the issue (and any design sub-issues), and put `model:review:opus`
+on the PR too: an issue's review override alone is not read by the reviewer workflow.
 
-### Per-workflow defaults
-
-All eight agent workflow files pass `vars.DEFAULT_MODEL` to the container without an additional per-workflow override; no workflow hard-codes a different fallback. Each workflow therefore inherits `"sonnet"` as its effective default.
-
-| Workflow | `AGENT_ACTION` | Role | Applicable guidance tier | Default | Aligned? |
-|---|---|---|---|---|---|
-| `agent-implement.yml` | `implement` | Implements issues: creates branch, writes solution, opens PR | `do` — typical scoped implementation → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
-| `agent-groom.yml` | `groom` | Classifies issues and applies labels | Structured issue-analysis; not mechanical, not architectural → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
-| `agent-design.yml` | `design` | Writes design docs for `plan` issues | Scoped feature design → `model:sonnet`; architectural design handled by the `model:opus` label the grooming agent applies before `agent:design` fires | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
-| `agent-review.yml` | *(reviewer image)* | Reviews PR changes and posts a review | Standard multi-file code review → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
-| `agent-resolve-conflicts.yml` | `resolve-conflicts` | Resolves merge conflicts on developer-agent PRs | Scoped semantic merge; not mechanical but well-bounded → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
-| `agent-fix-checks.yml` | `fix-checks` | Diagnoses and fixes CI failures | Scoped debugging and implementation → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
-| `agent-fix-deployment.yml` | `fix-deployment` | Diagnoses deployment failures and opens a fix-up PR | Scoped deployment debugging → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
-| `agent-respond-review.yml` | `respond-review` | Addresses review feedback and pushes updates | Scoped review-driven implementation → `model:sonnet` | `sonnet` (via `vars.DEFAULT_MODEL`) | ✓ |
-
-All eight workflows are aligned with the guidance. No disagreements were found; no follow-up issues were opened.
-
-**Note on label overrides.** Issue-driven workflows (`agent-implement`, `agent-groom`, `agent-design`, `agent-fix-deployment`) use the default only when no `model:*` label is present on the issue. The grooming agent typically applies `model:haiku` for mechanical tasks and `model:opus` for `plan` issues before `agent:developer` or `agent:design` fires, so the effective model at runtime often differs from the default. The default is the safety net for issues that skip grooming or that the groomer classifies as typical `do` work.
+[anthropic-models]: https://platform.claude.com/docs/en/models/overview
+[anthropic-pricing]: https://platform.claude.com/docs/en/about-claude/pricing
+[anthropic-deprecations]: https://platform.claude.com/docs/en/about-claude/model-deprecations
+[openai-models]: https://developers.openai.com/api/docs/guides/latest-model
+[openai-pricing]: https://developers.openai.com/api/docs/pricing
+[openai-sol]: https://developers.openai.com/api/docs/models/gpt-5.6-sol
+[openai-astra]: https://developers.openai.com/api/docs/models/gpt-6-astra
+[xai-models]: https://docs.x.ai/developers/models
+[xai-pricing]: https://docs.x.ai/developers/pricing
+[xai-batch]: https://docs.x.ai/developers/advanced-api-usage/batch-api
 
 ---
 
 ## Change Log
+
+Entries below record changes at their original dates; historical model lists and prices are not
+current selection guidance.
+
+- **2026-09-12 (rev 9)** — Addressed PR #567 review: included Anthropic, OpenAI, and xAI in
+  grooming selection, aligned the prompt and label criteria, and added cross-provider coverage.
+  Preserved existing overrides and the no-preference Anthropic fallback; no workflow defaults,
+  provider credentials, or provisioned labels changed.
+
+- **2026-09-12 (rev 8)** — End-to-end review for Issue #564 against Terraform and official
+  vendor sources. Consolidated pricing and recomputed normalized costs; corrected cache-write,
+  batch, long-context, and promotional-price assumptions. Added research and premium-escalation
+  task boundaries, distinguished vendor advice from repository policy, and replaced unsupported
+  benchmark/outcome claims with a dated descriptive sample. Aligned grooming preservation rules
+  with generic/per-agent labels and kept `plan` → Opus consistent with the criteria.
 
 - **2026-09-12 (rev 7)** — xAI Grok model audit (Issue #460): confirmed `grok models` at Grok
   Build CLI v1.0.13 is unchanged from the rev 6 refresh — 7 text/coding models
