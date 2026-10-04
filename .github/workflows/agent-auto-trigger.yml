@@ -57,7 +57,7 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 2 ─────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 3 ─────────────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 4 ─────────────────────────────────────────────────────────────
@@ -136,7 +136,7 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 5 ─────────────────────────────────────────────────────────────
@@ -165,7 +165,7 @@ jobs:
       pr-number: ${{ github.event.pull_request.number }}
       helpers-ref: ${{ github.sha }}
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 6 ─────────────────────────────────────────────────────────────
@@ -206,5 +206,5 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}

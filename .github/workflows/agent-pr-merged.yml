@@ -72,5 +72,5 @@ jobs:
     with:
       issue-number: ${{ needs.extract-issue-number.outputs.issue_number }}
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
