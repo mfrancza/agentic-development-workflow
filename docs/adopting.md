@@ -227,8 +227,10 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 > only for OpenAI models and `XAI_API_KEY` only for Grok models. The explicit
 > `secrets:` block still names all three keys, but
 > `${{ secrets.OPENAI_API_KEY }}` evaluates to an empty string when the secret
-> is unset — the reusable declares those keys `required: false` and the
-> container validates only that the key for the *selected* model is present.
+> is unset — the reusable declares those keys `required: false`, the
+> `run-agent` action forwards only the selected model's key into the container
+> (the other two never enter the agent's environment), and the container
+> validates that the key it received is present.
 > Per-reusable required/optional splits are listed in the **Prerequisites**
 > section of each reusable below.
 
