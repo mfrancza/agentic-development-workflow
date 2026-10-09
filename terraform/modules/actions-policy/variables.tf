@@ -16,7 +16,7 @@ variable "verified_allowed" {
 }
 
 variable "patterns_allowed" {
-  description = "List of owner/repo patterns for non-GitHub-owned Actions that are explicitly allowed (e.g. [\"anthropics/claude-code-action\"]). Each entry must correspond to an action pinned to a full 40-character SHA in the consuming workflow YAML. An empty list (the default) means only GitHub-owned actions are permitted."
+  description = "Patterns for non-GitHub-owned Actions and reusable workflows that are explicitly allowed. GitHub matches the full uses: string, so each entry needs a ref: an action is owner/repo@<sha-or-tag> (e.g. \"hashicorp/setup-terraform@<40-char-sha>\"), and a reusable workflow from another owner is OWNER/REPO/.github/workflows/FILE.yml@REF (wildcards allowed, e.g. \"mfrancza/agentic-development-workflow/.github/workflows/*@v0\"). A bare owner/repo entry matches nothing. An empty list (the default) means only GitHub-owned actions and same-repository workflows are permitted."
   type        = list(string)
   default     = []
 }
