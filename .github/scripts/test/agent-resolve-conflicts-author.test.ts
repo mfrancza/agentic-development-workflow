@@ -35,6 +35,15 @@ describe(
       );
     });
 
+    it("declares developer-author exactly once (a second declaration is a duplicate YAML key that makes GitHub reject the whole workflow file)", () => {
+      // Two PRs adding the same input in different positions merge without a
+      // textual conflict but produce a duplicate mapping key. GitHub then
+      // refuses to load the workflow (zero-job failure run on every push).
+      // Regression: PR #612 + PR #613, fixed in the follow-up PR.
+      const declarations = reusable.match(/^ {6}developer-author:\s*$/gm) ?? [];
+      expect(declarations).toHaveLength(1);
+    });
+
     it("passes developer-author to the find-conflicted-prs action as the author input", () => {
       // The value supplied (or defaulted) by the caller must reach the action
       // so that it actually controls which PRs are enumerated.
