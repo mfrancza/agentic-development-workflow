@@ -21,6 +21,16 @@ on:
         type: string
         required: false
         default: ''
+      developer-author:
+        description: >
+          GitHub App slug in `app/<slug>` form used to filter open PRs by the
+          developer-agent identity during enumeration (e.g.
+          `app/my-developer-agent`). Ignored when pr-number is set (enumeration
+          is skipped). Defaults to `app/mfrancza-developer-agent` — external
+          adopters must override this to match their own developer-agent App slug.
+        type: string
+        required: false
+        default: 'app/mfrancza-developer-agent'
       escalation-assignee:
         description: >
           GitHub login to assign escalation issues to (e.g.
@@ -133,6 +143,7 @@ jobs:
           token: ${{ github.token }}
           repo: ${{ github.repository }}
           pr-number: ${{ inputs.pr-number }}
+          author: ${{ inputs.developer-author }}
 
   resolve:
     needs: find-conflicted-prs
