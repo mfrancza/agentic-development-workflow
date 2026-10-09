@@ -320,6 +320,14 @@ required variables, composite action inputs) always bump the major version.
 Backwards-compatible additions bump the minor version. Bug fixes and internal
 refactors bump the patch version.
 
+> **Pre-1.0 stability.** That contract applies from `v1.0.0` onward. While the
+> project is on `v0.x.y` it is a feedback release: a breaking change to a
+> reusable's `inputs:`/`secrets:` contract may land on a **minor** bump (for
+> example `v0.0.x` → `v0.1.0`), and the moving `v0` tag will pick it up. Each
+> such change is called out in the release notes with the stub lines to add.
+> If you need reproducibility, pin to an exact `v0.x.y` tag rather than `v0`.
+> See [`docs/design/initial-release.md`](design/initial-release.md), Decision 6.
+
 ---
 
 ## Terraform modules
@@ -856,7 +864,11 @@ Responds to a submitted pull request review by running the developer agent to
 address feedback and push updated commits. The reusable first checks whether
 there is actionable feedback (skips on closed/merged PRs, on approvals with
 zero unresolved threads, and on bare approvals with no body and no inline
-comments) before spending an Anthropic API call.
+comments) before spending an Anthropic API call. It also skips any review
+whose author is the PR author: the developer agent's own thread replies are
+materialised by GitHub as `COMMENTED` reviews, and without this guard each
+reply re-triggers the workflow in an unbounded loop (see
+[`docs/design/respond-review-self-trigger-guard.md`](design/respond-review-self-trigger-guard.md)).
 
 **Prerequisites.**
 
@@ -864,6 +876,10 @@ comments) before spending an Anthropic API call.
 - Secrets: `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`, `ANTHROPIC_API_KEY`,
   `OPENAI_API_KEY`, `XAI_API_KEY`.
 - Actions variables: `AGENT_ALLOWLIST`.
+- The `review-author` and `pr-author` inputs are **required** (since v0.1.0).
+  Pass them straight from the event payload as shown in the stub; the reusable
+  compares them to implement the self-review guard and fails loudly if either
+  is missing rather than silently running without the guard.
 
 **Caller stub.**
 
@@ -886,8 +902,12 @@ jobs:
   respond-review:
     # Gate on PR author (developer-agent bot) AND review author (trusted actor).
     # Adjust the PR-author login to match your developer-agent App slug.
+    # The second line excludes reviews authored by the PR author itself: the
+    # developer agent is on AGENT_ALLOWLIST, so without it the agent's own
+    # thread replies would re-trigger this workflow indefinitely.
     if: >
       github.event.pull_request.user.login == '<developer-agent-slug>[bot]' &&
+      github.event.review.user.login != github.event.pull_request.user.login &&
       (
         contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.review.user.login) ||
         github.event.review.user.login == '<reviewer-agent-slug>[bot]'
@@ -898,6 +918,8 @@ jobs:
       review-state: ${{ github.event.review.state }}
       review-body: ${{ github.event.review.body }}
       review-id: ${{ github.event.review.id }}
+      review-author: ${{ github.event.review.user.login }}
+      pr-author: ${{ github.event.pull_request.user.login }}
       repo-name: ${{ github.event.repository.name }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
@@ -912,7 +934,10 @@ jobs:
 > **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` and
 > `<reviewer-agent-slug>[bot]` with your actual App slugs. The review-author
 > gate prevents outside actors from driving prompt injection against the
-> developer agent on public repos.
+> developer agent on public repos. Keep the `review.user.login !=
+> pull_request.user.login` line and the `review-author` / `pr-author` inputs
+> exactly as shown: together they are the two layers of the self-trigger
+> guard, and the reusable rejects the call if either input is absent.
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
 Workflows (R/W) to push the response commits. The review body and inline
@@ -1720,6 +1745,31 @@ workflow itself (before any variable lookup).
 with the actual bot logins for your Apps (e.g. `my-developer-agent[bot]` and
 `my-reviewer-agent[bot]`). The bot login appears in the first comment a bot posts
 after installation, or can be confirmed by checking the App's page on GitHub.
+
+---
+
+### `agent-respond-review` fails at startup: `Required input 'review-author' not provided`
+
+**Symptom:** After the `v0` tag advanced to `v0.1.0` or later, every
+`agent-respond-review` run fails immediately at workflow validation with an
+error naming `review-author` or `pr-author` as a required input that was not
+provided. No job runs.
+
+**Cause:** `v0.1.0` added two required inputs, `review-author` and
+`pr-author`, to `agent-respond-review-reusable.yml` for the self-trigger guard.
+A caller stub copied from this guide before that release does not pass them.
+
+**Fix:** Add the two lines to the `with:` block of your caller stub and, if
+missing, the author-inequality line to the `if:` condition:
+
+```yaml
+    with:
+      review-author: ${{ github.event.review.user.login }}
+      pr-author: ${{ github.event.pull_request.user.login }}
+```
+
+The full current stub is in the
+[`agent-respond-review` section](#agent-respond-review-reusable-workflow).
 
 ---
 
