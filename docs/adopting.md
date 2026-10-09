@@ -1060,7 +1060,7 @@ If the agent cannot resolve a conflict confidently, it aborts, applies
 - GitHub App: **developer-agent**.
 - Secrets: `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`, `ANTHROPIC_API_KEY`,
   `OPENAI_API_KEY`, `XAI_API_KEY`.
-- The reusable will require an explicit `developer-author` input in the caller stub (your developer-agent App's GitHub search author, in the `app/<slug>` form), because the conflict finder has no way to infer the identity otherwise. This input is added by [issue #605](https://github.com/mfrancza/agentic-development-workflow/issues/605); the stub below reflects the post-#605 state.
+- The reusable requires an explicit `developer-author` input in the caller stub (your developer-agent App's GitHub search author, in the `app/<slug>` form), because the conflict finder has no way to infer the identity otherwise.
 
 **Caller stub.**
 
@@ -1097,7 +1097,7 @@ jobs:
       XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
 
-> **Adapt `developer-author`** to your developer-agent App's bot author (e.g. `app/acme-developer-agent`). This input takes effect once [issue #605](https://github.com/mfrancza/agentic-development-workflow/issues/605) lands; the `manual pr-number` dispatch path works without it today.
+> **Adapt `developer-author`** to your developer-agent App's bot author (e.g. `app/acme-developer-agent`).
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
 Workflows (R/W) to push resolution commits. The workflow triggers on `push` to
