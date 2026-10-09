@@ -58,7 +58,7 @@ The `agent:developer` label is removed automatically when the PR is closed (merg
 
 > **Note:** The developer agent will not run on issues labeled `draft`. Wait for the design PR to merge first.
 
-> **Note:** The developer agent will not run on issues with open blockers. When the auto-trigger system is enabled, the `blocked` label is applied when blockers are detected and both it and `agent:developer` are re-applied automatically once all blockers close — no manual action is needed. When running without auto-trigger, remove `blocked` and re-apply `agent:developer` manually after resolving blockers.
+> **Note:** The developer agent will not run on issues with open blockers. When the auto-trigger system is enabled, the `blocked` label is applied when blockers are detected; once all blockers close, the cascade removes `blocked` and applies `agent:developer` automatically — no manual action is needed. When running without auto-trigger, remove `blocked` and re-apply `agent:developer` manually after resolving blockers.
 
 ### 5. CI
 
@@ -119,7 +119,7 @@ These labels are managed automatically but are visible and useful to understand.
 | Label | Meaning | Who applies it |
 |-------|---------|---------------|
 | `draft` | Issue is scoped by an unmerged design; implementation is not ready yet. | Designer agent (on sub-issues it creates). Removed when the design PR merges. |
-| `blocked` | Implementation deferred because the issue has open blockers. When the auto-trigger system is enabled, both `blocked` and `agent:developer` are re-applied automatically once all blockers close. Without auto-trigger, remove `blocked` and re-apply `agent:developer` manually. | Auto-trigger when blockers are detected; may also be applied manually as a "hold for later" marker — treated identically regardless of origin. |
+| `blocked` | Implementation deferred because the issue has open blockers. When the auto-trigger system is enabled, the cascade removes `blocked` and applies `agent:developer` automatically once all blockers close. Without auto-trigger, remove `blocked` and re-apply `agent:developer` manually. | Auto-trigger when blockers are detected; may also be applied manually as a "hold for later" marker — treated identically regardless of origin. |
 | `human-required` | A human is needed — agent has escalated. The issue or PR is also assigned to the relevant person. | Agents at escalation points; also applied manually. |
 | `conflicts-escalated` | The conflict-resolution agent already tried this PR and escalated. Remove to re-attempt. | Conflict-resolution agent. |
 
