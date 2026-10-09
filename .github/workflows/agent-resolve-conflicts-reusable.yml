@@ -139,7 +139,8 @@ jobs:
             echo "::error::developer-login must be in the form '<slug>[bot]'; got '${DEVELOPER_LOGIN}'"
             exit 1
           fi
-          printf 'author=app/%s\n' "${slug}" >> "$GITHUB_OUTPUT"
+          slug_clean="$(printf '%s' "${slug}" | tr -d '\r\n')"
+          printf 'author=app/%s\n' "${slug_clean}" >> "$GITHUB_OUTPUT"
 
       # When a PR number is provided via workflow_dispatch, use it directly
       # (poll for mergeability state to let GitHub's async computation settle,

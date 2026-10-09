@@ -1086,6 +1086,7 @@ jobs:
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-resolve-conflicts-reusable.yml@v0
     with:
       pr-number: ${{ inputs.pr_number || '' }}
+      developer-login: <developer-agent-slug>[bot]
       escalation-assignee: ${{ github.repository_owner }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
@@ -1096,6 +1097,10 @@ jobs:
       OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
+
+> **Adapt `developer-login`** to your developer-agent App's bot login (e.g.
+> `acme-developer-agent[bot]`). The reusable derives the `app/<slug>` author
+> filter from this value to find PRs authored by the developer-agent bot.
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
 Workflows (R/W) to push resolution commits. The workflow triggers on `push` to
