@@ -42,7 +42,7 @@ The `agent:groom` label is removed automatically on success. Re-apply it to re-g
 For issues labeled `plan`, apply `agent:design` to produce a design document before implementation begins. The agent will:
 
 - Create a `design/issue-{N}` branch with a design document under `docs/design/`.
-- Open a draft PR for human review of the design.
+- Open a PR for human review of the design.
 - Create draft sub-issues (labeled `draft`) with dependency tracking.
 
 When the design PR merges, the `draft` label is automatically removed from all sub-issues, making them ready for implementation.
@@ -88,7 +88,7 @@ The following behaviors are triggered by labels. All label-triggered workflows r
 | Label | Applied to | Effect |
 |-------|-----------|--------|
 | `agent:groom` | Issue | Classify the issue and add labels and notes. Removed automatically on success. |
-| `agent:design` | Issue | Write a design doc, open a draft PR, and create draft sub-issues. |
+| `agent:design` | Issue | Write a design doc, open a PR, and create draft sub-issues. |
 | `agent:developer` | Issue | Implement the issue, open a PR. Removed when the PR is closed. |
 
 ### PR labels
