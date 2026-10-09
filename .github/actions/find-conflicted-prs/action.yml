@@ -22,7 +22,11 @@ inputs:
     required: false
     default: ''
   author:
-    description: 'Author filter used to enumerate developer-agent PRs'
+    description: >
+      GitHub search author filter for enumerating developer-agent PRs.
+      Must be in the app/<slug> form (e.g. app/mfrancza-developer-agent).
+      Derive this value from the developer-login input in the caller workflow
+      by stripping the [bot] suffix and prepending app/.
     required: false
     default: 'app/mfrancza-developer-agent'
 

@@ -19,6 +19,7 @@ jobs:
     with:
       pr-number: ${{ inputs.pr_number || '' }}
       escalation-assignee: ${{ github.repository_owner }}
+      developer-login: mfrancza-developer-agent[bot]
       image: ''
       helpers-ref: ${{ github.sha }}
     secrets:

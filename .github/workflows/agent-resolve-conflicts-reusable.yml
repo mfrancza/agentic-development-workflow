@@ -21,6 +21,14 @@ on:
         type: string
         required: false
         default: ''
+      developer-login:
+        description: >
+          GitHub login of the developer-agent bot in the <slug>[bot] form
+          (e.g. mfrancza-developer-agent[bot]). Used to derive the
+          app/<slug> author filter for find-conflicted-prs. See
+          docs/adopting.md for how to look up your installation's slug.
+        type: string
+        required: true
       escalation-assignee:
         description: >
           GitHub login to assign escalation issues to (e.g.
@@ -120,6 +128,19 @@ jobs:
           fi
           echo "Helper checkout HEAD verified: ${actual_sha}"
 
+      - name: Compute search-author from developer-login
+        id: author
+        env:
+          DEVELOPER_LOGIN: ${{ inputs.developer-login }}
+        run: |
+          set -euo pipefail
+          slug="${DEVELOPER_LOGIN%\[bot\]}"
+          if [[ -z "${slug}" || "${slug}" == "${DEVELOPER_LOGIN}" ]]; then
+            echo "::error::developer-login must be in the form '<slug>[bot]'; got '${DEVELOPER_LOGIN}'"
+            exit 1
+          fi
+          printf 'author=app/%s\n' "${slug}" >> "$GITHUB_OUTPUT"
+
       # When a PR number is provided via workflow_dispatch, use it directly
       # (poll for mergeability state to let GitHub's async computation settle,
       # then include regardless of result — this is a manual backstop).
@@ -133,6 +154,7 @@ jobs:
           token: ${{ github.token }}
           repo: ${{ github.repository }}
           pr-number: ${{ inputs.pr-number }}
+          author: ${{ steps.author.outputs.author }}
 
   resolve:
     needs: find-conflicted-prs
