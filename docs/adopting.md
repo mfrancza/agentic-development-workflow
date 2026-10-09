@@ -462,12 +462,28 @@ non-GitHub action used in a workflow must be added to `patterns_allowed` **and**
 pinned to a full 40-character SHA in the workflow YAML — omitting the entry
 causes a loud workflow failure, not a silent bypass.
 
+**The reusable workflows from this repository count as non-GitHub-owned.**
+The policy is evaluated in *your* repository against the full `uses:` string
+of every call, and a reusable workflow in another owner's repository is only
+permitted if a pattern matches it. The `patterns_allowed` entry must therefore
+be in GitHub's reusable-workflow form,
+`OWNER/REPO/.github/workflows/FILE.yml@REF`, not `owner/repo`: a bare
+`mfrancza/agentic-development-workflow` entry matches nothing, and every
+caller stub fails at startup with zero jobs. The wiring snippet below
+allow-lists all of this repository's reusables at the `v0` tag with one
+wildcard entry; if you pin to an exact tag or SHA, use the same selector after
+the `@`. The reusables themselves only call GitHub-owned `actions/*` actions
+and this repository's local composite actions, so no further entries are
+needed on their account.
+
 **Prerequisites.**
 
 - A configured `github` provider.
 - A `github_repository` resource for the target repository.
-- If any workflow calls a non-GitHub action (e.g. a third-party marketplace
-  action), list it in `patterns_allowed`.
+- An entry in `patterns_allowed` matching the `uses:` string of the reusable
+  workflows you call (see the wiring snippet).
+- If any of your own workflows call a non-GitHub action (e.g. a third-party
+  marketplace action), list it in `patterns_allowed` as `owner/repo@<sha>`.
 
 **Wiring snippet.**
 
@@ -475,7 +491,14 @@ causes a loud workflow failure, not a silent bypass.
 module "actions_policy" {
   source     = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/actions-policy?ref=v0"
   repository = github_repository.this.name
-  # patterns_allowed = []   # add owner/repo patterns for any non-GitHub-owned actions
+  patterns_allowed = [
+    # Required: allow this repository's reusable workflows at the ref you pin
+    # in your caller stubs' uses: lines (here the moving v0 tag). GitHub
+    # matches the full OWNER/REPO/PATH/FILE@REF string, so owner/repo alone
+    # does not work. For an exact pin use ...workflows/*@v0.1.0 or ...@<sha>.
+    "mfrancza/agentic-development-workflow/.github/workflows/*@v0",
+    # Add any non-GitHub-owned action your own workflows use, as owner/repo@<sha>.
+  ]
 }
 ```
 
@@ -1728,6 +1751,41 @@ If step 1 still fails after upgrading, confirm that: (a) `helpers-ref:` is prese
 in the `with:` block, (b) the ref resolves to a tag or SHA that exists on the
 source repo, and (c) your `uses:` line references the reusable workflow file
 (not the caller stub file).
+
+---
+
+### Reusable workflow call fails at startup: "is not allowed to be used in"
+
+**Symptom:** Every caller stub that `uses:` a reusable workflow from this
+repository fails immediately with no jobs, and the run's error reads like:
+
+```
+mfrancza/agentic-development-workflow/.github/workflows/agent-groom-reusable.yml@v0
+is not allowed to be used in <your-org>/<your-repo>. Actions in this workflow
+must be: within a repository owned by <your-org>, created by GitHub, or matching
+the following: ...
+```
+
+**Cause:** Your repository's Actions permissions are in `selected` mode (the
+`actions-policy` module sets this) and the allow list has no pattern matching
+the reusable-workflow `uses:` string. GitHub matches the **full** string in the
+form `OWNER/REPO/.github/workflows/FILE.yml@REF`. An entry of
+`mfrancza/agentic-development-workflow` (an earlier version of this guide's
+wiring snippet suggested "owner/repo patterns") matches nothing.
+
+**Fix:** Add a pattern that matches the reusables at the ref you pin, then
+apply:
+
+```hcl
+patterns_allowed = [
+  "mfrancza/agentic-development-workflow/.github/workflows/*@v0",
+]
+```
+
+For an exact pin, use the same selector you use in `uses:` after the `@`, e.g.
+`...workflows/*@v0.1.0` or `...workflows/*@<40-char-sha>`. Without Terraform,
+the same list lives under *Settings → Actions → General → Allow specified
+actions and reusable workflows*.
 
 ---
 
