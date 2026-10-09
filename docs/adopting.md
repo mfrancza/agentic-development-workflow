@@ -1060,8 +1060,11 @@ If the agent cannot resolve a conflict confidently, it aborts, applies
 - GitHub App: **developer-agent**.
 - Secrets: `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`, `ANTHROPIC_API_KEY`,
   `OPENAI_API_KEY`, `XAI_API_KEY`.
-- Actions variables: `AGENT_ALLOWLIST` (identifies the developer-agent bot
-  identity used to find PRs authored by the agent).
+- The `developer-author` input must be set to `app/<developer-app-slug>` — the
+  GitHub App slug in the `app/` prefix form used by the PR author filter (for
+  example, `app/my-developer-agent`). This value is used to enumerate open PRs
+  authored by the developer agent. When `pr-number` is provided via
+  `workflow_dispatch`, enumeration is skipped and this value is not used.
 
 **Caller stub.**
 
@@ -1086,6 +1089,7 @@ jobs:
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-resolve-conflicts-reusable.yml@v0
     with:
       pr-number: ${{ inputs.pr_number || '' }}
+      developer-author: app/<developer-app-slug>
       escalation-assignee: ${{ github.repository_owner }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
@@ -1096,6 +1100,12 @@ jobs:
       OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
+
+> **Adapt `developer-author`** to your developer-agent App's GitHub App slug in
+> `app/<slug>` form — for example, `app/my-developer-agent`. The reusable uses
+> this value to list open PRs authored by the developer agent during enumeration.
+> When `pr-number` is provided via `workflow_dispatch`, enumeration is skipped
+> and this input is not used.
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
 Workflows (R/W) to push resolution commits. The workflow triggers on `push` to
@@ -1720,6 +1730,22 @@ as a literal placeholder.
 
 **Fix:** Replace with your developer-agent App's bot login, the same value used
 in the `agent-respond-review` stub.
+
+---
+
+### `agent-resolve-conflicts` stub placeholder
+
+**Symptom:** The `agent-resolve-conflicts` caller stub contains
+`app/<developer-app-slug>` as a literal placeholder for the `developer-author`
+input.
+
+**Fix:** Replace `app/<developer-app-slug>` with your developer-agent App's slug
+in `app/` prefix form — for example, `app/my-developer-agent`. This value is
+passed to the PR author filter that enumerates open developer-agent PRs. The App
+slug is the App's name in lowercase with spaces replaced by hyphens (the same
+base slug used for the `<slug>[bot]` login, without the `[bot]` suffix). When
+`pr-number` is provided via `workflow_dispatch`, the developer-author value is
+not used and can be left as-is for that run.
 
 ---
 
