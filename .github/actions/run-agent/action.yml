@@ -1,9 +1,9 @@
 name: 'Run agent container'
 description: >
   Pulls or builds the agent Docker image and runs the container with the
-  standard set of environment variables (GH_TOKEN, ANTHROPIC_API_KEY,
-  OPENAI_API_KEY, GITHUB_REPO, AGENT_MODEL) and any optional per-workflow
-  identifiers (AGENT_ACTION, GITHUB_ISSUE_NUMBER, GITHUB_PR_NUMBER,
+  standard set of environment variables (GH_TOKEN, exactly one provider API
+  key selected from the model name, GITHUB_REPO, AGENT_MODEL) and any optional
+  per-workflow identifiers (AGENT_ACTION, GITHUB_ISSUE_NUMBER, GITHUB_PR_NUMBER,
   GITHUB_RUN_ID, ESCALATION_ASSIGNEE, RESOLVE_THREADS_FILE, ADMIN_ASSIGNEES,
   CODE_REVIEWERS). Also creates and mounts an output directory when
   output-dir and output-mount are supplied (used by agent-review for the
@@ -40,13 +40,13 @@ inputs:
     description: 'GitHub token injected as GH_TOKEN'
     required: true
   anthropic-api-key:
-    description: 'Anthropic API key injected as ANTHROPIC_API_KEY'
+    description: 'Anthropic API key injected as ANTHROPIC_API_KEY (only when the model routes to Anthropic)'
     required: true
   openai-api-key:
-    description: 'OpenAI API key injected as OPENAI_API_KEY'
+    description: 'OpenAI API key injected as OPENAI_API_KEY (only when the model routes to OpenAI)'
     required: true
   xai-api-key:
-    description: 'xAI API key injected as XAI_API_KEY'
+    description: 'xAI API key injected as XAI_API_KEY (only when the model routes to xAI)'
     required: true
   repo:
     description: 'GitHub repository (owner/name) injected as GITHUB_REPO'
@@ -172,6 +172,23 @@ runs:
         # mode), otherwise use the locally-built tag (build mode).
         _EFFECTIVE_IMAGE="${_IMAGE:-${_IMAGE_TAG}}"
 
+        # Forward exactly one provider API key: the one for the provider the
+        # model name routes to. The other two never enter the container, so a
+        # prompt-injected agent on an Anthropic run cannot read the OpenAI or
+        # xAI key out of its own environment. Routing mirrors resolve_provider()
+        # in docker/scripts/entrypoint.sh and docker/reviewer/entrypoint.sh by
+        # namespace prefix (those functions are the ground truth and still
+        # validate the key); test/run-agent-provider-key.test.ts asserts every
+        # model literal in both entrypoints routes the same way here. An
+        # unrecognised model forwards no key and the entrypoint fails loud.
+        _key_env=()
+        case "${AGENT_MODEL}" in
+          sonnet|opus|haiku|claude-*) _key_env=(-e ANTHROPIC_API_KEY) ;;
+          gpt-*|o[0-9]*)              _key_env=(-e OPENAI_API_KEY) ;;
+          grok-*)                     _key_env=(-e XAI_API_KEY) ;;
+          *) echo "::warning::run-agent: model '${AGENT_MODEL}' matches no provider prefix; forwarding no provider API key" ;;
+        esac
+
         # Build optional -e flags for per-workflow identifiers that are only
         # present on some workflows. Each is included only when non-empty so
         # that the container's env does not receive spurious empty variables.
@@ -204,9 +221,7 @@ runs:
 
         docker run --rm \
           -e GH_TOKEN \
-          -e ANTHROPIC_API_KEY \
-          -e OPENAI_API_KEY \
-          -e XAI_API_KEY \
+          "${_key_env[@]}" \
           -e GITHUB_REPO \
           -e AGENT_MODEL \
           "${_opt_env[@]}" \
