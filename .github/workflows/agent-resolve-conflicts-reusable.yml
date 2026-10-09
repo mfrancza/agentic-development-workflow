@@ -56,17 +56,6 @@ on:
           selector (e.g. v0, v0.0.2, or a full SHA).
         required: true
         type: string
-      developer-author:
-        description: >
-          GitHub author filter used to enumerate open developer-agent PRs
-          (e.g. app/mfrancza-developer-agent). Passed to the
-          find-conflicted-prs action as the author input. Ignored when
-          pr-number is supplied (manual dispatch path enumerates nothing).
-          Defaults to app/mfrancza-developer-agent, preserving the
-          existing behavior for callers that omit this input.
-        type: string
-        required: false
-        default: 'app/mfrancza-developer-agent'
     secrets:
       DEVELOPER_APP_ID:
         required: true
