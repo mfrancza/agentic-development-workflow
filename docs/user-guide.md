@@ -21,7 +21,7 @@ File an issue with as much context as you can: what you want, why, and any relev
 Apply the `agent:groom` label to route the issue to the grooming agent. The agent will:
 
 - Add one or more classification labels (`bug`, `enhancement`, `dependency upgrade`, `do`, `plan`, `question`).
-- Add a `model:*` label to select the appropriate model tier based on issue complexity.
+- Add a `model:*` label to select the appropriate model tier based on issue complexity — skipped if any `model:*` label (generic or per-agent) is already present on the issue.
 - Post clarifying questions as a comment if the issue needs more detail (`question`).
 
 The `agent:groom` label is removed automatically on success. Re-apply it to re-groom.
@@ -106,6 +106,8 @@ The following behaviors are triggered by labels. All label-triggered workflows r
 | Push to `main` creates merge conflicts on open agent PRs | Agent resolves conflicts in parallel per PR; escalates to humans if it cannot resolve confidently. |
 | Deployment failure linked to an agent PR | Agent opens a follow-up fix-up PR. |
 
+> **Note:** Operators can also enable an auto-trigger system (`AUTO_TRIGGER_AGENTS`) that automatically advances issues through the pipeline — applying `agent:groom` on issue open, `agent:design` when `plan` is labeled, `agent:developer` when `do` is labeled or `draft` is removed, and `agent:review` when an agent-branch PR is opened — without any manual label action. See [AGENTS.md](../AGENTS.md) for the full auto-trigger gate configuration.
+
 ---
 
 ## Lifecycle labels
@@ -115,7 +117,7 @@ These labels are managed automatically but are visible and useful to understand.
 | Label | Meaning | Who applies it |
 |-------|---------|---------------|
 | `draft` | Issue is scoped by an unmerged design; implementation is not ready yet. | Designer agent (on sub-issues it creates). Removed when the design PR merges. |
-| `blocked` | Implementation deferred because the issue has open blockers. | Auto-trigger. Removed when all blockers close and `agent:developer` is applied. |
+| `blocked` | Implementation deferred because the issue has open blockers. Removed automatically when all blockers close and `agent:developer` is applied. | Auto-trigger when blockers are detected; may also be applied manually as a "hold for later" marker — treated identically regardless of origin. |
 | `human-required` | A human is needed — agent has escalated. The issue or PR is also assigned to the relevant person. | Agents at escalation points; also applied manually. |
 | `conflicts-escalated` | The conflict-resolution agent already tried this PR and escalated. Remove to re-attempt. | Conflict-resolution agent. |
 
