@@ -1060,8 +1060,7 @@ If the agent cannot resolve a conflict confidently, it aborts, applies
 - GitHub App: **developer-agent**.
 - Secrets: `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`, `ANTHROPIC_API_KEY`,
   `OPENAI_API_KEY`, `XAI_API_KEY`.
-- Actions variables: `AGENT_ALLOWLIST` (identifies the developer-agent bot
-  identity used to find PRs authored by the agent).
+- The reusable requires an explicit `developer-login` input in the caller stub (your developer-agent App's bot login, in the `<slug>[bot]` form), because the finder has no way to infer the identity otherwise.
 
 **Caller stub.**
 
@@ -1087,6 +1086,7 @@ jobs:
     with:
       pr-number: ${{ inputs.pr_number || '' }}
       escalation-assignee: ${{ github.repository_owner }}
+      developer-login: <developer-agent-slug>[bot]
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
     secrets:
@@ -1096,6 +1096,8 @@ jobs:
       OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
 ```
+
+> **Adapt `developer-login`** to your developer-agent App's bot login (e.g. `acme-developer-agent[bot]`).
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
 Workflows (R/W) to push resolution commits. The workflow triggers on `push` to
