@@ -51,12 +51,12 @@ Enumerated exhaustively (matching the trigger labels defined in
 | 2 | `issues.labeled` where label is `plan` | `agent:design` | `design` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | No |
 | 3 | `issues.labeled` where label is `do` | `agent:developer` | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | Yes — `!contains(github.event.issue.labels.*.name, 'draft')` |
 | 4 | `issues.unlabeled` where label is `draft` | `agent:developer` | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | No (draft is being removed; this transition _is_ the un-draft path) |
-| 5 | `pull_request.opened` on an agent-created branch | `agent:review` | `review` | No (head-repo guard covers fork PRs; see Decision 5) | N/A |
+| 5 | `pull_request.opened` on an agent-created branch, or authored by `mfrancza-developer-agent[bot]` | `agent:review` | `review` | No (head-repo guard covers fork PRs; see Decision 5) | N/A |
 | 6 | `issues.closed` | `agent:developer` (cascade on newly-unblocked issues) | `developer` | Yes — `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` | N/A — cascade fires on blocker closure; each candidate must carry `blocked`, be open, have no `agent:developer`, have no open `agent/issue-{N}` PR, and have all remaining blockers closed |
 
 All six transitions apply the `AGENT_ALLOWLIST` sender gate where a meaningful sender exists. Transitions #1–#4 and #6 are triggered by `issues` events. GitHub has no per-label or per-action permission model, so any collaborator with triage permission can open issues, apply labels, or remove labels. Without a sender check, a non-allowlisted actor could cause the auto-trigger job to apply an `agent:*` label under the developer-agent App identity — which is in `AGENT_ALLOWLIST` — and thereby trigger an agent run, spending Anthropic credits, without ever being in the allowlist themselves. The `AGENT_ALLOWLIST` sender gate on all `issues`-event jobs closes this gap and preserves the invariant that agent workflows are only triggered by actors on `AGENT_ALLOWLIST`.
 
-Transition #5 (`pull_request.opened`) uses the branch-prefix predicate instead of a sender-login check: the App slug varies per install, and a PR on an `agent/…` branch is a candidate for the review pipeline regardless of who opened it. A head-repo guard (`github.event.pull_request.head.repo.full_name == github.repository`) covers the fork-PR case, preventing outside contributors from triggering auto-review via a matching branch name.
+Transition #5 (`pull_request.opened`) gates on an OR of three predicates rather than a sender-login check alone. The head-repo guard (`github.event.pull_request.head.repo.full_name == github.repository`) sits outside the OR so it applies uniformly to all three enrollment paths, preventing fork PRs from triggering auto-review regardless of branch name or claimed author.
 
 Transition #4 exists because the un-draft job in `agent-design.yml` removes
 the `draft` label from every sub-issue when the design PR merges — that
@@ -64,14 +64,12 @@ removal is the natural signal to start implementation on each unblocked
 sub-issue. Transitions #3 and #4 share the `developer` gate because they
 target the same `agent:*` label.
 
-Transition #5's branch predicate is
-`startsWith(head.ref, 'agent/') || startsWith(head.ref, 'design/')`, which
-covers every branch prefix a developer-agent action produces today
-(`agent/issue-{N}`, `agent/fix-deploy-issue-{N}`, `design/issue-{N}` — see
-`docker/scripts/entrypoint.sh`). A branch-name predicate is preferred to a
-sender-login predicate because the agent App slug is per-install and
-hard-codes into YAML awkwardly, whereas branch prefixes are already
-load-bearing conventions in this repo.
+Transition #5's enrollment predicate is an OR of:
+1. `startsWith(head.ref, 'agent/')` — covers every `implement` and conflict-resolution branch the developer-agent produces today (`agent/issue-{N}`, `agent/fix-deploy-issue-{N}`).
+2. `startsWith(head.ref, 'design/')` — covers designer-agent branches (`design/issue-{N}`).
+3. `github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]'` — catches agent-authored PRs opened from non-standard branch prefixes (e.g. `validate/…`, `test/…`), closing the silent-skip gap documented in PR #557 and issue #559.
+
+The branch-prefix clauses remain as the portable option for external consumers of the reusable workflow (`agent-auto-trigger-reusable.yml`): callers write their own thin `if:` in their caller stub and can match their own naming conventions without knowing their bot slug. The author-identity clause in this repo's caller stub is a belt to the prefix's suspenders, hardcoded at the caller-stub level (consistent with the same string already present in `agent-pr-merged.yml`, `agent-respond-review.yml`, and `agent-fix-checks.yml`).
 
 ### Decision 1: Single map variable, JSON-encoded Actions variable
 
@@ -240,25 +238,47 @@ non-problem (humans can just leave the `auto_trigger_agents.developer` gate
 off, or toggle it in Terraform) at the cost of stateful cross-run
 persistence in a stateless workflow.
 
-### Decision 5: `pull_request.opened` fires from any actor on an agent branch
+### Decision 5: `pull_request.opened` enrollment gate uses OR-of-predicates
 
-**Decision.** Transition #5 gates on the branch prefix, not on the PR
-author. If a human happens to open a PR from an `agent/issue-42` branch,
-auto-review still applies. That is intentional — a PR on that branch is by
-definition a candidate for the same review pipeline, regardless of who
-pushed the button.
+**Decision.** Transition #5 uses an OR of three predicates — branch prefix
+`agent/`, branch prefix `design/`, or PR author is `mfrancza-developer-agent[bot]`
+— with the head-repo guard sitting outside the OR.
 
-To keep this safe against outside contributors from forks, the gate also
-requires `github.event.pull_request.head.repo.full_name ==
-github.repository` — the same head-repo guard the un-draft job in
-`agent-design.yml` already uses. A forked PR with a matching branch name
-cannot trigger auto-review.
+The branch-prefix clauses are retained as the portable, per-install-agnostic
+option. A PR on an `agent/issue-42` branch is a candidate for the review
+pipeline regardless of who opened it — a human pushing a rescue commit on
+an agent branch should still enroll. Similarly, a `design/issue-{N}` PR
+is always a candidate. These prefix clauses remain the recommended shape for
+external consumers of the reusable workflow who write their own caller stubs.
 
-**Alternative considered.** Gate on
-`github.event.pull_request.user.login == '<developer-agent-app>[bot]'`.
-Rejected: the App slug varies per install, so pinning it in YAML would
-require another Terraform var; and it excludes the legitimate "human
-pushes a rescue commit and opens the PR" case.
+The author-identity clause (`github.event.pull_request.user.login ==
+'mfrancza-developer-agent[bot]'`) closes the silent-skip gap documented in
+PR [#557](https://github.com/mfrancza/agentic-development-workflow/pull/557)
+and issue [#559](https://github.com/mfrancza/agentic-development-workflow/issues/559):
+the E2E canary PR was agent-authored on `validate/terraform-ci-canary`, which
+matched neither prefix, so no `agent:review` label was applied and no reviewer
+run was scheduled. This is a runtime miss — a silent `skipped` job with no
+diagnostic — precisely the recurrence class the repo has flagged as high-cost.
+The author-identity clause is hardcoded in this repo's caller stub (consistent
+with the same string already in `agent-pr-merged.yml`, `agent-respond-review.yml`,
+and `agent-fix-checks.yml`) and does not appear in the reusable workflow.
+
+The head-repo guard (`github.event.pull_request.head.repo.full_name ==
+github.repository`) sits outside the OR so it applies uniformly to all three
+enrollment paths. A fork PR cannot enroll via a matching branch name or a
+claimed author identity — the head-repo guard rejects it regardless.
+
+**Alternative considered.** Gate only on the PR author identity and drop the
+prefix clauses. Rejected: regresses the "human pushes a rescue commit and opens
+the PR from an `agent/…` branch" case, and also regresses future agent flows
+that open PRs under a different bot identity. The prefix clauses cost nothing
+to keep and remain the portable option for external consumers.
+
+**Alternative considered (original design).** Gate only on the branch prefix
+(`startsWith(head.ref, 'agent/') || startsWith(head.ref, 'design/')`).
+Retained as two of the three OR clauses. Rejected as the sole criterion: any
+agent flow that opens a PR from a non-standard prefix (e.g. `validate/…`)
+silently bypasses enrollment, as demonstrated by PR #557.
 
 ### Decision 6: Blocked-by deferral for the developer transitions
 

@@ -10,7 +10,7 @@ name: agent-auto-trigger
 #   2. auto-design            — issues.labeled (plan)           → agent:design
 #   3. auto-developer-do      — issues.labeled (do)             → agent:developer
 #   4. auto-developer-undraft — issues.unlabeled (draft)        → agent:developer
-#   5. auto-review            — pull_request.opened (agent/…)   → agent:review
+#   5. auto-review            — pull_request.opened (agent/… or design/… or bot-authored) → agent:review
 #   6. auto-developer-unblock — issues.closed                   → agent:developer (cascade)
 #
 # No agent container is run in this workflow — each job only mints a token
@@ -140,12 +140,18 @@ jobs:
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   # ── Transition 5 ─────────────────────────────────────────────────────────────
-  # pull_request.opened on an agent/… or design/… branch (same-repo) → agent:review
+  # pull_request.opened on an agent/… or design/… branch, or authored by the
+  # developer-agent bot (same-repo) → agent:review
   #
-  # Branch-prefix predicate is preferred over a sender-login check: the App slug
-  # varies per install. Head-repo guard prevents fork PRs from triggering this
-  # even if the branch name matches. No sender allowlist: a PR on an agent/…
-  # branch is a candidate for the review pipeline regardless of who opened it.
+  # Enrollment uses an OR of three predicates: branch prefix starts with
+  # 'agent/', branch prefix starts with 'design/', or the PR was opened by the
+  # developer-agent bot identity ('mfrancza-developer-agent[bot]'). The prefix
+  # clauses cover agent/implement and design branches; the author-identity clause
+  # closes the silent-skip gap for agent-authored PRs opened from non-standard
+  # prefixes (e.g. validate/…, test/…) — see PR #557 and issue #559.
+  #
+  # The head-repo guard sits outside the OR so it applies to all three paths
+  # uniformly. Fork PRs cannot enroll regardless of branch name or claimed author.
   #
   # No checkout: actions/create-github-app-token is called directly in the
   # reusable to avoid executing PR-authored local actions with secrets in scope.
@@ -154,9 +160,10 @@ jobs:
     if: >
       github.event_name == 'pull_request' &&
       github.event.action == 'opened' &&
-      (startsWith(github.event.pull_request.head.ref, 'agent/') ||
-       startsWith(github.event.pull_request.head.ref, 'design/')) &&
       github.event.pull_request.head.repo.full_name == github.repository &&
+      (startsWith(github.event.pull_request.head.ref, 'agent/') ||
+       startsWith(github.event.pull_request.head.ref, 'design/') ||
+       github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]') &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).review == true
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
