@@ -6,7 +6,7 @@ This file provides guidance to AI coding agents when working with code in this r
 
 This project builds a system for integrating coding agents into an issue-based software development lifecycle using GitHub. Agents have their own identities and isolated development environments, enabling human review policies and least-privilege access control.
 
-See [`requirements.md`](requirements.md) for the full project specification and [`.github/copilot-instructions.md`](.github/copilot-instructions.md) for a detailed repository structure map.
+See [`docs/design-philosophy.md`](docs/design-philosophy.md) for the reasoning behind the system's shape, [`requirements.md`](requirements.md) for the full project specification, and [`.github/copilot-instructions.md`](.github/copilot-instructions.md) for a detailed repository structure map.
 
 ## Repository Layout
 

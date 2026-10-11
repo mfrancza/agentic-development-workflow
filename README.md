@@ -4,7 +4,7 @@ A demonstration of AI coding agents integrated into a GitHub issue-based develop
 
 **This is a demonstration project, not an open project.** Pull requests are limited to collaborators. Issue reports from the public are welcome but may not be acted on. If you want to run this workflow yourself, see [Reproduce this yourself](#reproduce-this-yourself) below.
 
-See [requirements.md](requirements.md) for the full project specification, [AGENTS.md](AGENTS.md) for agent conventions, and [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution policy.
+See [docs/design-philosophy.md](docs/design-philosophy.md) for why the system is shaped the way it is, [requirements.md](requirements.md) for the full project specification, [AGENTS.md](AGENTS.md) for agent conventions, and [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution policy.
 
 ## What this demonstrates
 
