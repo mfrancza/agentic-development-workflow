@@ -1262,7 +1262,7 @@ supported (all opt-in, all default to `false`):
 | `auto-design` | `issues.labeled` (`plan`) | Applies `agent:design` |
 | `auto-developer-do` | `issues.labeled` (`do`) | Applies `agent:developer` (or `blocked` if open blockers) |
 | `auto-developer-undraft` | `issues.unlabeled` (`draft`) | Applies `agent:developer` (or `blocked`) |
-| `auto-review` | `pull_request.opened` on `agent/…` or `design/…` | Applies `agent:review` |
+| `auto-review` | `pull_request.opened` on `agent/…` or `design/…` branch, or authored by `<developer-agent-slug>[bot]` (same-repo only) | Applies `agent:review` |
 | `auto-developer-unblock` | `issues.closed` | Applies `agent:developer` on newly-unblocked downstream issues |
 
 No agent container runs in this workflow — each job only mints an App token
@@ -1364,9 +1364,10 @@ jobs:
     if: >
       github.event_name == 'pull_request' &&
       github.event.action == 'opened' &&
-      (startsWith(github.event.pull_request.head.ref, 'agent/') ||
-       startsWith(github.event.pull_request.head.ref, 'design/')) &&
       github.event.pull_request.head.repo.full_name == github.repository &&
+      (startsWith(github.event.pull_request.head.ref, 'agent/') ||
+       startsWith(github.event.pull_request.head.ref, 'design/') ||
+       github.event.pull_request.user.login == '<developer-agent-slug>[bot]') &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).review == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
@@ -1394,6 +1395,13 @@ jobs:
       DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 ```
+
+> **Adapt the `auto-review` `if:` condition.** Replace `<developer-agent-slug>[bot]`
+> with your developer-agent App's bot login (e.g. `my-developer-agent[bot]`). The
+> developer-agent login predicate enrolls PRs opened by the bot regardless of branch
+> prefix (e.g. `validate/*`, `test/*`); without it, auto-review silently skips those
+> PRs when `AUTO_TRIGGER_AGENTS.review = true`. The head-repo guard sitting outside
+> the `(…)` OR block ensures fork PRs are excluded even if the bot login matches.
 
 **Trust considerations.** Each transition mints a short-lived developer-agent
 token solely to write labels — no container is run, no code is compiled.
@@ -1856,6 +1864,29 @@ slug is the App's name in lowercase with spaces replaced by hyphens (the same
 base slug used for the `<slug>[bot]` login, without the `[bot]` suffix). When
 `pr-number` is provided via `workflow_dispatch`, the developer-author value is
 not used and can be left as-is for that run.
+
+---
+
+### `agent-auto-trigger` stub placeholder
+
+**Symptom:** The `agent-auto-trigger` caller stub's `auto-review` job contains
+`<developer-agent-slug>[bot]` as a literal placeholder in the `if:` condition.
+With `AUTO_TRIGGER_AGENTS.review = true`, PRs opened by the developer-agent bot on
+non-standard branch prefixes (e.g. `validate/*`, `test/*`) are silently skipped
+because the branch-prefix predicates do not match and the bot-login predicate is
+never evaluated.
+
+**Cause:** The developer-agent login predicate must be filled in before the workflow
+functions. It cannot be read from an Actions variable because it gates the workflow
+`if:` expression itself (before any variable lookup runs).
+
+**Fix:** Replace `<developer-agent-slug>[bot]` in the `auto-review` job's `if:`
+condition with your developer-agent App's bot login — for example,
+`my-developer-agent[bot]`. The bot login appears in the first comment a bot posts
+after installation, or can be confirmed by checking the App's page on GitHub. The
+same slug value (without `[bot]`) is also used in the `agent-resolve-conflicts`
+stub's `developer-author` input (as `app/<slug>`) and in the `agent-respond-review`
+and `agent-pr-merged` stubs.
 
 ---
 
