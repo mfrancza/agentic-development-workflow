@@ -32,8 +32,8 @@ a hard ceiling.
 ## How the models behave
 
 The design starts from how current models actually behave, not from how we
-would like tools to behave. These observations come from working with the
-models from early 2026 onward, and other engineers have reported the same:
+would like tools to behave. These are anecdotal observations about that
+behaviour:
 
 - **The best mental model is an enthusiastic, smart, overconfident
   entry-level engineer.** The "power tool" model gets it wrong in both
