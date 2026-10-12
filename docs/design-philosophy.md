@@ -40,9 +40,9 @@ behaviour:
   directions. It underestimates how much ambiguity the models can handle, and
   it overestimates how consistent they are.
 - **They tolerate ambiguity well, sometimes too well.** Models readily make
-  assumptions and fill in missing details with reasonable guesses. When they
-  fail, the cause is usually shallow understanding, not missing
-  specification.
+  assumptions and fill in missing details with reasonable guesses. Both
+  shallow understanding and missing specification are significant sources
+  of failure.
 - **Output is a distribution, not a value.** Token sampling is stochastic, so
   the same model given the same task produces a range of results. Small
   changes to the input widen that range further. Quality on equivalent tasks
