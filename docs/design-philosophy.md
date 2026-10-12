@@ -221,18 +221,3 @@ toward *local* optima. They polish the process but will not redesign it.
 Still, a system that keeps polishing itself takes much less effort to
 maintain and change, and humans stay responsible for the larger structural
 changes.
-
-## How the models evolved toward this
-
-The approach came from working through the models above one after another,
-with each step adding more automation as familiarity grew:
-
-- **Vibe coding.** Fast prototypes, but fragile and opaque.
-- **Pair programming.** Reliable, and good for investigating hard problems,
-  but limited to one agent per person.
-- **Swarm of interns.** The human acts as tech lead, delegating issues and
-  reviewing PRs. Throughput rises for parallel work, but it needs heavy
-  management because agents do not learn from repetition.
-- **Factory.** The intern model with its management work turned into explicit
-  process: defined stages, automated inspections, humans at the decision
-  points. This repo is an experiment in building that factory.
