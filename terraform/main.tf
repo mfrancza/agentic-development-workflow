@@ -74,6 +74,7 @@ module "agent_vars" {
   admin_assignees     = var.admin_assignees
   code_reviewers      = var.code_reviewers
   auto_trigger_agents = var.auto_trigger_agents
+  reviewer_models     = var.reviewer_models
 }
 
 module "branch_protection" {

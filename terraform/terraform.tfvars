@@ -37,3 +37,7 @@ auto_trigger_agents = {
   developer = true
   review    = true
 }
+
+# Multi-reviewer model pair: one Anthropic Sonnet and one OpenAI GPT equivalent,
+# so each PR gets a perspective from two different providers.
+reviewer_models = ["claude-sonnet-4-5", "gpt-6-astra"]

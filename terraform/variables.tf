@@ -47,3 +47,9 @@ variable "auto_trigger_agents" {
     review    = false
   }
 }
+
+variable "reviewer_models" {
+  description = "Ordered list of model identifiers to try when the multi-reviewer feature selects a reviewer. Each entry is a model name accepted by the agent --model flag (e.g. \"sonnet\", \"claude-sonnet-4-5\", \"gpt-5.6-sol\"). Stored as a JSON-encoded repository Actions variable REVIEWER_MODELS so the resolve-reviewer-set action can iterate the list without hardcoding model names in YAML. Defaults to [] (empty — multi-reviewer is disabled)."
+  type        = list(string)
+  default     = []
+}

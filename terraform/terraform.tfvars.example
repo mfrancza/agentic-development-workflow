@@ -35,3 +35,8 @@ auto_trigger_agents = {
   developer = false
   review    = false
 }
+
+# Ordered list of model identifiers for the multi-reviewer feature. Each entry
+# is a model name accepted by the agent --model flag. Leave empty ([]) to
+# disable multi-reviewer (the default). Stored as REVIEWER_MODELS Actions variable.
+# reviewer_models = ["sonnet", "claude-sonnet-4-5", "gpt-5.6-sol"]
