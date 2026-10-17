@@ -27,3 +27,8 @@ output "reviewer_models_variable_name" {
   description = "Name of the REVIEWER_MODELS Actions variable."
   value       = github_actions_variable.reviewer_models.variable_name
 }
+
+output "review_model_pairing_variable_name" {
+  description = "Name of the REVIEW_MODEL_PAIRING Actions variable."
+  value       = github_actions_variable.review_model_pairing.variable_name
+}
