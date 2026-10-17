@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveModel } from "../src/resolve-model.js";
+import { resolveModel } from "../src/lib/resolve-model.js";
 
 // ---------------------------------------------------------------------------
 // Minimal mock Octokit — only the REST methods used by resolveModel.
