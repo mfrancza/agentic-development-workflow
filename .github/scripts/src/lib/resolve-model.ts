@@ -1,5 +1,5 @@
 import { getOctokit } from "./octokit.js";
-import { classTable } from "./model-classes.js";
+import { classTable, modelToClass } from "./model-classes.js";
 import {
   selectReviewerModel,
   type PairingConfig,
@@ -131,13 +131,14 @@ export async function resolveModel(
           `Pairing tier skipped: authoring model marker is absent or empty on this PR. ` +
             `Falling through to DEFAULT_MODEL "${defaultModel}".`,
         );
-      } else if (pairingConfig.policy !== "off" && pairingConfig.enabled !== false) {
+      } else if (pairingConfig.policy !== "off" && pairingConfig.enabled === true) {
         const result = selectReviewerModel(
           authoringModel,
           pairingConfig,
           availableProviders,
           classTable,
           defaultModel,
+          modelToClass,
         );
 
         for (const w of result.warnings) {
@@ -152,8 +153,9 @@ export async function resolveModel(
           return result.model;
         }
 
-        // result.model is undefined only when source === "off", which we
-        // already guarded above.  Fall through just in case.
+        // Defensive: with enabled === true and policy !== "off",
+        // selectReviewerModel always returns a defined model.  This branch is
+        // unreachable in practice but guards against future changes.
         emitWarning(
           `Pairing tier returned no model; falling through to DEFAULT_MODEL "${defaultModel}".`,
         );

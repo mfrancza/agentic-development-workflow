@@ -342,6 +342,7 @@ export function selectReviewerModel(
   availableProviders: readonly string[],
   classTable: ClassTable,
   defaultModel: string,
+  modelToClass: Record<string, string> = {},
 ): PairingResult {
   const warnings: string[] = [];
 
@@ -359,26 +360,59 @@ export function selectReviewerModel(
   const fallbackChain: FallbackEntry[] = config.fallback_chain ?? ["default-model"];
   const explicitMap: Record<string, string> = config.explicit_map ?? {};
 
-  // --- same-model policy: always return the author (the only allowed case) ---
+  // --- same-model policy: return the author unless the author's provider key
+  //     is unavailable, in which case we walk the fallback chain. ---
   if (policy === "same-model") {
+    const sameModelVendor = inferVendor(authoringModel);
+    if (sameModelVendor && !availableProviders.includes(sameModelVendor)) {
+      warnings.push(
+        `Pairing policy "same-model": author vendor "${sameModelVendor}" API key is not available; walking fallback chain.`,
+      );
+      const sameModelClass = getClassFromTable(authoringModel, classTable, modelToClass);
+      const fallback = walkFallbackChain(
+        authoringModel,
+        sameModelVendor,
+        sameModelClass ?? "unknown",
+        availableProviders,
+        preferredVendors,
+        classTable,
+        fallbackChain,
+        warnings,
+        defaultModel,
+      );
+      maybeErrorOnSameModel(authoringModel, fallback.model, defaultModel, warnings);
+      return { model: fallback.model, source: fallback.source, warnings };
+    }
     return { model: authoringModel, source: "primary", warnings: [] };
   }
 
   // --- explicit-map policy ---
   if (policy === "explicit-map") {
     if (Object.hasOwn(explicitMap, authoringModel)) {
-      return {
-        model: explicitMap[authoringModel],
-        source: "primary",
-        warnings: [],
-      };
+      const pickedModel = explicitMap[authoringModel];
+      const pickedVendor = inferVendor(pickedModel);
+      if (pickedVendor && !availableProviders.includes(pickedVendor)) {
+        warnings.push(
+          `Pairing policy "explicit-map": mapped model "${pickedModel}" (provider "${pickedVendor}") is not available; walking fallback chain.`,
+        );
+        // fall through to shared fallback-chain walk below
+      } else if (pickedModel === authoringModel) {
+        warnings.push(
+          `ERROR: Pairing policy "explicit-map": explicit map returns the authoring model "${authoringModel}" itself; ` +
+            `this loses the independent review perspective. Walking fallback chain.`,
+        );
+        // fall through to shared fallback-chain walk below
+      } else {
+        return { model: pickedModel, source: "primary", warnings };
+      }
+    } else {
+      // Map miss: walk fallback chain.
+      warnings.push(
+        `Pairing policy "explicit-map": no entry for authoring model "${authoringModel}"; walking fallback chain.`,
+      );
     }
-    // Map miss: walk fallback chain.
-    warnings.push(
-      `Pairing policy "explicit-map": no entry for authoring model "${authoringModel}"; walking fallback chain.`,
-    );
 
-    // We need author vendor and class for fallbacks, but they may be unknown.
+    // Map miss, unavailable-vendor hit, or self-map: resolve class and walk fallback chain.
     const authorVendor = inferVendor(authoringModel);
     if (!authorVendor) {
       warnings.push(
@@ -400,7 +434,7 @@ export function selectReviewerModel(
     }
 
     // Look up class for fallbacks that need it.
-    const className = getClassFromTable(authoringModel, classTable);
+    const className = getClassFromTable(authoringModel, classTable, modelToClass);
     if (!className) {
       warnings.push(
         `Pairing: authoring model "${authoringModel}" not found in class table; falling through to DEFAULT_MODEL.`,
@@ -456,7 +490,7 @@ export function selectReviewerModel(
     return { model: fallback.model, source: fallback.source, warnings };
   }
 
-  const className = getClassFromTable(authoringModel, classTable);
+  const className = getClassFromTable(authoringModel, classTable, modelToClass);
   if (!className) {
     warnings.push(
       `Pairing: authoring model "${authoringModel}" is not in the class table; falling through to DEFAULT_MODEL.`,
@@ -516,8 +550,15 @@ export function selectReviewerModel(
       classTable,
       warnings,
     );
-    if (primary) {
+    if (primary && primary !== authoringModel) {
       return { model: primary, source: "primary", warnings };
+    }
+    if (primary === authoringModel) {
+      warnings.push(
+        `ERROR: Pairing policy "same-vendor-same-class": canonical ${className}-class model for vendor "${authorVendor}" ` +
+          `is the authoring model "${authoringModel}" itself; this loses the independent review perspective. ` +
+          `Walking fallback chain.`,
+      );
     }
     const fallback = walkFallbackChain(
       authoringModel,
@@ -546,22 +587,27 @@ export function selectReviewerModel(
 // ---------------------------------------------------------------------------
 
 /**
- * Looks up the class for a model by scanning modelToClass in the classTable.
- * This avoids importing model-classes.ts directly so the function remains pure
- * and testable without filesystem access.
+ * Looks up the class for a model.
  *
- * The classTable passed by the caller comes from the loader; we derive
- * modelToClass from it by scanning.
+ * When the caller supplies a non-empty `modelToClass` map, that authoritative
+ * reverse mapping is consulted first.  This is required for correct behaviour
+ * when a model appears in more than one class entry (dual-class configuration).
  *
- * NOTE: This performs a forward-table scan.  For correct dual-class resolution
- * the caller should pass in a classTable whose first entry per (class, vendor)
- * is the canonical pick — the resolution prefers the first-encountered class,
- * which matches the `modelToClass` convention.
+ * Falls back to a forward-table scan of `classTable` when the model is not
+ * found in `modelToClass`.  The scan picks whichever class lists the model
+ * first, which is correct for single-class entries but may be wrong for
+ * dual-class configurations — callers SHOULD pass the authoritative map.
  */
 function getClassFromTable(
   modelId: string,
   classTable: ClassTable,
+  modelToClass: Record<string, string>,
 ): string | undefined {
+  // Prefer the authoritative modelToClass reverse mapping when available.
+  if (Object.hasOwn(modelToClass, modelId)) {
+    return modelToClass[modelId];
+  }
+  // Fallback: forward-table scan.
   for (const [className, vendorMap] of Object.entries(classTable)) {
     for (const models of Object.values(vendorMap)) {
       if ((models as string[]).includes(modelId)) return className;

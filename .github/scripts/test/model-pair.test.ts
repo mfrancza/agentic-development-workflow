@@ -543,3 +543,206 @@ describe("selectReviewerModel — unknown authoring model", () => {
     expect(result.warnings.some((w) => w.includes("cannot infer vendor"))).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Dual-class model resolution via modelToClass (not forward scan)
+// ---------------------------------------------------------------------------
+
+describe("selectReviewerModel — dual-class model resolution", () => {
+  it("uses modelToClass rather than forward-table scan for dual-class models", () => {
+    // gpt-6-astra appears in both haiku AND opus in the class table, but
+    // modelToClass records it as "opus".  A pure forward scan would pick
+    // "haiku" (first encountered), downgrading the reviewer.
+    const dualClassTable: ClassTable = {
+      haiku: {
+        anthropic: ["haiku"],
+        openai: ["gpt-5.6-luna", "gpt-6-astra"], // gpt-6-astra also in haiku
+        xai: ["grok-build-0.1"],
+      },
+      sonnet: {
+        anthropic: ["sonnet"],
+        openai: ["gpt-5.6-terra"],
+        xai: ["grok-4.3"],
+      },
+      opus: {
+        anthropic: ["opus"],
+        openai: ["gpt-5.6-sol", "gpt-6-astra"], // canonical opus entry for openai
+        xai: ["grok-4.20-0309-reasoning", "grok-4.6"],
+      },
+    };
+    // Authoritative mapping: gpt-6-astra is opus
+    const dualClassModelToClass: Record<string, string> = {
+      "gpt-6-astra": "opus",
+    };
+
+    const result = selectReviewerModel(
+      "gpt-6-astra", // openai opus author
+      cfg({
+        policy: "different-vendor-same-class",
+        preferred_vendors: ["anthropic", "xai", "openai"],
+      }),
+      ALL_PROVIDERS,
+      dualClassTable,
+      DEFAULT,
+      dualClassModelToClass,
+    );
+
+    // Correct: opus class → picks anthropic "opus" (different vendor, same class)
+    // Wrong (forward-scan): haiku class → would pick anthropic "haiku" (downgraded)
+    expect(result.model).toBe("opus");
+    expect(result.source).toBe("primary");
+    expect(result.warnings).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Provider availability checks on primary picks
+// ---------------------------------------------------------------------------
+
+describe("selectReviewerModel — provider availability on primary picks", () => {
+  it('explicit-map: falls through when mapped model provider is unavailable', () => {
+    // Map sonnet → gpt-5.6-sol (openai), but openai key is absent.
+    const result = selectReviewerModel(
+      "sonnet",
+      cfg({
+        policy: "explicit-map",
+        explicit_map: { sonnet: "gpt-5.6-sol" },
+        fallback_chain: ["default-model"],
+      }),
+      ["anthropic"], // only anthropic available; openai absent
+      TEST_CLASS_TABLE,
+      "haiku",
+    );
+    expect(result.model).toBe("haiku"); // falls back to default
+    expect(result.source).toBe("fallback:default-model");
+    expect(result.warnings.some((w) => w.includes("not available"))).toBe(true);
+  });
+
+  it('explicit-map: returns mapped model when provider is available', () => {
+    // Sanity-check: map sonnet → gpt-5.6-sol with openai available → direct return.
+    const result = selectReviewerModel(
+      "sonnet",
+      cfg({
+        policy: "explicit-map",
+        explicit_map: { sonnet: "gpt-5.6-sol" },
+        fallback_chain: ["default-model"],
+      }),
+      ALL_PROVIDERS, // openai available
+      TEST_CLASS_TABLE,
+      DEFAULT,
+    );
+    expect(result.model).toBe("gpt-5.6-sol");
+    expect(result.source).toBe("primary");
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it('same-model: falls through when author vendor is unavailable', () => {
+    // Author is gpt-5.6-sol (openai), but openai key is absent.
+    const result = selectReviewerModel(
+      "gpt-5.6-sol",
+      cfg({
+        policy: "same-model",
+        preferred_vendors: ["anthropic", "xai", "openai"],
+        fallback_chain: ["default-model"],
+      }),
+      ["anthropic", "xai"], // openai absent
+      TEST_CLASS_TABLE,
+      "haiku",
+    );
+    expect(result.model).toBe("haiku"); // falls back to default
+    expect(result.source).toBe("fallback:default-model");
+    expect(result.warnings.some((w) => w.includes("API key is not available"))).toBe(true);
+  });
+
+  it('same-model: returns author model when vendor is available', () => {
+    const result = selectReviewerModel(
+      "gpt-5.6-sol",
+      cfg({ policy: "same-model" }),
+      ALL_PROVIDERS,
+      TEST_CLASS_TABLE,
+      DEFAULT,
+    );
+    expect(result.model).toBe("gpt-5.6-sol");
+    expect(result.source).toBe("primary");
+    expect(result.warnings).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Same-author guard on non-same-model policies
+// ---------------------------------------------------------------------------
+
+describe("selectReviewerModel — same-author guard on primary picks", () => {
+  it('same-vendor-same-class: emits ERROR and falls back when canonical model equals author', () => {
+    // Author is "sonnet" (canonical anthropic sonnet); same-vendor-same-class
+    // would ordinarily return "sonnet" — which is the author itself.
+    const result = selectReviewerModel(
+      "sonnet",
+      cfg({
+        policy: "same-vendor-same-class",
+        preferred_vendors: ["openai", "xai", "anthropic"],
+        fallback_chain: ["default-model"],
+      }),
+      ALL_PROVIDERS,
+      TEST_CLASS_TABLE,
+      "haiku",
+    );
+    // Must NOT return the author model as a silent primary pick.
+    expect(result.model).toBe("haiku");
+    expect(result.source).toBe("fallback:default-model");
+    const errorWarning = result.warnings.find((w) => w.startsWith("ERROR:"));
+    expect(errorWarning).toBeDefined();
+    expect(errorWarning).toContain("independent review perspective");
+  });
+
+  it('same-vendor-same-class: succeeds when canonical model differs from author', () => {
+    // Author is "claude-sonnet-4-5" (non-canonical); canonical is "sonnet" → OK.
+    const result = selectReviewerModel(
+      "claude-sonnet-4-5",
+      cfg({ policy: "same-vendor-same-class" }),
+      ALL_PROVIDERS,
+      TEST_CLASS_TABLE,
+      DEFAULT,
+    );
+    expect(result.model).toBe("sonnet");
+    expect(result.source).toBe("primary");
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it('explicit-map: emits ERROR and falls back on a self-map entry', () => {
+    // explicit_map maps sonnet → sonnet (a self-map).
+    const result = selectReviewerModel(
+      "sonnet",
+      cfg({
+        policy: "explicit-map",
+        explicit_map: { sonnet: "sonnet" },
+        preferred_vendors: ["openai", "xai", "anthropic"],
+        fallback_chain: ["default-model"],
+      }),
+      ALL_PROVIDERS,
+      TEST_CLASS_TABLE,
+      "haiku",
+    );
+    expect(result.model).toBe("haiku");
+    expect(result.source).toBe("fallback:default-model");
+    const errorWarning = result.warnings.find((w) => w.startsWith("ERROR:"));
+    expect(errorWarning).toBeDefined();
+    expect(errorWarning).toContain("independent review perspective");
+  });
+
+  it('explicit-map: normal non-self map still returns primary', () => {
+    const result = selectReviewerModel(
+      "sonnet",
+      cfg({
+        policy: "explicit-map",
+        explicit_map: { sonnet: "gpt-5.6-sol" },
+      }),
+      ALL_PROVIDERS,
+      TEST_CLASS_TABLE,
+      DEFAULT,
+    );
+    expect(result.model).toBe("gpt-5.6-sol");
+    expect(result.source).toBe("primary");
+    expect(result.warnings).toHaveLength(0);
+  });
+});

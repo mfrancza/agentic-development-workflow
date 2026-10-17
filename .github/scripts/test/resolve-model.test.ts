@@ -676,4 +676,34 @@ describe("resolveModel — pairing tier (agent-type: review)", () => {
     expect(result).toBe("haiku");
     expect(warnings).toHaveLength(0);
   });
+
+  it("pairing tier is skipped without warnings when enabled is absent (undefined)", async () => {
+    // enabled: undefined must behave the same as enabled: false — tier skipped, no warnings.
+    mockPullGet.mockResolvedValue(prResponse([]));
+
+    const warnings: string[] = [];
+    const result = await resolveModel(
+      octokit,
+      "pr",
+      13,
+      "owner",
+      "repo",
+      "haiku",
+      "review",
+      {
+        pairingConfig: {
+          // enabled is intentionally absent (undefined)
+          policy: "different-vendor-same-class",
+          preferred_vendors: ["openai", "xai", "anthropic"],
+          fallback_chain: ["default-model"],
+        },
+        authoringModel: "sonnet",
+        availableProviders: ["anthropic", "openai", "xai"],
+      },
+      (msg) => warnings.push(msg),
+    );
+
+    expect(result).toBe("haiku"); // fell through to default without running tier
+    expect(warnings).toHaveLength(0); // no spurious warning about "returned no model"
+  });
 });

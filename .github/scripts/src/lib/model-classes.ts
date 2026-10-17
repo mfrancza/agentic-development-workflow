@@ -137,6 +137,14 @@ const data: ModelClassData = loadData();
  */
 export const classTable: ClassTable = data.classes;
 
+/**
+ * The authoritative model-ID → class reverse mapping, derived from the
+ * `modelToClass` section of model-classes.json.  Callers MUST use this (not a
+ * forward scan of `classTable`) to resolve a model ID to its class, so that
+ * dual-class entries follow the canonical resolution recorded here.
+ */
+export const modelToClass: Record<string, ClassName> = data.modelToClass;
+
 // ---------------------------------------------------------------------------
 // Public accessors
 // ---------------------------------------------------------------------------
