@@ -124,25 +124,63 @@ entrypoint, and the future developer-container escalation path.
 
 **Decision.** Move the `AGENT_ALLOWLIST` check out of caller `if:` expressions
 and into a first-position gate step inside each reusable workflow that is
-reachable from a user-triggered caller (`agent-groom`, `agent-design`,
-`agent-implement`, `agent-review`, `agent-respond-review`,
-`agent-auto-trigger`). The step runs before any Claude container launch,
-reads `vars.AGENT_ALLOWLIST`, resolves every `org/team-slug` entry at
-trigger time via the GitHub API, compares the triggering event's sender
-login against the union of explicit logins and resolved team members, and
-calls `core.setFailed(...)` (which fails the step, which fails the job)
-whenever the sender is not covered.
+reachable from a user-triggered caller. The step runs before any Claude
+container launch, reads `vars.AGENT_ALLOWLIST`, resolves every
+`org/team-slug` entry at trigger time via the GitHub API, compares a
+caller-supplied **principal login** against the union of explicit logins
+and resolved team members (plus any caller-supplied known-identity
+exceptions), and calls `core.setFailed(...)` (which fails the step, which
+fails the job) whenever the principal is not covered.
 
-**Caller `if:` changes.** All eleven existing
-`contains(fromJSON(vars.AGENT_ALLOWLIST), <sender>)` clauses are removed
-from caller workflows; only the event / label / concurrency clauses remain
-in the caller `if:` so a second queued label does not displace an in-flight
-run (the constraint from [#629](https://github.com/mfrancza/agentic-development-workflow/issues/629)).
+**The gate's principal is caller-supplied, not hardcoded to `sender.login`.**
+The gate step takes two inputs: a `principal` login string and an optional
+`additional-trusted-logins` JSON array. The caller is responsible for
+selecting the principal appropriate to the event type (the pre-move
+`if:` expressions already encoded this), and for passing any
+known-identity exceptions the pre-move expression allowed. This preserves
+the existing event-specific authorization semantics exactly, rather than
+imposing a uniform "sender must be allowlisted" policy on all consumers.
+
+**Caller `if:` changes.** The `contains(fromJSON(vars.AGENT_ALLOWLIST), …)`
+clauses are removed from caller workflows wherever they currently gate on
+`AGENT_ALLOWLIST`; only the event / label / concurrency / known-identity
+and trust-model clauses remain in the caller `if:` so a second queued
+label does not displace an in-flight run (the constraint from
+[#629](https://github.com/mfrancza/agentic-development-workflow/issues/629)).
 The gate itself is now a single documented step in each reusable, and
 caller boilerplate shrinks correspondingly. This resolves the "every caller
 restates the gate" drift problem #629 is tracking for the allowlist
 specifically; label-based gates stay in the caller per that issue's
 constraint.
+
+**Event-specific authorization policies preserved.** The current call sites
+do not all authorize the triggering event's `sender.login` against the
+plain allowlist. Each site keeps its existing semantics after the move:
+
+| Caller | Event | Principal passed to gate | Trusted-login exceptions | Notes |
+|---|---|---|---|---|
+| `agent-groom.yml` | `issues.labeled` | `github.event.sender.login` | — | Unchanged behaviour. |
+| `agent-design.yml` | `issues.labeled` | `github.event.sender.login` | — | Unchanged behaviour. |
+| `agent-implement.yml` | `issues.labeled` | `github.event.sender.login` | — | Unchanged behaviour. |
+| `agent-review.yml` | `pull_request_target.labeled` | `github.event.sender.login` | — | Unchanged behaviour. |
+| `agent-review.yml` | `pull_request_target.synchronize` | **gate skipped** | — | Today's caller intentionally authorizes `synchronize` through the `agent:review` label's presence alone, with no pusher check (see the comment at `agent-review.yml:40-46`): the label is the authorization artifact, applied earlier by an allowlisted actor; same-repo + head-repo match is sufficient to re-review. Imposing a sender/pusher allowlist check here would stop re-reviews when a non-allowlisted same-repo collaborator pushes to an already-reviewed PR. The gate step therefore accepts a `skip-gate` input that the caller sets to `true` for the `synchronize` branch, and the existing same-repo + label-presence guards in the caller `if:` remain the sole gate for that event. |
+| `agent-respond-review.yml` | `pull_request_review.submitted` | `github.event.review.user.login` | `mfrancza-reviewer-agent[bot]`, `Copilot`, `copilot-pull-request-reviewer[bot]`, `github-copilot[bot]` | The caller today authorizes a review author via the allowlist OR the four known reviewer-bot logins (because the checked-in `terraform/terraform.tfvars` does not and should not include these bots in `agent_allowlist`). The gate step accepts a JSON array of trusted logins; the caller passes the four bot logins and the gate allows the principal if it matches any trusted login OR any allowlist entry. Without this, the review-response loop stops on every bot review. |
+| `agent-auto-trigger.yml` → `auto-groom`, `auto-design`, `auto-developer-do`, `auto-developer-undraft`, `auto-developer-unblock` | `issues.*` | `github.event.sender.login` | — | Unchanged behaviour. |
+| `agent-auto-trigger.yml` → `auto-review` | `pull_request.opened` | **gate skipped** | — | Today's job does not check `AGENT_ALLOWLIST` — it authorizes based on branch prefix (`agent/…` or `design/…`) OR PR author being the developer-agent bot, plus the same-repo guard. There is nothing to preserve by adding a sender check; the caller's `if:` stays authoritative. The reusable it dispatches (`agent-auto-trigger-reusable.yml`) does not include the allowlist gate step for this transition. |
+
+The `skip-gate` and `additional-trusted-logins` inputs are explicit; the
+reusable workflow does not infer them from event names. Any new caller
+must declare its policy at wiring time, and the design doc / AGENTS.md
+documents the two currently-skipped cases so future consumers cannot
+accidentally weaken the gate.
+
+**Known-identity exceptions are not added to `AGENT_ALLOWLIST`.** The
+reviewer-bot logins and future similar identities stay as per-caller
+constants (passed through `additional-trusted-logins`), not operator-managed
+allowlist entries. This matches how `terraform.tfvars` is checked in today
+(the reviewer bots are not in `agent_allowlist`) and keeps the operator
+list focused on humans/teams who may trigger agent runs via labels, not
+automated reviewers who respond to agent-authored PRs.
 
 **Resolution semantics (fail-closed).** The gate step treats authorization
 as grantable only when a positive membership answer is produced from a
@@ -454,10 +492,10 @@ state, not a Terraform state.
 | Issue [#646](https://github.com/mfrancza/agentic-development-workflow/issues/646) | **Shared TypeScript expander:** add `.github/scripts/src/lib/expand-team-refs.ts` with the pure `expandTeamRefs()` function per Decision 5, plus `.github/scripts/test/lib/expand-team-refs.test.ts` covering login pass-through, pagination, dedupe, empty-team, 404/403, malformed, bot-identity, and nested-team (inherited) cases. | — |
 | Issue [#647](https://github.com/mfrancza/agentic-development-workflow/issues/647) | **`CODE_REVIEWERS` team pass-through:** add a smoke-test step to the implement prompt / entrypoint path confirming `gh pr edit --add-reviewer "org/team-slug"` succeeds; update `docker/scripts/prompts/implement.md` with one sentence allowing team-slug entries; no other code changes needed if the smoke test passes. If the smoke test fails, label `human-required` and escalate per Decision 4. | — |
 | Issue [#648](https://github.com/mfrancza/agentic-development-workflow/issues/648) | **Allowlist gate identity (human-required):** created with the `human-required` label per Decision 2. A maintainer picks an identity (new `allowlist-resolver` App vs. extending the developer-agent App vs. a PAT), provisions the installation / secret, and documents the credential wiring. No code change happens on this issue; the deliverables are the installation decision, the secret in the relevant org/repo, and a short note in the README operator setup. | — |
-| Issue [#649](https://github.com/mfrancza/agentic-development-workflow/issues/649) | **In-reusable allowlist gate step and caller cleanup:** add `.github/scripts/src/check-agent-allowlist.ts` that reads `vars.AGENT_ALLOWLIST`, calls `expandTeamRefs()` with the Decision 2 identity, compares against `github.event.sender.login`, and `core.setFailed`s if not covered (fail-closed on error per requirement 5). Wire it as a first-position step in the reusable workflows `agent-groom.yml`, `agent-design.yml`, `agent-implement.yml`, `agent-review.yml`, `agent-respond-review.yml`, and `agent-auto-trigger.yml`. Remove the eleven `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` clauses from the caller workflows (keep event / label / concurrency clauses). Update AGENTS.md § "Repo-specific security defaults" to document the step-based gate and the required org identity. | Issues #646, #648 |
+| Issue [#649](https://github.com/mfrancza/agentic-development-workflow/issues/649) | **In-reusable allowlist gate step and caller cleanup:** add `.github/scripts/src/check-agent-allowlist.ts` that reads `vars.AGENT_ALLOWLIST`, accepts a `principal` login and an optional `additional-trusted-logins` JSON array, calls `expandTeamRefs()` with the Decision 2 identity, allows if the principal matches any trusted login or any explicit/resolved allowlist entry, and `core.setFailed`s otherwise (fail-closed on error per requirement 5). Also accept a `skip-gate: 'true'` input so the caller can opt out of the gate for the specific event types documented in Decision 1 (`agent-review` synchronize, `agent-auto-trigger` auto-review). Wire the step into the reusable workflows per the Decision 1 event-specific policy table — principal and trusted-login values vary per caller and per event. Remove the matching `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` clauses from the caller workflows (keep event / label / concurrency / trust-model / known-identity clauses). Update AGENTS.md § "Repo-specific security defaults" to document the step-based gate and the required org identity. Acceptance tests must cover: (a) `agent-respond-review` with a review authored by `Copilot` (not in `AGENT_ALLOWLIST`) is still allowed through the trusted-logins exception; (b) `agent-review` `synchronize` event triggered by a pusher who is not in `AGENT_ALLOWLIST` but on an already-labeled same-repo PR is still allowed; (c) `agent-review` `labeled` event triggered by a non-allowlisted sender is denied; (d) `agent-groom`/`agent-design`/`agent-implement` events by a non-allowlisted sender are denied; (e) `auto-review` continues to authorize based on branch prefix / author with no sender gate. | Issues #646, #648 |
 | Issue [#650](https://github.com/mfrancza/agentic-development-workflow/issues/650) | **Groom entrypoint expansion of `ADMIN_ASSIGNEES`:** add a shell (or small Node) helper in `docker/scripts/` that expands team references in `ADMIN_ASSIGNEES` before Claude is invoked, logs per-entry warnings for empty/failed teams, and re-exports the deduped flat list under the same env var name. Wire the Decision 2 identity into `.github/workflows/agent-groom.yml` as a second token exposed to the container, and have the helper call `gh api` with that token. No prompt change required beyond a one-sentence note. | Issues #646, #648 |
 | Issue [#651](https://github.com/mfrancza/agentic-development-workflow/issues/651) | **Documentation:** update AGENTS.md § "Repo-specific security defaults" (in-reusable gate and the org `Members: Read` identity), § "Optional env vars" references for `ADMIN_ASSIGNEES` / `CODE_REVIEWERS` to document the mixed format, and README.md § operator setup to add a short "GitHub team references in `AGENT_ALLOWLIST`, `ADMIN_ASSIGNEES`, `CODE_REVIEWERS`" subsection that includes the Decision 2 credential setup. | Issues #645, #648 |
-| Issue [#652](https://github.com/mfrancza/agentic-development-workflow/issues/652) | **End-to-end validation:** on a test deployment with a real org team, verify (a) a user added to the team can trigger `agent:groom` on the very next event, no cache wait required; (b) a user removed from the team cannot trigger on the next event (revocation case — must be verified); (c) a team that is emptied of all members contributes zero grants on the next event (revocation case — the former last member cannot trigger unless they appear as an explicit login or in a different team); (d) a referenced team that is temporarily deleted / 404s / 403s causes the gate step to fail the job (fail-closed, no cached grant survives); (e) a `human-required` issue with `ADMIN_ASSIGNEES` containing an `org/team` is assigned to every current team member; (f) a PR with `CODE_REVIEWERS` containing an `org/team` carries a team-level review request on GitHub; (g) all three lists continue to work with a mix of individual logins (including a bot login) and team references; (h) a nested-team member (member of a child of the referenced team) is correctly treated as covered. | Issues #645, #646, #647, #648, #649, #650, #651 |
+| Issue [#652](https://github.com/mfrancza/agentic-development-workflow/issues/652) | **End-to-end validation:** on a test deployment with a real org team, verify (a) a user added to the team can trigger `agent:groom` on the very next event, no cache wait required; (b) a user removed from the team cannot trigger on the next event (revocation case — must be verified); (c) a team that is emptied of all members contributes zero grants on the next event (revocation case — the former last member cannot trigger unless they appear as an explicit login or in a different team); (d) a referenced team that is temporarily deleted / 404s / 403s causes the gate step to fail the job (fail-closed, no cached grant survives); (e) a `human-required` issue with `ADMIN_ASSIGNEES` containing an `org/team` is assigned to every current team member; (f) a PR with `CODE_REVIEWERS` containing an `org/team` carries a team-level review request on GitHub; (g) all three lists continue to work with a mix of individual logins (including a bot login) and team references; (h) a nested-team member (member of a child of the referenced team) is correctly treated as covered; (i) a `pull_request_review.submitted` event authored by `Copilot` (a known-trusted login not in `AGENT_ALLOWLIST`) still triggers `agent-respond-review` — the trusted-logins exception works end-to-end; (j) a `pull_request_target.synchronize` event on a PR already carrying `agent:review`, triggered by a same-repo non-allowlisted collaborator, still triggers `agent-review` — the label-only authorization on `synchronize` is preserved. | Issues #645, #646, #647, #648, #649, #650, #651 |
 
 Dependencies are recorded natively as GitHub blocked-by relationships on the
 sub-issues. The Terraform task, the shared TypeScript expander, the
