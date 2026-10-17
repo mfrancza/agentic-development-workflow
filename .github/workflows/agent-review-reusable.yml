@@ -165,6 +165,17 @@ jobs:
           default-model: ${{ inputs.default-model }}
           agent-type: review
 
+      - name: Fetch PR head SHA
+        id: pr-head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ inputs.repo }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+
       - name: Dismiss stale reviewer-bot CHANGES_REQUESTED reviews
         # Fail-open: dismissal is defence-in-depth (see Decision 2 of
         # docs/design/reviewer-supersede-stale-verdict.md). If this step
@@ -178,6 +189,7 @@ jobs:
           token: ${{ steps.setup.outputs.token }}
           repo: ${{ inputs.repo }}
           pr-number: ${{ inputs.pr-number }}
+          head-sha: ${{ steps.pr-head.outputs.sha }}
 
       - name: Prepare agent log directory
         run: |

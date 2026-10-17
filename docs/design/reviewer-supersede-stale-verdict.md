@@ -142,6 +142,10 @@ Fail-open matches the posture of the existing `resolve-review-threads` action.
   `CHANGES_REQUESTED` needs dismissal. `DISMISSED` reviews are already in the
   target state and are skipped by the filter.
 
+#### Amended (Issue #449)
+
+Under the multi-reviewer matrix design ([`docs/design/multi-reviewer-agents.md`](multi-reviewer-agents.md), Decision 4c), all reviewer legs share a single bot identity (`mfrancza-reviewer-agent[bot]`). A naive dismissal of every `CHANGES_REQUESTED` review by the bot would delete a sibling leg's just-posted verdict for the current head SHA. The filter has therefore been tightened to also require `commit_id !== HEAD_SHA` before dismissing a review. Only reviews that are stale in the strict sense (posted against an earlier head SHA) are dismissed; fresh sibling reviews on the current head are preserved. The `head-sha` input was added to the `dismiss-stale-reviewer-reviews` composite action to carry this value.
+
 ### Decision 3 — Ship both fixes together, not just one
 
 The two decisions above are complementary and the design ships both in the same
