@@ -344,25 +344,58 @@ provisioned, every team entry in `ADMIN_ASSIGNEES` warn-and-skips (per
 requirement 5) and grooming proceeds with only the explicit-login portion
 of the list.
 
-Getting the token to the container crosses three boundaries, and all three
-need the groom-only wiring to land together:
+Getting the token to the container crosses **four** boundaries, and all
+four need the groom-only wiring to land together. The structural
+constraint that makes this four hops instead of three: `agent-groom.yml`
+is a job-level `uses:` caller (jobs.groom is a single `uses:` with a
+`secrets:` block — no `steps:` and no job `env:`, both of which GitHub
+Actions disallows alongside a `uses:` at job level). A caller-level
+environment variable therefore cannot propagate into the reusable, and
+the token has to flow through the `secrets:` passthrough into
+`agent-groom-reusable.yml` and only materialize as a step `env:` on the
+reusable's actual `run-agent` step.
 
-1. **Caller stub `.github/workflows/agent-groom.yml`** maps the
-   organization-level secret into a job env var (`env:
-   ALLOWLIST_RESOLVER_TOKEN: ${{ secrets.ALLOWLIST_RESOLVER_TOKEN }}`, or
-   the App-ID/private-key equivalent for Decision 2 option (a)) and
-   passes it into the `run-agent` composite step.
-2. **`.github/actions/run-agent/action.yml`** currently enumerates the
-   environment forwarded to `docker run` (see the `_opt_env` block near
-   lines 191–230, which already uses conditional name-only `-e` flags for
-   `ADMIN_ASSIGNEES` and `CODE_REVIEWERS`). The composite grows one more
-   conditional entry — `[[ -n "${ALLOWLIST_RESOLVER_TOKEN:-}" ]] &&
-   _opt_env+=(-e ALLOWLIST_RESOLVER_TOKEN)` — using the **name-only**
-   `-e` form so the token value stays out of the composite's rendered
-   shell command and the process list. Because every other caller leaves
-   the var unset, the forwarding stays groom-only in effect; no new
-   per-caller flag is required.
-3. **Container entrypoint `docker/scripts/entrypoint.sh`** picks up
+1. **Caller stub `.github/workflows/agent-groom.yml`** passes the
+   organization-level secret through the existing `secrets:` block of
+   its `uses: ./.github/workflows/agent-groom-reusable.yml` call —
+   `ALLOWLIST_RESOLVER_TOKEN: ${{ secrets.ALLOWLIST_RESOLVER_TOKEN }}`
+   for Decision 2 option (c), or `ALLOWLIST_RESOLVER_APP_ID` plus
+   `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` for option (a). The caller stub
+   has no `steps:` and no job `env:` (both unsupported alongside `uses:`
+   at job level), so the secret must flow via `secrets:` into the
+   reusable; a job-level `env:` next to `uses:` would not even be a
+   valid workflow file.
+2. **Reusable workflow `.github/workflows/agent-groom-reusable.yml`**
+   declares the new secret(s) under `on.workflow_call.secrets` (adding
+   `ALLOWLIST_RESOLVER_TOKEN` for option (c), or
+   `ALLOWLIST_RESOLVER_APP_ID` + `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY`
+   for option (a)). For option (a) the reusable adds a second
+   `agent-token` step that mints an installation token from those two
+   secrets (parallel to the existing developer-agent mint step at
+   `agent-groom-reusable.yml:132-137`) and exposes it as a step output;
+   for option (c) the reusable uses `secrets.ALLOWLIST_RESOLVER_TOKEN`
+   directly. The reusable then sets
+   `env: ALLOWLIST_RESOLVER_TOKEN: <minted-token-or-secret>` on the
+   existing "Run grooming agent" step (the `uses:
+   ./_agentic-workflow/.github/actions/run-agent` step at
+   `agent-groom-reusable.yml:156-170`), alongside the existing
+   `ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }}` env entry — this is
+   the first point in the chain where the token exists as a step env
+   var the composite can forward.
+3. **Composite action `.github/actions/run-agent/action.yml`**
+   enumerates the environment forwarded to `docker run` (see the
+   `_opt_env` block near lines 191–230, which already uses conditional
+   `-e` flags for `ADMIN_ASSIGNEES` and `CODE_REVIEWERS`). The composite
+   grows one more conditional entry — `[[ -n
+   "${ALLOWLIST_RESOLVER_TOKEN:-}" ]] && _opt_env+=(-e
+   ALLOWLIST_RESOLVER_TOKEN)` — using the **name-only** `-e` form (same
+   shape as the existing `-e GH_TOKEN` at line 223) so the token value
+   stays out of the composite's rendered shell command and the process
+   list. Because every other caller stub leaves the var unset (and does
+   not declare the corresponding secrets on its reusable), the
+   forwarding stays groom-only in effect; no new per-caller flag is
+   required.
+4. **Container entrypoint `docker/scripts/entrypoint.sh`** picks up
    `ALLOWLIST_RESOLVER_TOKEN` from its environment and passes it to the
    `expand_team_refs` helper. The entrypoint does **not** `export` the
    value globally — the helper reads it directly or runs the `gh` call
@@ -385,13 +418,24 @@ containers where the var is unset. The scrubbing test in
 a corresponding case.
 
 **Test coverage** for the forwarding path — not just the helper logic — is
-part of #650's acceptance: a test that sets
-`ALLOWLIST_RESOLVER_TOKEN=sentinel-value` on the host, invokes the
-`run-agent` composite with the groom-container image, and asserts the
-value is observable inside the container (e.g. via a stubbed
-`expand_team_refs` that echoes a hash of the token to the log). Without
-this, "wire the token in" is still a plausible-looking workflow change
-that silently never reaches the container.
+part of #650's acceptance and must exercise the full caller→reusable→
+composite→entrypoint chain, not just the composite boundary. A test that
+starts with `ALLOWLIST_RESOLVER_TOKEN=sentinel-value` already on the
+runner can only catch a missing composite `-e` flag; it cannot catch a
+missing `secrets:` passthrough in the caller or a missing
+`on.workflow_call.secrets` declaration in the reusable, both of which
+would silently drop the token before it ever reaches the composite.
+Acceptable coverage is either (a) a full e2e workflow run on a test
+deployment that sets `ALLOWLIST_RESOLVER_TOKEN=sentinel-value` as a
+repo/org secret, triggers `agent-groom.yml`, and asserts the sentinel is
+observable inside the container (e.g. via a stubbed `expand_team_refs`
+that echoes a hash of the token to the log), or (b) a layered
+static-plus-runtime test asserting all four boundaries individually: the
+caller stub's `secrets:` block names the new secret, the reusable's
+`on.workflow_call.secrets` declares it and binds it to the `run-agent`
+step's `env:` block, the composite forwards the env var into `docker
+run`, and the container entrypoint reads it. Pure composite-level
+runtime observation is insufficient on its own.
 
 This decision applies to **groom** today. If future issues extend
 `ADMIN_ASSIGNEES` consumption to the designer or developer agents (as
@@ -557,11 +601,12 @@ state, not a Terraform state.
   (per `configurable-github-assignees.md` Decision 5), team support comes
   along automatically through the shared entrypoint helper.
 - **Caching API responses across workflow runs.** The runtime gate makes
-  one API call per team reference per triggering event (short-circuiting as
-  soon as the sender is matched); at expected list sizes (<20 teams) this
-  is well under GitHub's REST budget. A persistent cache would re-introduce
-  the staleness and fail-open problems the runtime approach is specifically
-  designed to avoid.
+  one API call per team reference per triggering event (resolving all
+  teams before deciding, without short-circuiting — see Decision 1); at
+  expected list sizes (<20 teams) this is well under GitHub's REST
+  budget. A persistent cache would re-introduce the staleness and
+  fail-open problems the runtime approach is specifically designed to
+  avoid.
 - **Terraform-side `data "github_team_members"` validation.** The design
   does not add a Terraform data source to pre-validate team references at
   `terraform plan` time. A plan-time validation would duplicate the
@@ -576,10 +621,10 @@ state, not a Terraform state.
 | Issue [#646](https://github.com/mfrancza/agentic-development-workflow/issues/646) | **Shared TypeScript expander:** add `.github/scripts/src/lib/expand-team-refs.ts` with the pure `expandTeamRefs()` function per Decision 5, plus `.github/scripts/test/lib/expand-team-refs.test.ts` covering login pass-through, pagination, dedupe, empty-team, 404/403, malformed, bot-identity, and nested-team (inherited) cases. | — |
 | Issue [#647](https://github.com/mfrancza/agentic-development-workflow/issues/647) | **`CODE_REVIEWERS` team pass-through:** add a smoke-test step to the implement prompt / entrypoint path confirming `gh pr edit --add-reviewer "org/team-slug"` succeeds; update `docker/scripts/prompts/implement.md` with one sentence allowing team-slug entries; no other code changes needed if the smoke test passes. If the smoke test fails, label `human-required` and escalate per Decision 4. | — |
 | Issue [#648](https://github.com/mfrancza/agentic-development-workflow/issues/648) | **Allowlist gate identity (human-required):** created with the `human-required` label per Decision 2. A maintainer picks an identity (new `allowlist-resolver` App vs. extending the developer-agent App vs. a PAT), provisions the installation / secret, and documents the credential wiring. No code change happens on this issue; the deliverables are the installation decision, the secret in the relevant org/repo, and a short note in the README operator setup. | — |
-| Issue [#649](https://github.com/mfrancza/agentic-development-workflow/issues/649) | **In-reusable allowlist gate step and caller cleanup:** add `.github/scripts/src/check-agent-allowlist.ts` that reads `vars.AGENT_ALLOWLIST`, accepts a `principal` login and an optional `additional-trusted-logins` JSON array, allows the principal immediately if it matches any trusted login or any explicit login in `AGENT_ALLOWLIST` (no API call), otherwise calls `expandTeamRefs()` with the Decision 2 identity **once, over all team references in the list** (do not short-circuit on first match: a resolution error later in the list must fail the gate regardless of whether an earlier team already matched the principal), allows if `errors` is empty and the principal matches any resolved team member, and `core.setFailed`s otherwise (fail-closed on error per requirement 5). Also accept a `skip-gate: 'true'` input so the caller can opt out of the gate for the specific event types documented in Decision 1 (`agent-review` synchronize, `agent-auto-trigger` auto-review). Wire the step into the reusable workflows per the Decision 1 event-specific policy table — principal and trusted-login values vary per caller and per event. Remove the matching `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` clauses from the caller workflows (keep event / label / concurrency / trust-model / known-identity clauses). Update AGENTS.md § "Repo-specific security defaults" to document the step-based gate and the required org identity. Acceptance tests must cover: (a) `agent-respond-review` with a review authored by `Copilot` (not in `AGENT_ALLOWLIST`) is still allowed through the trusted-logins exception; (b) `agent-review` `synchronize` event triggered by a pusher who is not in `AGENT_ALLOWLIST` but on an already-labeled same-repo PR is still allowed; (c) `agent-review` `labeled` event triggered by a non-allowlisted sender is denied; (d) `agent-groom`/`agent-design`/`agent-implement` events by a non-allowlisted sender are denied; (e) `auto-review` continues to authorize based on branch prefix / author with no sender gate; (f) **order-independence** of the gate's error policy: with a principal in `org/good` and `org/broken` returning 403, both `["org/good","org/broken"]` and `["org/broken","org/good"]` deny the request. | Issues #646, #648 |
-| Issue [#650](https://github.com/mfrancza/agentic-development-workflow/issues/650) | **Groom entrypoint expansion of `ADMIN_ASSIGNEES`:** add a shell (or small Node) helper in `docker/scripts/` that expands team references in `ADMIN_ASSIGNEES` before Claude is invoked, logs per-entry warnings for empty/failed teams, and re-exports the deduped flat list under the same env var name. Wire the Decision 2 identity through all three boundaries end-to-end: (i) in `.github/workflows/agent-groom.yml` map the secret into a job env var, (ii) in `.github/actions/run-agent/action.yml` add a conditional name-only `-e ALLOWLIST_RESOLVER_TOKEN` to the existing `_opt_env` block so the token reaches the container (groom-only in effect because other callers leave it unset), (iii) in `docker/scripts/entrypoint.sh` have the helper call `gh api` with that token (`GH_TOKEN=$ALLOWLIST_RESOLVER_TOKEN gh api …`) without exporting it globally. Add a fifth redaction block for `ALLOWLIST_RESOLVER_TOKEN` in the `_log_capture_exit` trap and a scrubber test case. Include a test that verifies the token actually reaches the container (not just that the workflow sets it). No prompt change required beyond a one-sentence note. | Issues #646, #648 |
+| Issue [#649](https://github.com/mfrancza/agentic-development-workflow/issues/649) | **In-reusable allowlist gate step and caller cleanup:** add `.github/scripts/src/check-agent-allowlist.ts` that reads `vars.AGENT_ALLOWLIST`, accepts a `principal` login and an optional `additional-trusted-logins` JSON array, allows the principal immediately **only** if it matches any trusted login (no API call — the known-identity exception documented in Decision 1); otherwise calls `expandTeamRefs()` with the Decision 2 identity **once, over all team references in the list** (do not short-circuit on first match: a resolution error later in the list must fail the gate regardless of whether an earlier team already matched the principal), and allows if `errors` is empty AND the principal matches any explicit login or any resolved team member. `core.setFailed`s otherwise (fail-closed on error per requirement 5). **Explicit logins in `AGENT_ALLOWLIST` do NOT bypass team resolution** — only the per-caller `additional-trusted-logins` input (bot identities) can short-circuit before API calls. This is critical: with `AGENT_ALLOWLIST=["alice","org/broken"]`, principal `alice`, and `org/broken` returning 403, the gate must deny (fail-closed on the team error) rather than allowing via an explicit-login shortcut. Also accept a `skip-gate: 'true'` input so the caller can opt out of the gate for the specific event types documented in Decision 1 (`agent-review` synchronize, `agent-auto-trigger` auto-review). Wire the step into the reusable workflows per the Decision 1 event-specific policy table — principal and trusted-login values vary per caller and per event. Remove the matching `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` clauses from the caller workflows (keep event / label / concurrency / trust-model / known-identity clauses). Update AGENTS.md § "Repo-specific security defaults" to document the step-based gate and the required org identity. Acceptance tests must cover: (a) `agent-respond-review` with a review authored by `Copilot` (not in `AGENT_ALLOWLIST`) is still allowed through the trusted-logins exception; (b) `agent-review` `synchronize` event triggered by a pusher who is not in `AGENT_ALLOWLIST` but on an already-labeled same-repo PR is still allowed; (c) `agent-review` `labeled` event triggered by a non-allowlisted sender is denied; (d) `agent-groom`/`agent-design`/`agent-implement` events by a non-allowlisted sender are denied; (e) `auto-review` continues to authorize based on branch prefix / author with no sender gate; (f) **order-independence** of the gate's error policy: with a principal in `org/good` and `org/broken` returning 403, both `["org/good","org/broken"]` and `["org/broken","org/good"]` deny the request; (g) **explicit-login does not bypass team error**: with `AGENT_ALLOWLIST=["alice","org/broken"]`, principal `alice`, and `org/broken` returning 403, the gate denies (not allowed via explicit-login shortcut) — the only pre-resolution bypass is `additional-trusted-logins`; (h) `additional-trusted-logins` **does** bypass team error: with `AGENT_ALLOWLIST=["org/broken"]`, principal `Copilot`, trusted-logins `["Copilot"]`, and `org/broken` returning 403, the gate allows (the trusted-login fast path is taken before any API call). | Issues #646, #648 |
+| Issue [#650](https://github.com/mfrancza/agentic-development-workflow/issues/650) | **Groom entrypoint expansion of `ADMIN_ASSIGNEES`:** add a shell (or small Node) helper in `docker/scripts/` that expands team references in `ADMIN_ASSIGNEES` before Claude is invoked, logs per-entry warnings for empty/failed teams, and re-exports the deduped flat list under the same env var name. Wire the Decision 2 identity through all four boundaries end-to-end: (i) in `.github/workflows/agent-groom.yml` add the secret(s) to the existing `secrets:` passthrough block of the `uses: ./.github/workflows/agent-groom-reusable.yml` call — `agent-groom.yml` is a job-level `uses:` caller with no `steps:` and no job `env:` (both unsupported alongside `uses:` at job level), so the token must flow via `secrets:` into the reusable; (ii) in `.github/workflows/agent-groom-reusable.yml` declare the new secret(s) under `on.workflow_call.secrets`, mint a token from them if Decision 2 picked option (a) (new `agent-token` step with the resolver App's client-id / private-key, parallel to the existing developer-agent mint at `agent-groom-reusable.yml:132-137`), and set `env: ALLOWLIST_RESOLVER_TOKEN: <minted-token-or-secret>` on the existing "Run grooming agent" step at `agent-groom-reusable.yml:156-170`; (iii) in `.github/actions/run-agent/action.yml` add a conditional name-only `-e ALLOWLIST_RESOLVER_TOKEN` to the existing `_opt_env` block so the token reaches the container (groom-only in effect because other callers leave it unset); (iv) in `docker/scripts/entrypoint.sh` have the helper call `gh api` with that token (`GH_TOKEN=$ALLOWLIST_RESOLVER_TOKEN gh api …`) without exporting it globally. Add a fifth redaction block for `ALLOWLIST_RESOLVER_TOKEN` in the `_log_capture_exit` trap and a scrubber test case. Include a test that verifies the token actually reaches the container through the **full caller→reusable→composite→entrypoint handoff** (a composite-only test that starts with the token already on the runner cannot catch a missing `secrets:` passthrough or a missing `on.workflow_call.secrets` declaration): either a full e2e workflow run with a sentinel token, or a layered static-plus-runtime test asserting (a) caller `secrets:` names the new secret, (b) reusable's `on.workflow_call.secrets` declares it and binds it to the `run-agent` step's `env:`, (c) composite forwards the env var, (d) container sees the value. No prompt change required beyond a one-sentence note. | Issues #646, #648 |
 | Issue [#651](https://github.com/mfrancza/agentic-development-workflow/issues/651) | **Documentation:** update AGENTS.md § "Repo-specific security defaults" (in-reusable gate and the org `Members: Read` identity), § "Optional env vars" references for `ADMIN_ASSIGNEES` / `CODE_REVIEWERS` to document the mixed format, and README.md § operator setup to add a short "GitHub team references in `AGENT_ALLOWLIST`, `ADMIN_ASSIGNEES`, `CODE_REVIEWERS`" subsection that includes the Decision 2 credential setup. | Issues #645, #648 |
-| Issue [#652](https://github.com/mfrancza/agentic-development-workflow/issues/652) | **End-to-end validation:** on a test deployment with a real org team, verify (a) a user added to the team can trigger `agent:groom` on the very next event, no cache wait required; (b) a user removed from the team cannot trigger on the next event (revocation case — must be verified); (c) a team that is emptied of all members contributes zero grants on the next event (revocation case — the former last member cannot trigger unless they appear as an explicit login or in a different team); (d) a referenced team that is temporarily deleted / 404s / 403s causes the gate step to fail the job (fail-closed, no cached grant survives); (e) a `human-required` issue with `ADMIN_ASSIGNEES` containing an `org/team` is assigned to every current team member; (f) a PR with `CODE_REVIEWERS` containing an `org/team` carries a team-level review request on GitHub; (g) all three lists continue to work with a mix of individual logins (including a bot login) and team references; (h) a nested-team member (member of a child of the referenced team) is correctly treated as covered; (i) a `pull_request_review.submitted` event authored by `Copilot` (a known-trusted login not in `AGENT_ALLOWLIST`) still triggers `agent-respond-review` — the trusted-logins exception works end-to-end; (j) a `pull_request_target.synchronize` event on a PR already carrying `agent:review`, triggered by a same-repo non-allowlisted collaborator, still triggers `agent-review` — the label-only authorization on `synchronize` is preserved; (k) **order-independence**: with `AGENT_ALLOWLIST` set to `["org/good","org/broken"]` where the principal is a member of `org/good` and `org/broken` returns 403, the gate denies; and with the entries reversed (`["org/broken","org/good"]`), the gate also denies — the outcome does not depend on list order; (l) `ALLOWLIST_RESOLVER_TOKEN` appears in a redacted form in the groom container's `/home/agent/logs/container.log` after a run that intentionally echoes the token, confirming the scrubber covers the new credential. | Issues #645, #646, #647, #648, #649, #650, #651 |
+| Issue [#652](https://github.com/mfrancza/agentic-development-workflow/issues/652) | **End-to-end validation:** on a test deployment with a real org team, verify (a) a user added to the team can trigger `agent:groom` on the very next event, no cache wait required; (b) a user removed from the team cannot trigger on the next event (revocation case — must be verified); (c) a team that is emptied of all members contributes zero grants on the next event (revocation case — the former last member cannot trigger unless they appear as an explicit login or in a different team); (d) a referenced team that is temporarily deleted / 404s / 403s causes the gate step to fail the job (fail-closed, no cached grant survives); (e) a `human-required` issue with `ADMIN_ASSIGNEES` containing an `org/team` is assigned to every current team member; (f) a PR with `CODE_REVIEWERS` containing an `org/team` carries a team-level review request on GitHub; (g) all three lists continue to work with a mix of individual logins (including a bot login) and team references; (h) a nested-team member (member of a child of the referenced team) is correctly treated as covered; (i) a `pull_request_review.submitted` event authored by `Copilot` (a known-trusted login not in `AGENT_ALLOWLIST`) still triggers `agent-respond-review` — the trusted-logins exception works end-to-end; (j) a `pull_request_target.synchronize` event on a PR already carrying `agent:review`, triggered by a same-repo non-allowlisted collaborator, still triggers `agent-review` — the label-only authorization on `synchronize` is preserved; (k) **order-independence**: with `AGENT_ALLOWLIST` set to `["org/good","org/broken"]` where the principal is a member of `org/good` and `org/broken` returns 403, the gate denies; and with the entries reversed (`["org/broken","org/good"]`), the gate also denies — the outcome does not depend on list order; (l) `ALLOWLIST_RESOLVER_TOKEN` appears in a redacted form in the groom container's `/home/agent/logs/container.log` after a run that intentionally echoes the token, confirming the scrubber covers the new credential; (m) **explicit-login-plus-failing-team**: with `AGENT_ALLOWLIST=["alice","org/broken"]`, principal `alice`, and `org/broken` returning 403 at trigger time, the gate denies — the explicit-login match does not bypass the team-resolution error (sibling of (k) order-independence, verifying Decision 1's rule that only `additional-trusted-logins` short-circuits before API calls); (n) **token-handoff end-to-end**: with `ALLOWLIST_RESOLVER_TOKEN` provisioned as a secret and a stubbed `expand_team_refs` that writes a hash of the received token to the agent log, trigger `agent-groom` through the caller stub and confirm the sentinel's hash appears in the container log — verifies the full caller→reusable→composite→entrypoint handoff, not just the composite boundary. | Issues #645, #646, #647, #648, #649, #650, #651 |
 
 Dependencies are recorded natively as GitHub blocked-by relationships on the
 sub-issues. The Terraform task, the shared TypeScript expander, the
