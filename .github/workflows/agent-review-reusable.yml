@@ -3,6 +3,20 @@ name: agent-review (reusable)
 # Reusable workflow — call this from agent-review.yml (or any external caller)
 # to run the reviewer agent on a specific pull request.
 #
+# Reviewer-set fan-out: a preflight job (resolve) applies the three-tier
+# waterfall in the resolve-reviewer-set composite action to determine which
+# models will review the PR:
+#   1. Per-PR model:review:* labels.
+#   2. Repo-wide REVIEWER_MODELS list (inputs.reviewer-models).
+#   3. Single-reviewer fallback: generic model:* label on the PR →
+#      inputs.default-model.
+# The matrix review job (review) fans out over the resolved set with
+# fail-fast: false so one leg's failure does not cancel the others.  Each
+# matrix leg mints its own reviewer-agent installation token, dismisses stale
+# reviews posted against an older head SHA, runs the reviewer container,
+# uploads its own log artifact (named with the model slug), and resolves its
+# own addressed review threads.
+#
 # Security: all trust-model checks (PR state, same-repo enforcement, sender
 # allowlist, synchronize-path label check) are the caller's responsibility;
 # this reusable performs none of them.  Keep those conditions in the caller
@@ -45,6 +59,16 @@ on:
         required: false
         type: string
         default: ''
+      reviewer-models:
+        description: >
+          JSON-encoded list of model names from the REVIEWER_MODELS Actions
+          variable (e.g. '["sonnet","gpt-5"]'). An empty string or empty JSON
+          array ("[]") disables Tier 2 and falls through to the single-reviewer
+          waterfall. Default: empty string (feature disabled; single-reviewer
+          mode preserved).
+        required: false
+        type: string
+        default: ''
       logs-retention-days:
         description: 'Days to retain uploaded log artifacts'
         required: false
@@ -76,13 +100,107 @@ on:
       XAI_API_KEY:
         required: false
 
-# Deny-all at the workflow level; the write scopes the resolve step needs are
-# granted on the review job itself so any future job added to this workflow
-# starts with no permissions.
+# Deny-all at the workflow level; write scopes needed by specific jobs are
+# declared on those jobs so any future job added here starts with no permissions.
 permissions: {}
 
 jobs:
+  # Preflight job: resolves the reviewer set once per workflow run and fetches
+  # the PR head SHA, then passes both to the matrix review job via outputs.
+  # Fails loudly if the resolved set is empty (should not occur — the resolver
+  # always yields at least inputs.default-model).
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      pull-requests: read
+    outputs:
+      set: ${{ steps.resolve-set.outputs.set }}
+      head-sha: ${{ steps.pr-head.outputs.sha }}
+    steps:
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+
+      - name: Resolve reviewer set
+        id: resolve-set
+        uses: ./_agentic-workflow/.github/actions/resolve-reviewer-set
+        with:
+          token: ${{ github.token }}
+          pr-number: ${{ inputs.pr-number }}
+          repo: ${{ inputs.repo }}
+          reviewer-models: ${{ inputs.reviewer-models }}
+          default-model: ${{ inputs.default-model }}
+
+      - name: Fail loudly if reviewer set is empty
+        env:
+          REVIEWER_SET: ${{ steps.resolve-set.outputs.set }}
+        run: |
+          set -euo pipefail
+          count=$(echo "${REVIEWER_SET}" | jq 'length')
+          if [[ "${count}" -eq 0 ]]; then
+            echo "::error::Reviewer set resolved to an empty array. The resolver should always yield at least the default model."
+            exit 1
+          fi
+          echo "Resolved reviewer set has ${count} reviewer(s)."
+          if [[ "${count}" -gt 3 ]]; then
+            echo "::warning::Resolved reviewer set has ${count} reviewers; each push will fan out to ${count} parallel review passes and spend ~${count}× review cost."
+          fi
+
+      - name: Fetch PR head SHA
+        id: pr-head
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ inputs.repo }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+        run: |
+          set -euo pipefail
+          sha="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')"
+          echo "sha=$(printf '%s' "${sha}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
   review:
+    needs: resolve
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     # contents: write + pull-requests: write are for the "Resolve addressed
@@ -100,7 +218,10 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.resolve.outputs.set) }}
     steps:
       - name: Validate helpers-ref input
         env:
@@ -154,27 +275,16 @@ jobs:
           client-id: ${{ secrets.REVIEWER_APP_ID }}
           private-key: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
 
-      - name: Resolve Claude model from PR labels
-        id: model
-        uses: ./_agentic-workflow/.github/actions/resolve-model
-        with:
-          token: ${{ steps.setup.outputs.token }}
-          subject-type: pr
-          subject-number: ${{ inputs.pr-number }}
-          repo: ${{ inputs.repo }}
-          default-model: ${{ inputs.default-model }}
-          agent-type: review
-
-      - name: Fetch PR head SHA
-        id: pr-head
+      - name: Slugify model name for artifact
+        # Passes matrix.model through env: so the value is never interpolated
+        # directly into the shell script (output-injection hygiene).
+        id: slug
         env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ inputs.repo }}
-          PR_NUMBER: ${{ inputs.pr-number }}
+          MODEL: ${{ matrix.model }}
         run: |
           set -euo pipefail
-          sha="$(gh api "repos/${REPO}/pulls/${PR_NUMBER}" --jq '.head.sha')"
-          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          slugified=$(echo "${MODEL}" | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9' '-' | sed 's/^-*//;s/-*$//')
+          echo "value=$(printf '%s' "${slugified}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
 
       - name: Dismiss stale reviewer-bot CHANGES_REQUESTED reviews
         # Fail-open: dismissal is defence-in-depth (see Decision 2 of
@@ -183,13 +293,15 @@ jobs:
         # failure does not cancel the job. The activity itself also uses
         # core.warning() rather than core.setFailed() for individual API
         # errors, so the common case is a clean zero exit.
+        # head-sha filters to only dismiss reviews posted against an earlier
+        # head SHA, preserving sibling-leg verdicts on the current SHA.
         continue-on-error: true
         uses: ./_agentic-workflow/.github/actions/dismiss-stale-reviewer-reviews
         with:
           token: ${{ steps.setup.outputs.token }}
           repo: ${{ inputs.repo }}
           pr-number: ${{ inputs.pr-number }}
-          head-sha: ${{ steps.pr-head.outputs.sha }}
+          head-sha: ${{ needs.resolve.outputs.head-sha }}
 
       - name: Prepare agent log directory
         run: |
@@ -200,6 +312,9 @@ jobs:
       - name: Run reviewer agent
         # The container records the GraphQL IDs of addressed review threads
         # into the mounted output directory; the resolve step below reads them.
+        # Per-leg output-dir uses strategy.job-index to make the path explicit
+        # (each matrix leg already runs on its own runner, so isolation is
+        # structural, but the index makes the path self-documenting).
         uses: ./_agentic-workflow/.github/actions/run-agent
         with:
           image: ${{ inputs.image }}
@@ -211,8 +326,8 @@ jobs:
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           repo: ${{ inputs.repo }}
           pr-number: ${{ inputs.pr-number }}
-          model: ${{ steps.model.outputs.claude_model }}
-          output-dir: ${{ runner.temp }}/reviewer-output
+          model: ${{ matrix.model }}
+          output-dir: ${{ runner.temp }}/reviewer-output-${{ strategy.job-index }}
           output-mount: /agent-output
           resolve-threads-file: /agent-output/resolve-threads.txt
           logs-dir: ${{ runner.temp }}/agent-logs
@@ -221,21 +336,22 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: agent-logs-review-pr-${{ inputs.pr-number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          name: agent-logs-review-pr-${{ inputs.pr-number }}-${{ steps.slug.outputs.value }}-run-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/agent-logs
           retention-days: ${{ inputs.logs-retention-days }}
           if-no-files-found: warn
 
       - name: Resolve addressed review threads
         # Runs with the workflow GITHUB_TOKEN (see the permissions comment at
-        # the top of this file), not the reviewer app token — so threads show
+        # the top of this job), not the reviewer app token — so threads show
         # as resolved by github-actions[bot]. The recorded IDs are
         # agent-generated output derived from PR content, so they are treated
         # as untrusted: each ID is format-checked and intersected against the
         # PR's actual open threads before the mutation is issued.
+        # resolve-file reads this leg's own output directory.
         uses: ./_agentic-workflow/.github/actions/resolve-review-threads
         with:
           token: ${{ github.token }}
           pr-number: ${{ inputs.pr-number }}
           repo: ${{ inputs.repo }}
-          resolve-file: ${{ runner.temp }}/reviewer-output/resolve-threads.txt
+          resolve-file: ${{ runner.temp }}/reviewer-output-${{ strategy.job-index }}/resolve-threads.txt
