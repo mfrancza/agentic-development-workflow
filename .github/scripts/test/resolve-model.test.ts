@@ -415,3 +415,265 @@ describe("resolveModel — two-tier resolution with agentType", () => {
     expect(result).toBe("opus");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Pairing tier (agentType === "review", pairingOptions provided)
+// ---------------------------------------------------------------------------
+
+// The pairing tier in resolveModel uses the classTable imported at module level
+// from model-classes.ts.  These tests rely on the real loaded classTable and
+// use model names that exist in the real model-classes.json.
+
+describe("resolveModel — pairing tier (agent-type: review)", () => {
+  beforeEach(() => {
+    mockIssueGet.mockReset();
+    mockPullGet.mockReset();
+  });
+
+  it("pairing tier fires only for agent-type: review, not for other agent types", async () => {
+    // agent-type: developer with pairingOptions — pairing tier must NOT fire.
+    mockIssueGet.mockResolvedValue(issueResponse([]));
+
+    const warnings: string[] = [];
+    const result = await resolveModel(
+      octokit,
+      "issue",
+      42,
+      "owner",
+      "repo",
+      "haiku", // default
+      "developer", // not review
+      {
+        pairingConfig: {
+          enabled: true,
+          policy: "different-vendor-same-class",
+          preferred_vendors: ["openai", "xai", "anthropic"],
+          fallback_chain: ["default-model"],
+        },
+        authoringModel: "sonnet",
+        availableProviders: ["anthropic", "openai", "xai"],
+      },
+      (msg) => warnings.push(msg),
+    );
+
+    // Pairing tier must not fire for developer; falls through to haiku default.
+    expect(result).toBe("haiku");
+    // No pairing-related warnings for a non-review agent type.
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("pairing tier is disabled by default (no pairingOptions passed)", async () => {
+    mockPullGet.mockResolvedValue(prResponse([]));
+
+    const warnings: string[] = [];
+    const result = await resolveModel(
+      octokit,
+      "pr",
+      10,
+      "owner",
+      "repo",
+      "haiku",
+      "review",
+      undefined, // no pairingOptions
+      (msg) => warnings.push(msg),
+    );
+
+    expect(result).toBe("haiku");
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("label tiers still win when both labels and pairing inputs are present", async () => {
+    // model:review:opus label present → tier 1 wins before pairing tier.
+    mockPullGet.mockResolvedValue(prResponse(["model:review:opus"]));
+
+    const warnings: string[] = [];
+    const result = await resolveModel(
+      octokit,
+      "pr",
+      5,
+      "owner",
+      "repo",
+      "haiku",
+      "review",
+      {
+        pairingConfig: {
+          enabled: true,
+          policy: "different-vendor-same-class",
+          preferred_vendors: ["openai", "xai", "anthropic"],
+          fallback_chain: ["default-model"],
+        },
+        authoringModel: "sonnet",
+        availableProviders: ["anthropic", "openai", "xai"],
+      },
+      (msg) => warnings.push(msg),
+    );
+
+    expect(result).toBe("opus"); // label tier won
+    expect(warnings).toHaveLength(0); // pairing tier not reached
+  });
+
+  it("generic model:* label wins over pairing tier", async () => {
+    mockPullGet.mockResolvedValue(prResponse(["model:haiku"]));
+
+    const warnings: string[] = [];
+    const result = await resolveModel(
+      octokit,
+      "pr",
+      3,
+      "owner",
+      "repo",
+      "sonnet",
+      "review",
+      {
+        pairingConfig: {
+          enabled: true,
+          policy: "different-vendor-same-class",
+          preferred_vendors: ["openai"],
+          fallback_chain: ["default-model"],
+        },
+        authoringModel: "sonnet",
+        availableProviders: ["anthropic", "openai"],
+      },
+      (msg) => warnings.push(msg),
+    );
+
+    expect(result).toBe("haiku"); // generic label wins
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("pairing tier resolves a cross-vendor model when labels are absent", async () => {
+    // No labels; pairing tier fires; authoring model is "sonnet" (anthropic);
+    // expects gpt-5.6-terra (openai sonnet canonical).
+    mockPullGet.mockResolvedValue(prResponse([]));
+
+    const warnings: string[] = [];
+    const result = await resolveModel(
+      octokit,
+      "pr",
+      7,
+      "owner",
+      "repo",
+      "haiku",
+      "review",
+      {
+        pairingConfig: {
+          enabled: true,
+          policy: "different-vendor-same-class",
+          preferred_vendors: ["openai", "xai", "anthropic"],
+          fallback_chain: ["default-model"],
+        },
+        authoringModel: "sonnet",
+        availableProviders: ["anthropic", "openai", "xai"],
+      },
+      (msg) => warnings.push(msg),
+    );
+
+    expect(result).toBe("gpt-5.6-terra");
+    expect(warnings).toHaveLength(0);
+  });
+
+  it("pairing tier falls through to default and warns when authoring-model marker is absent", async () => {
+    mockPullGet.mockResolvedValue(prResponse([]));
+
+    const warnings: string[] = [];
+    const result = await resolveModel(
+      octokit,
+      "pr",
+      8,
+      "owner",
+      "repo",
+      "haiku",
+      "review",
+      {
+        pairingConfig: {
+          enabled: true,
+          policy: "different-vendor-same-class",
+          preferred_vendors: ["openai"],
+          fallback_chain: ["default-model"],
+        },
+        authoringModel: "", // marker absent
+        availableProviders: ["anthropic", "openai"],
+      },
+      (msg) => warnings.push(msg),
+    );
+
+    expect(result).toBe("haiku"); // fell through to default
+    expect(warnings.some((w) => w.includes("authoring model marker is absent"))).toBe(true);
+  });
+
+  it("pairing tier falls through to default when pairing-policy JSON is not set (pairingOptions undefined)", async () => {
+    mockPullGet.mockResolvedValue(prResponse([]));
+
+    const result = await resolveModel(
+      octokit,
+      "pr",
+      9,
+      "owner",
+      "repo",
+      "haiku",
+      "review",
+      undefined, // pairingOptions not passed
+    );
+
+    expect(result).toBe("haiku");
+  });
+
+  it("pairing tier emits warning when it falls back", async () => {
+    // Only anthropic key; policy is different-vendor-same-class; no cross-vendor.
+    mockPullGet.mockResolvedValue(prResponse([]));
+
+    const warnings: string[] = [];
+    const result = await resolveModel(
+      octokit,
+      "pr",
+      11,
+      "owner",
+      "repo",
+      "haiku",
+      "review",
+      {
+        pairingConfig: {
+          enabled: true,
+          policy: "different-vendor-same-class",
+          preferred_vendors: ["openai", "xai", "anthropic"],
+          fallback_chain: ["default-model"],
+        },
+        authoringModel: "sonnet",
+        availableProviders: ["anthropic"], // only author vendor
+      },
+      (msg) => warnings.push(msg),
+    );
+
+    expect(result).toBe("haiku");
+    expect(warnings.length).toBeGreaterThan(0);
+  });
+
+  it('pairing tier with policy "off" does not fire and returns default', async () => {
+    mockPullGet.mockResolvedValue(prResponse([]));
+
+    const warnings: string[] = [];
+    const result = await resolveModel(
+      octokit,
+      "pr",
+      12,
+      "owner",
+      "repo",
+      "haiku",
+      "review",
+      {
+        pairingConfig: {
+          enabled: true,
+          policy: "off",
+          preferred_vendors: ["openai"],
+          fallback_chain: ["default-model"],
+        },
+        authoringModel: "sonnet",
+        availableProviders: ["anthropic", "openai"],
+      },
+      (msg) => warnings.push(msg),
+    );
+
+    expect(result).toBe("haiku");
+    expect(warnings).toHaveLength(0);
+  });
+});

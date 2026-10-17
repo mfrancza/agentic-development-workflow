@@ -21,11 +21,40 @@ inputs:
     required: true
   agent-type:
     description: >
-      Optional agent type (e.g. "developer", "groom", "design"). When provided,
-      enables per-agent label resolution: model:<agent-type>:* labels are
-      checked first (tier 1), then generic model:* labels (tier 2), then the
-      default. When omitted, all model:* labels are considered together
-      (original single-tier behaviour used by PR-based workflows).
+      Optional agent type (e.g. "developer", "groom", "design", "review"). When
+      provided, enables per-agent label resolution: model:<agent-type>:* labels
+      are checked first (tier 1), then generic model:* labels (tier 2). For
+      agent-type "review", a pairing tier (tier 3) is consulted when
+      pairing-policy is also supplied. When omitted, all model:* labels are
+      considered together (original single-tier behaviour used by PR-based
+      workflows).
+    required: false
+    default: ''
+  pairing-policy:
+    description: >
+      Optional JSON string containing the REVIEW_MODEL_PAIRING configuration
+      object (shape: { enabled, policy, preferred_vendors, explicit_map,
+      fallback_chain }). Only consulted when agent-type is "review". When
+      absent or empty, the pairing tier is skipped and the waterfall falls
+      through to DEFAULT_MODEL as today.
+    required: false
+    default: ''
+  authoring-model:
+    description: >
+      The model that authored the PR under review, parsed from the
+      <!-- authored-by-model: … --> HTML-comment marker in the PR body. Only
+      consulted when agent-type is "review" and pairing-policy is non-empty.
+      When absent, the pairing tier is skipped with a loud warning.
+    required: false
+    default: ''
+  available-providers:
+    description: >
+      Comma-separated or JSON-encoded list of provider names whose API key is
+      set in the calling workflow (e.g. "anthropic,openai" or
+      '["anthropic","xai"]'). Supported values: "anthropic", "openai", "xai".
+      Only consulted when agent-type is "review" and pairing-policy is
+      non-empty. When absent, the pairing resolver treats all providers as
+      unavailable.
     required: false
     default: ''
 outputs:
@@ -69,4 +98,7 @@ runs:
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_DEFAULT_MODEL: ${{ inputs.default-model }}
         INPUT_AGENT_TYPE: ${{ inputs.agent-type }}
+        INPUT_PAIRING_POLICY: ${{ inputs.pairing-policy }}
+        INPUT_AUTHORING_MODEL: ${{ inputs.authoring-model }}
+        INPUT_AVAILABLE_PROVIDERS: ${{ inputs.available-providers }}
       run: npx --no-install tsx src/resolve-model.ts

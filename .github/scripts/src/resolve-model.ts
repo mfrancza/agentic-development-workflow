@@ -1,6 +1,7 @@
 import * as core from "@actions/core";
 import { getOctokit } from "./lib/octokit.js";
 import { resolveModel, type SubjectType } from "./lib/resolve-model.js";
+import { type PairingConfig } from "./lib/model-pair.js";
 
 /**
  * Entry point — reads action inputs, calls resolveModel, and publishes the
@@ -39,6 +40,59 @@ async function run(): Promise<void> {
   const agentTypeInput = core.getInput("agent_type", { required: false });
   const agentType = agentTypeInput.trim() || undefined;
 
+  // ---------------------------------------------------------------------------
+  // Pairing tier inputs (optional; only used for agent-type: review)
+  // ---------------------------------------------------------------------------
+  const pairingPolicyRaw = core.getInput("pairing_policy", { required: false }).trim();
+  const authoringModel = core.getInput("authoring_model", { required: false }).trim();
+  const availableProvidersRaw = core.getInput("available_providers", { required: false }).trim();
+
+  let pairingOptions: Parameters<typeof resolveModel>[7] = undefined;
+
+  if (agentType === "review" && pairingPolicyRaw) {
+    let pairingConfig: PairingConfig;
+    try {
+      pairingConfig = JSON.parse(pairingPolicyRaw) as PairingConfig;
+    } catch (err) {
+      core.warning(
+        `Pairing tier skipped: failed to parse pairing-policy JSON: ${err instanceof Error ? err.message : String(err)}. ` +
+          `Falling through to DEFAULT_MODEL.`,
+      );
+      pairingConfig = { policy: "off", enabled: false };
+    }
+
+    // Parse available-providers: supports "anthropic,openai,xai" or ["anthropic","openai"]
+    let availableProviders: string[] = [];
+    if (availableProvidersRaw) {
+      const trimmed = availableProvidersRaw.trim();
+      if (trimmed.startsWith("[")) {
+        try {
+          availableProviders = JSON.parse(trimmed) as string[];
+        } catch {
+          availableProviders = trimmed
+            .replace(/[\[\]"]/g, "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+      } else {
+        availableProviders = trimmed
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    }
+
+    pairingOptions = {
+      pairingConfig,
+      authoringModel,
+      availableProviders,
+    };
+  } else if (agentType === "review" && !pairingPolicyRaw) {
+    // Pairing tier inputs absent — log and fall through (disabled by default).
+    // No warning needed; the feature is opt-in.
+  }
+
   const octokit = getOctokit(token);
   const claudeModel = await resolveModel(
     octokit,
@@ -48,6 +102,17 @@ async function run(): Promise<void> {
     repoName,
     defaultModel,
     agentType,
+    pairingOptions,
+    (msg: string) => {
+      // Messages prefixed with "ERROR:" must be surfaced as core.error(); all
+      // others are core.warning().  This fulfils Decision 5 of the design which
+      // requires core.error() when DEFAULT_MODEL == authoring model.
+      if (msg.startsWith("ERROR:")) {
+        core.error(msg.slice("ERROR:".length).trim());
+      } else {
+        core.warning(msg);
+      }
+    },
   );
 
   core.setOutput("claude_model", claudeModel);

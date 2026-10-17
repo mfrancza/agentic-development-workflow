@@ -130,6 +130,13 @@ function loadData(): ModelClassData {
 
 const data: ModelClassData = loadData();
 
+/**
+ * The loaded cross-vendor class table, ready for use by the pairing resolver.
+ * This is the `classes` portion of model-classes.json; export it so callers
+ * can pass it directly to `selectReviewerModel` without duplicating the load.
+ */
+export const classTable: ClassTable = data.classes;
+
 // ---------------------------------------------------------------------------
 // Public accessors
 // ---------------------------------------------------------------------------
