@@ -47,6 +47,22 @@ on:
         description: 'GitHub login of the PR author (github.event.pull_request.user.login)'
         type: string
         required: true
+      head-sha:
+        description: >
+          Current PR head SHA (github.event.pull_request.head.sha). When empty,
+          the stale-SHA guard inside check-reviewer-feedback is skipped
+          (fail-open).
+        type: string
+        required: false
+        default: ''
+      review-commit-id:
+        description: >
+          The commit SHA the review was submitted against
+          (github.event.review.commit_id). When empty, the stale-SHA guard
+          falls through (does not skip on a missing value).
+        type: string
+        required: false
+        default: ''
       image:
         description: >
           Pre-built agent image reference to pull (e.g.
@@ -170,6 +186,8 @@ jobs:
           repo-name: ${{ inputs.repo-name }}
           review-author: ${{ inputs.review-author }}
           pr-author: ${{ inputs.pr-author }}
+          head-sha: ${{ inputs.head-sha }}
+          review-commit-id: ${{ inputs.review-commit-id }}
 
       # Mint only after we've decided to proceed — no installation token for runs we skip.
       - name: Mint installation token for developer-agent

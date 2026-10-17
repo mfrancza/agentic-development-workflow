@@ -29,6 +29,8 @@ const BASE_INPUT: FeedbackCheckInput = {
   repo: "myrepo",
   reviewAuthor: "reviewer-bot",
   prAuthor: "developer-bot",
+  headSha: "abc1234",
+  reviewCommitId: "abc1234",
 };
 
 function makeDeps(overrides?: Partial<FeedbackCheckDeps>): FeedbackCheckDeps {
@@ -39,6 +41,92 @@ function makeDeps(overrides?: Partial<FeedbackCheckDeps>): FeedbackCheckDeps {
     ...overrides,
   };
 }
+
+// ---------------------------------------------------------------------------
+// -1. Stale-SHA guard — skip when review.commit_id != head-sha
+// ---------------------------------------------------------------------------
+
+describe("stale-SHA guard", () => {
+  it("skips immediately when reviewCommitId does not match headSha (stale review)", async () => {
+    const deps = makeDeps();
+    const result = await checkReviewerFeedback(
+      {
+        ...BASE_INPUT,
+        state: "changes_requested",
+        headSha: "newsha456",
+        reviewCommitId: "oldsha123",
+      },
+      deps,
+    );
+    expect(result.proceed).toBe(false);
+    expect(result.reason).toMatch(/stale/i);
+    expect(result.reason).toMatch(/oldsha123/);
+    expect(result.reason).toMatch(/newsha456/);
+    // No further API calls should be made.
+    expect(deps.getPrState).not.toHaveBeenCalled();
+    expect(deps.countUnresolvedThreads).not.toHaveBeenCalled();
+    expect(deps.countInlineComments).not.toHaveBeenCalled();
+  });
+
+  it("proceeds to existing checks when reviewCommitId matches headSha", async () => {
+    const sha = "matchingsha789";
+    const deps = makeDeps({
+      countUnresolvedThreads: vi.fn().mockResolvedValue(1),
+    });
+    const result = await checkReviewerFeedback(
+      {
+        ...BASE_INPUT,
+        state: "approved",
+        headSha: sha,
+        reviewCommitId: sha,
+      },
+      deps,
+    );
+    // SHA matches → falls through to existing flow; approved + 1 thread → proceed.
+    expect(result.proceed).toBe(true);
+    expect(deps.getPrState).toHaveBeenCalledOnce();
+    expect(deps.countUnresolvedThreads).toHaveBeenCalledOnce();
+  });
+
+  it("proceeds (fail-open) when headSha is empty — stale-SHA guard is skipped", async () => {
+    const deps = makeDeps({
+      countUnresolvedThreads: vi.fn().mockResolvedValue(0),
+    });
+    const result = await checkReviewerFeedback(
+      {
+        ...BASE_INPUT,
+        state: "approved",
+        headSha: "",
+        reviewCommitId: "somesha123",
+      },
+      deps,
+    );
+    // head-sha missing → stale-SHA guard skipped (fail-open); continues to existing
+    // flow; zero threads → skip.
+    expect(result.proceed).toBe(false);
+    expect(deps.getPrState).toHaveBeenCalledOnce();
+    expect(deps.countUnresolvedThreads).toHaveBeenCalledOnce();
+  });
+
+  it("proceeds (fall-through) when reviewCommitId is empty — guard does not skip on missing value", async () => {
+    const deps = makeDeps({
+      countUnresolvedThreads: vi.fn().mockResolvedValue(2),
+    });
+    const result = await checkReviewerFeedback(
+      {
+        ...BASE_INPUT,
+        state: "approved",
+        headSha: "currentsha999",
+        reviewCommitId: "",
+      },
+      deps,
+    );
+    // reviewCommitId missing → fall through; approved + 2 threads → proceed.
+    expect(result.proceed).toBe(true);
+    expect(deps.getPrState).toHaveBeenCalledOnce();
+    expect(deps.countUnresolvedThreads).toHaveBeenCalledOnce();
+  });
+});
 
 // ---------------------------------------------------------------------------
 // 0. PR state check — skip immediately if PR is no longer open

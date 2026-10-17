@@ -244,6 +244,17 @@ approval that needs response.
   remains), but a human approver may approve while leaving open questions,
   and those deserve a response.
 
+**Amended (Issue #449):** the loop guard now also gates on
+`review.commit_id == head_sha`. Under multi-reviewer matrix concurrency,
+the per-PR concurrency group serialises `respond-review` runs behind each
+other. A review event posted against an earlier head SHA may fire against
+a PR whose head has since moved (developer pushed a fix between review A
+and review B's queued dispatches). Skipping when `commit_id != head_sha`
+prevents the developer agent from responding to a review of code that no
+longer exists at HEAD, and also tightens the same race for single-reviewer
+manual pushes. See [`docs/design/multi-reviewer-agents.md`](multi-reviewer-agents.md)
+Decision 4b for the full multi-reviewer context.
+
 ### 4. Conflicted-PR limitation: user-visible documentation
 
 The parent design already documents the underlying quirk (GitHub drops

@@ -64,6 +64,8 @@ jobs:
       repo-name: ${{ github.event.repository.name }}
       review-author: ${{ github.event.review.user.login }}
       pr-author: ${{ github.event.pull_request.user.login }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+      review-commit-id: ${{ github.event.review.commit_id }}
       image: ''
       helpers-ref: ${{ github.sha }}
     secrets:
