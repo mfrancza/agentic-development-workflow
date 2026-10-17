@@ -187,6 +187,42 @@ setup_repo() {
     cd "$WORK_DIR"
 }
 
+# inject_authored_by_marker <pr_number>
+#
+# Stamps the current PR body with a machine-generated HTML-comment marker that
+# records the authoring model, enabling downstream tooling to discover it at
+# review time without relying on agent compliance.  The function is idempotent:
+# any existing <!-- authored-by-model: … --> line is stripped before the new
+# one is prepended, so repeated calls on the same PR are safe.
+inject_authored_by_marker() {
+    local pr_number="$1"
+
+    log "Injecting authored-by-model marker into PR #${pr_number} (model: ${AGENT_MODEL})"
+
+    local current_body stripped_body new_body tmpfile
+
+    # Fetch the current PR body; .body may be null on a brand-new PR, so coerce
+    # to an empty string to keep subsequent processing safe.
+    current_body="$(gh pr view "$pr_number" --repo "$GITHUB_REPO" --json body --jq '.body // ""')"
+
+    # Strip any existing authored-by-model marker lines so the injection is
+    # idempotent across re-runs of the same action.
+    # Pattern mirrors the JS regex /<!--\s*authored-by-model:\s*[^\s>]+\s*-->\n?/gi.
+    stripped_body="$(printf '%s\n' "$current_body" | sed -E '/<!--[[:space:]]*authored-by-model:[[:space:]]*[^[:space:]>]+[[:space:]]*-->/d')"
+
+    # Prepend the marker on its own line at the very top of the PR body.
+    new_body="<!-- authored-by-model: ${AGENT_MODEL} -->
+${stripped_body}"
+
+    # Write via --body-file to avoid shell-escaping pitfalls with large PR bodies.
+    tmpfile="$(mktemp)"
+    printf '%s' "$new_body" > "$tmpfile"
+    gh pr edit "$pr_number" --repo "$GITHUB_REPO" --body-file "$tmpfile"
+    rm -f "$tmpfile"
+
+    log "authored-by-model marker written to PR #${pr_number} (model: ${AGENT_MODEL})"
+}
+
 # -----------------------------------------------------------------------------
 # Log capture (docs/design/agent-container-logs.md, decisions 3 & 4)
 # Installed before the preamble so env-validation errors are captured too.
@@ -347,6 +383,9 @@ CODE_REVIEWERS: ${CODE_REVIEWERS}"
         exit 1
     fi
     log "Verified PR: ${PR_URL}"
+
+    PR_NUMBER="${PR_URL##*/}"
+    inject_authored_by_marker "$PR_NUMBER"
 }
 
 action_fix_checks() {
@@ -371,6 +410,8 @@ Fix the issues and commit the changes."
 
     log "Pushing fixes"
     git push origin "$BRANCH_NAME"
+
+    inject_authored_by_marker "$GITHUB_PR_NUMBER"
 }
 
 action_respond_review() {
@@ -449,6 +490,8 @@ ${ISSUE_COMMENTS_JSON}"
             request_rereview "$GITHUB_PR_NUMBER"
         fi
     fi
+
+    inject_authored_by_marker "$GITHUB_PR_NUMBER"
 }
 
 # Re-request review from every user and team currently assigned as a reviewer
@@ -531,15 +574,17 @@ Diagnose and fix the deployment failure."
     log "Pushing fix branch"
     git push origin "$FIX_BRANCH"
 
-    gh pr create \
+    FIX_PR_URL="$(gh pr create \
         --repo "$GITHUB_REPO" \
         --head "$FIX_BRANCH" \
         --title "Fix deployment failure for issue #${GITHUB_ISSUE_NUMBER}" \
         --body "Automated fix for deployment failure.
 
-Related issue: #${GITHUB_ISSUE_NUMBER}"
+Related issue: #${GITHUB_ISSUE_NUMBER}")"
 
-    log "Created deployment fix PR"
+    log "Created deployment fix PR: ${FIX_PR_URL}"
+    FIX_PR_NUMBER="${FIX_PR_URL##*/}"
+    inject_authored_by_marker "$FIX_PR_NUMBER"
 }
 
 
@@ -607,6 +652,9 @@ ${ISSUE_COMMENTS:-none}"
         exit 1
     fi
     log "Verified ${SUB_ISSUE_COUNT} sub-issue(s) for issue #${GITHUB_ISSUE_NUMBER}"
+
+    PR_NUMBER="${PR_URL##*/}"
+    inject_authored_by_marker "$PR_NUMBER"
 }
 
 action_groom() {
