@@ -6,18 +6,21 @@
 
 Let operators configure `AGENT_ALLOWLIST`, `ADMIN_ASSIGNEES`, and `CODE_REVIEWERS`
 as mixed lists of individual GitHub logins and `org/team-slug` references. Team
-members are resolved at runtime, so joining or leaving the team propagates
-automatically without re-applying Terraform or editing the Actions variable.
+members are resolved at runtime, so joining or leaving the team takes effect on
+the very next workflow event — there is no cache to go stale.
 
 The three lists are consumed in different ways and each gets a different
 resolution mechanism:
 
-- **`AGENT_ALLOWLIST`** — used in workflow `if:` expressions, which cannot call
-  the GitHub API. A new scheduled resolver workflow expands the operator-facing
-  `AGENT_ALLOWLIST` to a flat list of logins and writes it to a new
-  Terraform-managed companion variable `AGENT_ALLOWLIST_RESOLVED`. All eleven
-  existing `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` call sites switch to
-  the resolved variable.
+- **`AGENT_ALLOWLIST`** — the allowlist gate moves out of caller workflow `if:`
+  expressions and into a step inside each reusable workflow (aligning with the
+  gate-consolidation requested in [#629](https://github.com/mfrancza/agentic-development-workflow/issues/629)
+  and the maintainer's preference stated in issue #626). The in-reusable step
+  resolves team references via the GitHub API against the triggering event's
+  sender login and fails the job (fail-closed) if the sender is not covered by
+  any explicit login or any resolved team member. Caller `if:` expressions drop
+  the `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` clause; only the
+  event/label/concurrency gates remain in the caller.
 - **`ADMIN_ASSIGNEES`** — issue assignees must be users. The grooming
   container's entrypoint expands team references to logins before invoking
   Claude, so the prompt still receives a flat list and the existing
@@ -27,8 +30,8 @@ resolution mechanism:
   GitHub owns the per-member notification fan-out and tracks membership live.
 
 A shared TypeScript helper under `.github/scripts/src/lib/` performs the
-expansion and is reused by the resolver workflow, the groom container, and the
-future developer-container escalation path.
+expansion and is reused by the in-reusable gate step, the groom container
+entrypoint, and the future developer-container escalation path.
 
 ## Requirements (from issue #626 and grooming Q&A)
 
@@ -43,21 +46,31 @@ future developer-container escalation path.
    "github_team_members"` source would require `terraform apply` on every
    membership change.
 3. **`AGENT_ALLOWLIST` gate semantics preserved end-to-end.** The eleven
-   workflow `if:` conditions that gate on
-   `contains(fromJSON(vars.AGENT_ALLOWLIST), <sender>)` must keep returning
-   the same `true/false` for a given sender identity. Workflow expressions
-   cannot call the GitHub API (grooming note Q1), so the API-driven
-   resolution has to happen before the gate evaluates.
+   existing `contains(fromJSON(vars.AGENT_ALLOWLIST), <sender>)` call sites
+   must keep producing the same deny/allow outcome for a given sender identity.
+   Workflow `if:` expressions cannot call the GitHub API (grooming note Q1), so
+   the API-driven membership check moves one level in, into a step inside the
+   reusable workflow. The maintainer prefers this redesign over keeping an
+   expanded allowlist in a workflow variable because the caller `if:`
+   expressions are already too complex (issue [#626](https://github.com/mfrancza/agentic-development-workflow/issues/626#issuecomment-6241114137)
+   and issue [#629](https://github.com/mfrancza/agentic-development-workflow/issues/629)).
 4. **Issue assignment path unchanged.** Issue assignees are users — the
    assignment command stays `gh issue edit --add-assignee <login>` and the
    team-to-member expansion happens upstream of it.
 5. **Fail-closed for the allowlist, warn-and-skip for the others** (issue
    "Constraints" bullet 4):
-   - **Allowlist.** When the resolved allowlist is empty, the natural
-     `contains([], login)` evaluation returns `false` and every gated job
-     skips. The resolver additionally refuses to overwrite the previously
-     resolved value with an empty list on a resolver error — a transient API
-     outage must not silently lock everyone out.
+   - **Allowlist.** The in-reusable gate step denies execution whenever
+     authorization cannot be positively established from a successful API
+     response: unresolvable team (404, 403, network error), empty expanded
+     allowlist, or sender absent from both the explicit logins and every
+     resolved team member. There is no previously-cached grant to fall back
+     on, so a transient API outage denies — not grants — access. A referenced
+     team that successfully resolves to zero members (last member removed, team
+     emptied) is treated identically to the team never having existed: the
+     grants it would have carried disappear immediately, which is the required
+     revocation semantic from grooming point 5. An unrelated failing team
+     causes the whole gate step to fail and the job to skip, so revocations
+     from other teams in the same list cannot be delayed by one team's outage.
    - **Assignees / reviewers.** A team that currently has zero members, or a
      team reference that fails to resolve, logs a warning and is skipped for
      that invocation. The explicit logins in the same list are still assigned
@@ -77,23 +90,28 @@ future developer-container escalation path.
 
 ### Ambiguities resolved during design
 
-- **Where does the resolved allowlist live?** The grooming notes offered
-  "pre-resolution step" and "gate redesign" as the two broad approaches. A
-  per-trigger preflight job would touch all seven workflow files and spin up
-  a runner for every gated event. A scheduled resolver that writes a
-  companion variable touches zero gate expressions in shape (only the name
-  changes) and keeps the gate expression form that AGENTS.md documents as a
-  security default. The chosen approach is the scheduled resolver with a
-  companion variable (Decision 1).
-- **Where does the resolver run and under what identity?** Writing a
-  repository Actions variable requires either the workflow `GITHUB_TOKEN`
-  with `actions: write` (which the GitHub docs cover for `/repos/{owner}/{repo}/actions/variables`
-  via the fine-grained `actions` permission) or a GitHub App installation
-  token with the `Variables: Write` permission. The resolver workflow is
-  specified to prefer `GITHUB_TOKEN` first (Decision 2); if a runtime check
-  during implementation shows the default token is insufficient on this repo,
-  escalate to a human for the App-identity decision rather than silently
-  expanding the developer-agent App's scope.
+- **Where does the allowlist check live?** The grooming notes offered
+  "pre-resolution step" and "gate redesign" as the two broad approaches. The
+  maintainer picked the gate redesign in [issue #626](https://github.com/mfrancza/agentic-development-workflow/issues/626#issuecomment-6241114137)
+  ("the if statements are already complex for implementers") and pointed to
+  [issue #629](https://github.com/mfrancza/agentic-development-workflow/issues/629)
+  as the broader consolidation effort. Decision 1 therefore moves the
+  allowlist check into a step inside each reusable workflow instead of
+  pre-expanding into a companion variable. This also eliminates any
+  cache-staleness window (grants and revocations take effect on the next
+  triggering event) and removes the fail-open risk of a scheduled resolver
+  carrying stale values forward.
+- **What identity performs the membership API calls?** Resolving
+  `org/team-slug` references calls `GET /orgs/{org}/teams/{team_slug}/members`,
+  which requires the caller to see organization team membership. Per the
+  [List team members](https://docs.github.com/en/rest/teams/members#list-team-members)
+  reference, this needs the `members: read` fine-grained organization
+  permission (or the classic `read:org` scope). The default `GITHUB_TOKEN`
+  issued to a repository workflow does **not** carry org-level team-read
+  permission and cannot satisfy this requirement. The design therefore
+  requires a GitHub App (or PAT) that is installed on the referenced
+  organizations with `Members: Read` at the organization level, and the
+  identity choice is explicitly flagged as human-required (Decision 2).
 - **How much resolution is handled in Claude vs. deterministic code?** The
   entrypoint resolves team references before Claude sees the list. Claude's
   prompt stays as a flat `["user1", "user2", …]` input, so the prompt and
@@ -102,83 +120,130 @@ future developer-container escalation path.
 
 ## Decisions
 
-### Decision 1: Scheduled resolver + `AGENT_ALLOWLIST_RESOLVED` companion variable
+### Decision 1: Runtime allowlist gate step inside each reusable workflow
 
-**Decision.** Add a Terraform-managed Actions variable
-`AGENT_ALLOWLIST_RESOLVED` whose value is a JSON array of GitHub logins. A
-new workflow `.github/workflows/resolve-agent-allowlist.yml` reads
-`vars.AGENT_ALLOWLIST` (operator-facing, mixed users + team slugs), expands
-every `org/team-slug` entry via `GET /orgs/{org}/teams/{team_slug}/members`
-with pagination, dedupes against the explicit logins in the same list, and
-writes the result to `AGENT_ALLOWLIST_RESOLVED` via `PATCH
-/repos/{owner}/{repo}/actions/variables/AGENT_ALLOWLIST_RESOLVED`. The
-resolver runs on a 15-minute schedule and on `workflow_dispatch` for manual
-refresh after a known membership change.
+**Decision.** Move the `AGENT_ALLOWLIST` check out of caller `if:` expressions
+and into a first-position gate step inside each reusable workflow that is
+reachable from a user-triggered caller (`agent-groom`, `agent-design`,
+`agent-implement`, `agent-review`, `agent-respond-review`,
+`agent-auto-trigger`). The step runs before any Claude container launch,
+reads `vars.AGENT_ALLOWLIST`, resolves every `org/team-slug` entry at
+trigger time via the GitHub API, compares the triggering event's sender
+login against the union of explicit logins and resolved team members, and
+calls `core.setFailed(...)` (which fails the step, which fails the job)
+whenever the sender is not covered.
 
-All eleven existing `contains(fromJSON(vars.AGENT_ALLOWLIST), <sender>)`
-expressions change to `contains(fromJSON(vars.AGENT_ALLOWLIST_RESOLVED),
-<sender>)`. The operator-facing variable name stays `AGENT_ALLOWLIST` to
-preserve operator muscle memory: operators continue to edit
-`agent_allowlist` in Terraform; the `_RESOLVED` suffix on the runtime
-variable advertises that it is derived, not hand-edited.
+**Caller `if:` changes.** All eleven existing
+`contains(fromJSON(vars.AGENT_ALLOWLIST), <sender>)` clauses are removed
+from caller workflows; only the event / label / concurrency clauses remain
+in the caller `if:` so a second queued label does not displace an in-flight
+run (the constraint from [#629](https://github.com/mfrancza/agentic-development-workflow/issues/629)).
+The gate itself is now a single documented step in each reusable, and
+caller boilerplate shrinks correspondingly. This resolves the "every caller
+restates the gate" drift problem #629 is tracking for the allowlist
+specifically; label-based gates stay in the caller per that issue's
+constraint.
 
-The Terraform resource for `AGENT_ALLOWLIST_RESOLVED` carries
-`lifecycle { ignore_changes = [value] }` so the resolver's writes do not
-cause Terraform plan drift. The initial Terraform-applied value is
-`jsonencode([])`.
+**Resolution semantics (fail-closed).** The gate step treats authorization
+as grantable only when a positive membership answer is produced from a
+successful API response during the current workflow run:
 
-**Staleness window.** With a 15-minute schedule, a user removed from a
-referenced team retains allowlist access for up to 15 minutes. Operators who
-need a shorter window can shorten the cron, or manually trigger
-`workflow_dispatch` after a known removal. Operators who need an immediate
-revoke can also remove the user by adding the user as a *negative* explicit
-entry — not supported by this design — or simply edit the team on GitHub
-and wait up to 15 minutes. This window is a deliberate trade-off against the
-cost of per-trigger API resolution; the alternatives below explain why.
+- Entries without `/` are explicit logins and compared directly to
+  `github.event.sender.login` (case-insensitive).
+- Entries matching `^[^/]+/[^/]+$` are passed to the shared expander
+  (Decision 5) which calls `teams.listMembersInOrg` with pagination for each
+  reference. The step short-circuits as soon as it sees a match for the
+  sender login so a non-matching tail of teams does not need to be fetched.
+- A team that resolves successfully to zero members contributes zero grants
+  for that run — the only way an emptied team's former member can still
+  trigger a workflow is for them to appear as an explicit login in the same
+  list or in a different, non-empty team.
+- Any resolution failure (team not found, 403, 5xx, network timeout) on a
+  team the sender is not already positively matched to **fails the gate
+  step**. The job skips with a visible error, not a silent allow. There is
+  no cached authorization from a prior run.
+- A completely empty `AGENT_ALLOWLIST` denies all senders.
 
-**Resolver failure behaviour.** The resolver preserves the previous
-`AGENT_ALLOWLIST_RESOLVED` value on any error (unreachable org, deleted
-team, API outage, zero members returned when at least one team reference is
-present) and exits non-zero so the workflow run turns red. A completely
-empty source list (operator misconfiguration — both `AGENT_ALLOWLIST` and
-every referenced team are empty) propagates to an empty resolved list and
-causes every allowlist-gated workflow to skip — this is the explicit
-fail-closed behaviour from requirement 5.
+Because the API call happens on every triggering event, grants and
+revocations take effect immediately on the next event — there is no cache
+or scheduled refresh and therefore no staleness window to specify. A user
+removed from the referenced team at 10:00 cannot trigger a workflow at
+10:01.
+
+**Credentials.** `teams.listMembersInOrg` requires organization `Members:
+Read` (fine-grained) or `read:org` (classic). The default `GITHUB_TOKEN` on
+a repository workflow does not carry this permission. See Decision 2 for
+the identity/credential plan, which is flagged human-required because this
+is an org-scope installation and the identity used by the gate authenticates
+all allowlist checks.
 
 **Alternatives considered.**
 
 | Alternative | Reason rejected |
 |-------------|-----------------|
-| Per-trigger preflight job: a lightweight job runs on every workflow event, calls the API, emits an `allowed` output, and all downstream jobs gate on `needs.preflight.outputs.allowed == 'true'`. | Requires editing all seven workflow files and eleven call sites; spins up a runner for every event (including ones that would evaluate `false` and currently skip without a runner); and departs from the uniform `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` convention documented in AGENTS.md § "Repo-specific security defaults". The staleness win is small (seconds instead of minutes) relative to this cost. |
-| Resolver overwrites `AGENT_ALLOWLIST` in place. | Causes Terraform plan drift on every resolver run — Terraform owns the variable and would plan to revert it. Working around this with `lifecycle { ignore_changes = [value] }` on the operator-facing variable hides *all* edits from Terraform plan, which is a worse operator experience than having two variables (one operator-managed, one resolver-managed) with distinct names. |
-| Store the resolved list in a committed repo file (e.g. `.github/data/agent_allowlist_resolved.json`) and have workflows read it. | Workflow `if:` expressions can only access `vars.*`, `github.*`, `env.*`, and a handful of other contexts — they cannot read repo files without a step. This defeats the goal of keeping the gate as an `if:` expression. |
+| Scheduled resolver that expands `AGENT_ALLOWLIST` into a companion `AGENT_ALLOWLIST_RESOLVED` variable; callers keep `contains(fromJSON(vars.AGENT_ALLOWLIST_RESOLVED), ...)` in their `if:`. | Rejected by the maintainer in favor of the gate redesign (issue [#626](https://github.com/mfrancza/agentic-development-workflow/issues/626#issuecomment-6241114137)) because the caller `if:` expressions are already too complex and should be consolidated per [#629](https://github.com/mfrancza/agentic-development-workflow/issues/629). Also carries a staleness window (grants and revocations lag the cron) and a fail-open risk: if the resolver fails for any reason, every subsequent workflow run reuses the stale `AGENT_ALLOWLIST_RESOLVED`, meaning a user removed from a team can keep triggering agents indefinitely until the resolver succeeds again, not just for one refresh interval. Clearing the resolved list on resolver failure would be fail-closed but would also lock everyone out on any transient outage, defeating the point of a cache. The runtime gate has neither problem. |
+| Per-trigger preflight job in each caller workflow: a job runs the resolution and emits `outputs.allowed`, downstream jobs gate on it. | Keeps the resolution in the caller — exactly the duplication #629 is removing. Also spins up an extra runner for every event even when the gate denies. |
+| Keep the gate in the caller but implement a composite action `check-agent-allowlist` and copy the single-line invocation across callers. | Still copy-paste per caller; still gives up the single source of truth; still requires an org-permissioned identity to be configured in every caller. Only a modest ergonomic improvement over the status quo. |
+| Store the resolved list in a committed repo file (e.g. `.github/data/agent_allowlist_resolved.json`) and have workflows read it. | Workflow `if:` expressions can only access `vars.*`, `github.*`, `env.*`, and a handful of other contexts — they cannot read repo files without a step. Combined with the gate-redesign direction, this is strictly worse than running the gate as a step. |
 | Terraform-time resolution via `data "github_team_members"`. | Explicitly ruled out by the issue "Constraints" bullet 2 and grooming note Q2: changes would only take effect on the next `terraform apply`. |
 
-### Decision 2: Resolver runs under `GITHUB_TOKEN` with `actions: write`, escalate if insufficient
+### Decision 2: Gate step uses a human-approved org `Members: Read` App identity (human-required)
 
-**Decision.** The resolver workflow declares top-level
-`permissions: { actions: write, contents: read }` and uses the default
-`GITHUB_TOKEN` to PATCH the Actions variable. If a runtime smoke test during
-implementation shows the default token cannot write repository Actions
-variables on this repo (behaviour differs between personal and org accounts
-and between fine-grained token setups), the implementer applies the
-`human-required` label on the sub-issue and the human reviewer picks between
-(a) extending the developer-agent App to include `Variables: Write`,
-(b) adding a new `allowlist-resolver` App with only `Variables: Write`, or
-(c) using the existing `terraform-ci` App whose Admin scope already covers
-this. Option (b) is the least-privilege choice and is the design's
-preferred fallback; option (a) is scope creep for an App focused on code and
-issue operations; option (c) overloads a CI identity.
+**Decision.** The in-reusable gate step and the groom-container
+`ADMIN_ASSIGNEES` expansion (Decision 3) both call `GET
+/orgs/{org}/teams/{team_slug}/members`, which per the [List team members
+reference](https://docs.github.com/en/rest/teams/members#list-team-members)
+requires the organization fine-grained permission `Members: Read` (or the
+classic scope `read:org`). The default `GITHUB_TOKEN` issued to a repository
+workflow does **not** carry an organization-level team-read permission and
+cannot satisfy this requirement. Writing to a repository Actions variable
+is not required by this design because there is no companion variable to
+update.
 
-**Why not pick the App identity in this design?** The question is partly
-empirical — whether `GITHUB_TOKEN` can write the variable depends on repo
-and org settings — and partly a security-sensitive identity choice that
-AGENTS.md § "Escalating to a human" lists as human-in-the-loop territory.
-Picking the identity now would either (i) commit the fleet to a new App
-identity that may be unnecessary or (ii) commit the developer-agent App to
-expanded scope. Deferring the choice to the implementation task, with a
-clear escalation path, lets the human reviewer weigh the actual observed
-constraint.
+Because this is a change to the identity that authenticates allowlist
+decisions, it is explicitly escalated to a human. The implementation sub-issue
+([#648](https://github.com/mfrancza/agentic-development-workflow/issues/648))
+is created with the `human-required` label and does not proceed until a
+maintainer has picked an identity and provisioned it. The human reviewer
+chooses between:
+
+- **(a) New `allowlist-resolver` GitHub App installed on each referenced
+  organization with only `Organization permissions → Members: Read` and
+  `Repository permissions → Metadata: Read`.** This is the design's
+  recommended default: least-privilege, dedicated identity, auditable in org
+  audit log as a distinct actor, and reusable by the groom-container
+  `ADMIN_ASSIGNEES` expansion.
+- **(b) Extend the existing `developer-agent` App to add
+  `Organization → Members: Read`.** Simpler because the App is already
+  installed, but widens the blast radius of a developer-agent key compromise
+  from code/issue operations to also reading org membership. Discouraged
+  unless (a) is operationally blocked.
+- **(c) Fine-grained PAT with `read:org`, stored as an organization-level
+  secret.** Easiest to provision for a single org, but PATs are
+  user-impersonating and expire; not recommended for a durable control.
+
+Whichever identity the human picks, its credential is wired into the gate
+step as `GH_TOKEN` / `token:` on the `github-script` action (or equivalent)
+and documented in the operator setup section of README.md and in the
+`agent-vars` module README. The reusable workflow declares a new
+`secrets.ALLOWLIST_RESOLVER_APP_ID` and
+`secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` (option (a)) or a single
+`secrets.ALLOWLIST_RESOLVER_TOKEN` (option (c)); callers pass them through
+alongside the existing developer-agent App secrets.
+
+**No access without the identity.** If the installing organization has not
+provisioned the identity, the gate step fails every event — fail-closed,
+visible in the Actions run log. The design does not provide a bypass mode
+for "no identity, trust the explicit logins only" because that would create
+two code paths for the same gate and would silently degrade authorization
+on misconfiguration.
+
+**Why not defer the identity choice to a runtime smoke test?** The
+`AGENT_ALLOWLIST` is the fleet's primary access-control gate. Shipping a
+design that lets the implementation agent pick the identity based on an
+empirical check is the pattern the project's AGENTS.md § "Escalating to a
+human" exists to prevent. The decision is deferred to a human by design,
+not by probing.
 
 ### Decision 3: Entrypoint expands `ADMIN_ASSIGNEES` team references before invoking Claude
 
@@ -198,10 +263,26 @@ expanded list. If no entries at all resolve (empty source list, or all
 teams empty / failed), the warn-and-skip behaviour in the existing
 `groom.md` prompt handles it — no behaviour change.
 
+**Credentials.** The membership API call needs the same organization
+`Members: Read` permission documented in Decision 2. The groom container's
+existing `GH_TOKEN` is the developer-agent App token, which per the
+operator-setup documentation in `README.md` carries repository-scoped
+permissions (contents, issues, PRs) and does **not** include organization
+Members: Read. The design therefore wires the Decision 2 identity into the
+groom reusable (`.github/workflows/agent-groom.yml`) as a second token
+exposed to the container under a distinct env var (e.g.
+`ALLOWLIST_RESOLVER_TOKEN`), and the entrypoint helper calls `gh api`
+with that token (`gh api --header "Authorization: Bearer $ALLOWLIST_RESOLVER_TOKEN"`
+or `GH_TOKEN=$ALLOWLIST_RESOLVER_TOKEN gh api ...`) rather than the
+developer-agent token. Without the Decision 2 identity provisioned, every
+team entry in `ADMIN_ASSIGNEES` warn-and-skips (per requirement 5) and
+grooming proceeds with only the explicit-login portion of the list.
+
 This decision applies to **groom** today. If future issues extend
 `ADMIN_ASSIGNEES` consumption to the designer or developer agents (as
 anticipated in Decision 5 of `configurable-github-assignees.md`), those
-entrypoint paths reuse the same shell helper.
+entrypoint paths reuse the same shell helper and the same credential
+wiring.
 
 **Alternatives considered.**
 
@@ -263,17 +344,45 @@ expanded: string[]; errors: ResolutionError[] }>` that:
   resolution errors with a `malformed` reason, so the caller logs them
   uniformly with API-failure cases.
 
-Unit tests under `.github/scripts/test/lib/expand-team-refs.test.ts` mock
-Octokit at the module boundary (per the existing convention) and cover: pure
-login pass-through, team expansion with pagination, mixed input, deduping,
-empty team, 404 on team, 403 on team, malformed entry, bot-identity entry.
+**Nested-team membership is included.** The GitHub [List team members
+endpoint](https://docs.github.com/en/rest/teams/members#list-team-members)
+explicitly documents that "team members will include the members of child
+teams" — there is no server-side `direct-only` filter. Each returned
+member carries an `inherited` boolean the caller could post-filter on, but
+this design intentionally keeps the API default (inherited members are
+included) because:
 
-The resolver workflow entry (`src/resolve-agent-allowlist.ts`) consumes the
-helper. The container-side expansion in `docker/scripts/` consumes it too —
-either by baking the compiled JS into the developer image at build time, or
-by re-implementing the small logic in shell against `gh api`. Implementation
-picks whichever keeps the image build simple; both paths share the same
-test contract.
+1. It matches operator intent: if `org/engineering` has a child team
+   `org/engineering-backend`, an operator who writes `org/engineering` in
+   `AGENT_ALLOWLIST` almost certainly expects backend engineers to be
+   covered. A direct-only semantic would silently exclude them.
+2. It matches how `gh pr edit --add-reviewer "org/engineering"` behaves on
+   the PR-review side (Decision 4), keeping the three lists consistent.
+3. The repo's cited example `Brale-xyz/dev` has no child teams, so this is
+   a design choice, not a hidden surprise for the current operator.
+
+The expander therefore does not post-filter on `inherited`, and the
+`inherited` field is documented in the expander's module docstring so
+future callers can opt into a direct-only mode by passing a predicate (not
+part of the initial scope). The behaviour is covered by a unit test case
+that mocks a `listMembersInOrg` response containing both `inherited: true`
+and `inherited: false` members and asserts both are present in the output,
+plus an end-to-end validation point in #652 that creates a real nested-team
+setup and confirms the inherited member can trigger a gated workflow.
+
+Unit tests under `.github/scripts/test/lib/expand-team-refs.test.ts` mock
+Octokit at the module boundary (per the existing convention) and cover:
+pure login pass-through, team expansion with pagination, mixed input,
+deduping, empty team, 404 on team, 403 on team, malformed entry,
+bot-identity entry, and nested-team membership (inherited members
+included).
+
+The in-reusable gate step (new `.github/scripts/src/check-agent-allowlist.ts`)
+consumes the helper. The container-side expansion in `docker/scripts/`
+consumes it too — either by baking the compiled JS into the developer
+image at build time, or by re-implementing the small logic in shell against
+`gh api`. Implementation picks whichever keeps the image build simple;
+both paths share the same test contract.
 
 ### Decision 6: Terraform variable types stay `list(string)`; descriptions document the mixed format
 
@@ -295,27 +404,25 @@ state, not a Terraform state.
 
 ## Out of scope
 
-- **Nested teams / team hierarchies.** GitHub Enterprise supports child
-  teams; `teams.listMembersInOrg` returns only the direct members of the
-  named team. If a referenced team has child teams, their members are not
-  included. A future issue can switch to a traversal if the need arises;
-  the single-level case is sufficient for the issue's cited `Brale-xyz/dev`
-  example.
+- **Direct-members-only mode for team references.** The design uses the
+  GitHub [List team members](https://docs.github.com/en/rest/teams/members#list-team-members)
+  endpoint's default behaviour, which includes members of child teams via
+  the `inherited: true` flag on each member record (see Decision 5 for the
+  rationale and test coverage). An opt-in direct-only mode — where
+  operators could tag a reference such as `org/team-slug!direct` to filter
+  inherited members out — is not provided. Operators who need to deny a
+  child-team member edit the team on GitHub.
 - **Negative entries (deny-list).** The design has no syntax for "exclude
   this user even though they are a team member." Operators who need this
   edit the team on GitHub.
-- **Per-workflow team references.** `AGENT_ALLOWLIST_RESOLVED` is uniform
-  across all seven consuming workflows. Per-workflow or per-stage team
-  references (e.g. "team X can trigger `agent:groom` but not
-  `agent:developer`") are future work.
-- **Pre-trigger (zero-latency) resolution.** The 15-minute staleness window
-  on the allowlist is accepted as a trade-off; operators who need per-event
-  resolution can manually `workflow_dispatch` the resolver.
-- **Webhook-driven resolver refresh.** GitHub's `membership` and `team`
-  webhook events could trigger an immediate refresh, but they require org
-  admin to subscribe and are not available on all plans. The scheduled
-  refresh plus manual dispatch covers the current need; a webhook trigger
-  can be added later.
+- **Per-workflow team references.** `AGENT_ALLOWLIST` is uniform across
+  all consuming workflows. Per-workflow or per-stage team references (e.g.
+  "team X can trigger `agent:groom` but not `agent:developer`") are future
+  work.
+- **Webhook-driven resolution.** GitHub's `membership` and `team` webhook
+  events could notify installing orgs of membership changes, but the
+  runtime gate design does not need notification because every triggering
+  event re-resolves. No `membership`-webhook integration is specified.
 - **Extending `ADMIN_ASSIGNEES` consumption to designer / resolve-conflicts
   / developer agents.** Decision 5 of
   `configurable-github-assignees.md` already called this out as future
@@ -327,32 +434,36 @@ state, not a Terraform state.
   `resolve-conflicts`. If a future issue migrates it to `ADMIN_ASSIGNEES`
   (per `configurable-github-assignees.md` Decision 5), team support comes
   along automatically through the shared entrypoint helper.
-- **Caching API responses within a workflow run.** The resolver makes one
-  API call per team reference per run; at expected list sizes (<20 teams)
-  this is negligible. No in-run cache is specified.
+- **Caching API responses across workflow runs.** The runtime gate makes
+  one API call per team reference per triggering event (short-circuiting as
+  soon as the sender is matched); at expected list sizes (<20 teams) this
+  is well under GitHub's REST budget. A persistent cache would re-introduce
+  the staleness and fail-open problems the runtime approach is specifically
+  designed to avoid.
 - **Terraform-side `data "github_team_members"` validation.** The design
   does not add a Terraform data source to pre-validate team references at
   `terraform plan` time. A plan-time validation would duplicate the
-  runtime resolver's error handling and would fail on transient GitHub API
+  runtime gate step's error handling and would fail on transient GitHub API
   issues during plans. Runtime resolution is the sole source of truth.
 
 ## Task breakdown and dependencies
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| Issue [#645](https://github.com/mfrancza/agentic-development-workflow/issues/645) | **Terraform `agent-vars`:** add `AGENT_ALLOWLIST_RESOLVED` resource (default `jsonencode([])`, `lifecycle { ignore_changes = [value] }`); update descriptions on `agent_allowlist`, `admin_assignees`, and `code_reviewers` to document the mixed `user \| org/team-slug` format; add optional validation blocks that reject empty strings and entries containing more than one `/`. Update the module README. | — |
-| Issue [#646](https://github.com/mfrancza/agentic-development-workflow/issues/646) | **Shared TypeScript expander:** add `.github/scripts/src/lib/expand-team-refs.ts` with the pure `expandTeamRefs()` function per Decision 5, plus `.github/scripts/test/lib/expand-team-refs.test.ts` covering login pass-through, pagination, dedupe, empty-team, 404/403, malformed, and bot-identity cases. | — |
+| Issue [#645](https://github.com/mfrancza/agentic-development-workflow/issues/645) | **Terraform `agent-vars`:** update descriptions on `agent_allowlist`, `admin_assignees`, and `code_reviewers` to document the mixed `user \| org/team-slug` format; add optional validation blocks that reject empty strings and entries containing more than one `/`. Update the module README. (No companion `AGENT_ALLOWLIST_RESOLVED` variable — the runtime gate makes it unnecessary.) | — |
+| Issue [#646](https://github.com/mfrancza/agentic-development-workflow/issues/646) | **Shared TypeScript expander:** add `.github/scripts/src/lib/expand-team-refs.ts` with the pure `expandTeamRefs()` function per Decision 5, plus `.github/scripts/test/lib/expand-team-refs.test.ts` covering login pass-through, pagination, dedupe, empty-team, 404/403, malformed, bot-identity, and nested-team (inherited) cases. | — |
 | Issue [#647](https://github.com/mfrancza/agentic-development-workflow/issues/647) | **`CODE_REVIEWERS` team pass-through:** add a smoke-test step to the implement prompt / entrypoint path confirming `gh pr edit --add-reviewer "org/team-slug"` succeeds; update `docker/scripts/prompts/implement.md` with one sentence allowing team-slug entries; no other code changes needed if the smoke test passes. If the smoke test fails, label `human-required` and escalate per Decision 4. | — |
-| Issue [#648](https://github.com/mfrancza/agentic-development-workflow/issues/648) | **Resolver workflow:** add `.github/workflows/resolve-agent-allowlist.yml` (schedule every 15 min + `workflow_dispatch`), `permissions: { actions: write, contents: read }`, invoking a new `.github/scripts/src/resolve-agent-allowlist.ts` entry that reads `vars.AGENT_ALLOWLIST`, calls `expandTeamRefs()`, and PATCHes `AGENT_ALLOWLIST_RESOLVED`. Preserve previous value on error and exit non-zero. First-run smoke test: verify `GITHUB_TOKEN` can PATCH the variable; if not, escalate for the App-identity decision per Decision 2. | Issues #645, #646 |
-| Issue [#649](https://github.com/mfrancza/agentic-development-workflow/issues/649) | **Switch allowlist consumers to `AGENT_ALLOWLIST_RESOLVED`:** update all eleven `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` call sites in `.github/workflows/agent-implement.yml`, `agent-groom.yml`, `agent-design.yml`, `agent-review.yml`, `agent-respond-review.yml`, and `agent-auto-trigger.yml` (five sites) to reference `vars.AGENT_ALLOWLIST_RESOLVED`. Update AGENTS.md § "Repo-specific security defaults" to document both variables and the resolver. | Issue #648 |
-| Issue [#650](https://github.com/mfrancza/agentic-development-workflow/issues/650) | **Groom entrypoint expansion of `ADMIN_ASSIGNEES`:** add a shell (or small Node) helper in `docker/scripts/` that expands team references in `ADMIN_ASSIGNEES` before Claude is invoked, logs per-entry warnings for empty/failed teams, and re-exports the deduped flat list under the same env var name. No prompt change required beyond a one-sentence note. | Issue #646 |
-| Issue [#651](https://github.com/mfrancza/agentic-development-workflow/issues/651) | **Documentation:** update AGENTS.md § "Repo-specific security defaults" (allowlist resolver), § "Optional env vars" references for `ADMIN_ASSIGNEES` / `CODE_REVIEWERS` to document the mixed format, and README.md § operator setup to add a short "GitHub team references in `AGENT_ALLOWLIST`, `ADMIN_ASSIGNEES`, `CODE_REVIEWERS`" subsection. | Issue #645 |
-| Issue [#652](https://github.com/mfrancza/agentic-development-workflow/issues/652) | **End-to-end validation:** on a test deployment with a real org team, verify (a) a user added to the team can trigger `agent:groom` within one resolver cycle; (b) a user removed from the team cannot after one cycle; (c) a `human-required` issue with `ADMIN_ASSIGNEES` containing an `org/team` is assigned to every current team member; (d) a PR with `CODE_REVIEWERS` containing an `org/team` carries a team-level review request on GitHub; (e) the resolver preserves the previous `AGENT_ALLOWLIST_RESOLVED` value when a referenced team is temporarily deleted; (f) all three lists continue to work with a mix of individual logins (including a bot login) and team references. | Issues #645, #646, #647, #648, #649, #650, #651 |
+| Issue [#648](https://github.com/mfrancza/agentic-development-workflow/issues/648) | **Allowlist gate identity (human-required):** created with the `human-required` label per Decision 2. A maintainer picks an identity (new `allowlist-resolver` App vs. extending the developer-agent App vs. a PAT), provisions the installation / secret, and documents the credential wiring. No code change happens on this issue; the deliverables are the installation decision, the secret in the relevant org/repo, and a short note in the README operator setup. | — |
+| Issue [#649](https://github.com/mfrancza/agentic-development-workflow/issues/649) | **In-reusable allowlist gate step and caller cleanup:** add `.github/scripts/src/check-agent-allowlist.ts` that reads `vars.AGENT_ALLOWLIST`, calls `expandTeamRefs()` with the Decision 2 identity, compares against `github.event.sender.login`, and `core.setFailed`s if not covered (fail-closed on error per requirement 5). Wire it as a first-position step in the reusable workflows `agent-groom.yml`, `agent-design.yml`, `agent-implement.yml`, `agent-review.yml`, `agent-respond-review.yml`, and `agent-auto-trigger.yml`. Remove the eleven `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` clauses from the caller workflows (keep event / label / concurrency clauses). Update AGENTS.md § "Repo-specific security defaults" to document the step-based gate and the required org identity. | Issues #646, #648 |
+| Issue [#650](https://github.com/mfrancza/agentic-development-workflow/issues/650) | **Groom entrypoint expansion of `ADMIN_ASSIGNEES`:** add a shell (or small Node) helper in `docker/scripts/` that expands team references in `ADMIN_ASSIGNEES` before Claude is invoked, logs per-entry warnings for empty/failed teams, and re-exports the deduped flat list under the same env var name. Wire the Decision 2 identity into `.github/workflows/agent-groom.yml` as a second token exposed to the container, and have the helper call `gh api` with that token. No prompt change required beyond a one-sentence note. | Issues #646, #648 |
+| Issue [#651](https://github.com/mfrancza/agentic-development-workflow/issues/651) | **Documentation:** update AGENTS.md § "Repo-specific security defaults" (in-reusable gate and the org `Members: Read` identity), § "Optional env vars" references for `ADMIN_ASSIGNEES` / `CODE_REVIEWERS` to document the mixed format, and README.md § operator setup to add a short "GitHub team references in `AGENT_ALLOWLIST`, `ADMIN_ASSIGNEES`, `CODE_REVIEWERS`" subsection that includes the Decision 2 credential setup. | Issues #645, #648 |
+| Issue [#652](https://github.com/mfrancza/agentic-development-workflow/issues/652) | **End-to-end validation:** on a test deployment with a real org team, verify (a) a user added to the team can trigger `agent:groom` on the very next event, no cache wait required; (b) a user removed from the team cannot trigger on the next event (revocation case — must be verified); (c) a team that is emptied of all members contributes zero grants on the next event (revocation case — the former last member cannot trigger unless they appear as an explicit login or in a different team); (d) a referenced team that is temporarily deleted / 404s / 403s causes the gate step to fail the job (fail-closed, no cached grant survives); (e) a `human-required` issue with `ADMIN_ASSIGNEES` containing an `org/team` is assigned to every current team member; (f) a PR with `CODE_REVIEWERS` containing an `org/team` carries a team-level review request on GitHub; (g) all three lists continue to work with a mix of individual logins (including a bot login) and team references; (h) a nested-team member (member of a child of the referenced team) is correctly treated as covered. | Issues #645, #646, #647, #648, #649, #650, #651 |
 
 Dependencies are recorded natively as GitHub blocked-by relationships on the
-sub-issues. The Terraform task, the shared TypeScript expander, and the
-`CODE_REVIEWERS` pass-through are mutually independent and can proceed in
-parallel. The resolver workflow and the groom entrypoint expansion both
-depend on the expander. The allowlist consumer switch depends on the
-resolver workflow. The documentation task depends only on the Terraform
-task's variable surface. End-to-end validation depends on all other tasks.
+sub-issues. The Terraform task, the shared TypeScript expander, the
+`CODE_REVIEWERS` pass-through, and the human-required identity decision are
+mutually independent and can proceed in parallel. The in-reusable gate step
+and the groom entrypoint expansion both depend on the expander *and* the
+identity decision (so the credential is available to wire in). The
+documentation task depends on the Terraform task's variable surface and the
+identity decision. End-to-end validation depends on all other tasks.
