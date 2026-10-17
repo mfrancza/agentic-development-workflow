@@ -81,6 +81,16 @@ jobs:
               STATUS=1
             fi
           done
+          # Every src/<activity>.ts runs its entry point at module load (only
+          # vitest suppresses it), so importing one activity from another runs
+          # both entry points — the imported one then fails on inputs it was
+          # never given (first hit live by resolve-reviewer-set importing
+          # resolve-model, which broke every agent-review run while CI stayed
+          # green). Shared logic belongs in src/lib/.
+          if grep -nE 'from "\./[^"]+"' .github/scripts/src/*.ts | grep -v 'from "\./lib/'; then
+            echo "::error::Activity entry file(s) above import a sibling entry file — move the shared logic into .github/scripts/src/lib/."
+            STATUS=1
+          fi
           exit "$STATUS"
 
       # Execute every activity entrypoint the same way the composite actions

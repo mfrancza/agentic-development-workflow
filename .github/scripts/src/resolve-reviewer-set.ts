@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
 import { getOctokit } from "./lib/octokit.js";
-import { resolveModel } from "./resolve-model.js";
+import { resolveModel } from "./lib/resolve-model.js";
 
 export interface ReviewerSetEntry {
   model: string;
