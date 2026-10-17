@@ -144,11 +144,12 @@ Two independent emission points, both guarded on `> 3` reviewers:
   `echo "::warning::…"`.
 
 Both fire for every resolved set with more than 3 reviewers.  The
-TypeScript path is exercised by `npm test` running the entry-point
-module in non-`VITEST` mode (the module's `VITEST` guard suppresses
-the entry-point side-effect during test runs, so this path is tested
-manually rather than by unit tests — consistent with the pattern used
-for all other entry-point scripts in the package).
+TypeScript path was verified by static inspection: `resolve-reviewer-set.ts`
+contains `core.warning(…)` inside `run()`, and the `VITEST` guard in the
+module causes `run()` to be skipped during `npm test` (`vitest run` sets
+`VITEST`, so the entry-point side-effect is never invoked by the test
+suite).  No separate manual invocation was performed; the coverage of this
+path is static-only.
 
 ⚠️ **Live-run evidence pending** — no observed run with > 3 reviewers confirming
 the warning appears in Actions logs.  See scenario L6 below.
