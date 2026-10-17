@@ -29,7 +29,7 @@ module "agent_vars" {
     developer = false
     review    = false
   }
-  # reviewer_models = ["sonnet", "claude-sonnet-4-5"]  # omit or leave [] to disable multi-reviewer
+  # reviewer_models = ["claude-sonnet-4-5", "gpt-6-astra"]  # omit or leave [] to disable multi-reviewer; use models from different providers for diversity
 }
 ```
 
@@ -49,7 +49,7 @@ module "agent_vars" {
     developer = false
     review    = false
   }
-  # reviewer_models = ["sonnet", "claude-sonnet-4-5"]  # omit or leave [] to disable multi-reviewer
+  # reviewer_models = ["claude-sonnet-4-5", "gpt-6-astra"]  # omit or leave [] to disable multi-reviewer; use models from different providers for diversity
 }
 ```
 
