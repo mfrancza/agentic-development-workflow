@@ -83,7 +83,16 @@ export async function resolveReviewerSet(
     defaultModel,
     "review",
     pairingOptions,
-    (msg: string) => core.warning(msg),
+    (msg: string) => {
+      // Messages prefixed with "ERROR:" must be surfaced as core.error(); all
+      // others are core.warning().  This fulfils Decision 5 of the design which
+      // requires core.error() when DEFAULT_MODEL == authoring model.
+      if (msg.startsWith("ERROR:")) {
+        core.error(msg.slice("ERROR:".length).trim());
+      } else {
+        core.warning(msg);
+      }
+    },
   );
   return [{ model }];
 }
