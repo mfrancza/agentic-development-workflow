@@ -121,3 +121,5 @@ Before proposing a change to a workflow file or a workflow expression that has a
 - **Workflow triggers and gates** → `.github/workflows/agent-*.yml` (`on:` blocks and job `if:` conditions)
 
 Do not update any copy of this information in `AGENTS.md` or `README.md` — update the source file.
+
+The `<!-- authored-by-model: … -->` marker in the PR body is machine-generated; do not remove it when editing the body.

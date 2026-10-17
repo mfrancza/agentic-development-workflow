@@ -26,3 +26,5 @@ gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required
 - **Workflow triggers and gates** → `.github/workflows/agent-*.yml` (`on:` blocks and job `if:` conditions)
 
 Do not update any copy of this information in `AGENTS.md` or `README.md` — update the source file.
+
+The `<!-- authored-by-model: … -->` marker in the PR body is machine-generated; do not remove it when editing the body.
