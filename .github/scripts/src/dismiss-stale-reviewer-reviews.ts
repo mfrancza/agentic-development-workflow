@@ -7,6 +7,7 @@ export interface ReviewSummary {
   id: number;
   userLogin: string | null;
   state: string;
+  commitId: string;
 }
 
 export interface DismissResult {
@@ -72,6 +73,7 @@ export async function fetchAllReviews(
           id: r.id,
           userLogin: r.user?.login ?? null,
           state: r.state,
+          commitId: r.commit_id ?? "",
         });
       }
 
@@ -93,17 +95,26 @@ export async function fetchAllReviews(
 
 /**
  * Pure filter: returns only reviews authored by the reviewer bot that have
- * state CHANGES_REQUESTED.
+ * state CHANGES_REQUESTED and were posted against an earlier head SHA (i.e.
+ * commit_id !== headSha).
+ *
+ * Reviews whose commit_id matches headSha are skipped — they belong to the
+ * current head and may have been posted by a sibling matrix leg running
+ * concurrently; dismissing them would discard a fresh sibling verdict.
  *
  * DISMISSED reviews are already in the target state and are intentionally
  * skipped. APPROVED and COMMENTED reviews carry no blocking verdict.
  */
 export function filterStaleReviews(
   reviews: ReviewSummary[],
-  botLogin: string
+  botLogin: string,
+  headSha: string
 ): ReviewSummary[] {
   return reviews.filter(
-    (r) => r.userLogin === botLogin && r.state === "CHANGES_REQUESTED"
+    (r) =>
+      r.userLogin === botLogin &&
+      r.state === "CHANGES_REQUESTED" &&
+      r.commitId !== headSha
   );
 }
 
@@ -150,14 +161,15 @@ export async function dismissReviews(
 
 async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
-  // The composite action declares the input as "pr-number" (hyphen) and
-  // bridges it to the env var INPUT_PR_NUMBER (underscore) explicitly.
-  // @actions/core maps getInput(name) to process.env["INPUT_" + name with
-  // spaces→underscores]; hyphens are NOT converted by the runner, so a
-  // dashed name would look for INPUT_PR-NUMBER and miss the env var.
-  // Using "pr_number" here matches the explicit INPUT_PR_NUMBER env var.
+  // The composite action declares inputs with hyphens (e.g. "pr-number",
+  // "head-sha") and bridges each to an underscore-named env var explicitly
+  // (INPUT_PR_NUMBER, INPUT_HEAD_SHA).  @actions/core maps getInput(name) to
+  // process.env["INPUT_" + name with spaces→underscores]; hyphens are NOT
+  // converted by the runner, so we read the underscore form here to match the
+  // explicit env var names set in action.yml.
   const prNumberStr = core.getInput("pr_number", { required: true });
   const repo = core.getInput("repo", { required: true });
+  const headSha = core.getInput("head_sha", { required: true });
 
   const prNumber = parseInt(prNumberStr, 10);
   if (isNaN(prNumber)) {
@@ -176,7 +188,7 @@ async function run(): Promise<void> {
   }
 
   const allReviews = await fetchAllReviews(octokit, owner, repoName, prNumber);
-  const stale = filterStaleReviews(allReviews, botLogin);
+  const stale = filterStaleReviews(allReviews, botLogin, headSha);
 
   if (stale.length === 0) {
     console.log("No stale CHANGES_REQUESTED reviews to dismiss.");

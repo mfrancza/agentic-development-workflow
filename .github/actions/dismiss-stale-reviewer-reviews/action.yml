@@ -1,10 +1,14 @@
 name: 'Dismiss stale reviewer-bot CHANGES_REQUESTED reviews'
 description: >
   Dismisses any prior CHANGES_REQUESTED reviews on the PR that were authored by
-  the reviewer bot itself, so that a clean re-review pass is not biased by a
-  stale blocking verdict. Paginates through all reviews (100 per page), filters
-  to those with state CHANGES_REQUESTED authored by the reviewer-app identity
-  (derived at runtime via viewer.login), and issues a dismissal for each.
+  the reviewer bot itself and posted against an earlier head SHA, so that a
+  clean re-review pass is not biased by a stale blocking verdict. Paginates
+  through all reviews (100 per page), filters to those with state
+  CHANGES_REQUESTED authored by the reviewer-app identity (derived at runtime
+  via viewer.login) whose commit_id differs from the required head-sha input,
+  and issues a dismissal for each. Reviews on the current head SHA are
+  preserved so that concurrent sibling matrix legs (all sharing one bot
+  identity) do not discard each other's just-posted verdicts.
   Fail-open: individual dismissal errors are logged as warnings and do not fail
   the workflow. See docs/design/reviewer-supersede-stale-verdict.md Decisions
   2, 4, and 5.
@@ -20,6 +24,12 @@ inputs:
     required: true
   pr-number:
     description: 'Pull request number'
+    required: true
+  head-sha:
+    description: >
+      The current head SHA of the pull request. Only CHANGES_REQUESTED reviews
+      whose commit_id differs from this SHA are dismissed; reviews posted against
+      the current head SHA (e.g. by a sibling matrix leg) are preserved.
     required: true
 
 runs:
@@ -55,4 +65,5 @@ runs:
         INPUT_TOKEN: ${{ inputs.token }}
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        INPUT_HEAD_SHA: ${{ inputs.head-sha }}
       run: npx --no-install tsx src/dismiss-stale-reviewer-reviews.ts

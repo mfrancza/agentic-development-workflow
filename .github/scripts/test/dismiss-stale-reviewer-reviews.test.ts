@@ -35,13 +35,16 @@ function makeOctokit({
   } as unknown as OctokitType;
 }
 
-/** Build a ReviewSummary test fixture. */
+/** Build a ReviewSummary test fixture. commitId defaults to a SHA that is
+ * considered "old" (not the current head) so existing tests remain valid
+ * when a specific commitId is not relevant to the scenario under test. */
 function makeReview(
   id: number,
   userLogin: string | null,
-  state: string
+  state: string,
+  commitId: string = "old-sha-aaaaaa"
 ): ReviewSummary {
-  return { id, userLogin, state };
+  return { id, userLogin, state, commitId };
 }
 
 // ---------------------------------------------------------------------------
@@ -93,8 +96,8 @@ describe("fetchAllReviews", () => {
   it("returns all reviews from a single page (fewer than 100 items)", async () => {
     const listReviews = vi.fn().mockResolvedValueOnce({
       data: [
-        { id: 1, user: { login: "bot[bot]" }, state: "CHANGES_REQUESTED" },
-        { id: 2, user: { login: "human" }, state: "APPROVED" },
+        { id: 1, user: { login: "bot[bot]" }, state: "CHANGES_REQUESTED", commit_id: "sha-abc" },
+        { id: 2, user: { login: "human" }, state: "APPROVED", commit_id: "sha-def" },
       ],
     });
     const octokit = makeOctokit({ listReviews });
@@ -102,8 +105,8 @@ describe("fetchAllReviews", () => {
     const reviews = await fetchAllReviews(octokit, "owner", "repo", 7);
 
     expect(reviews).toEqual([
-      { id: 1, userLogin: "bot[bot]", state: "CHANGES_REQUESTED" },
-      { id: 2, userLogin: "human", state: "APPROVED" },
+      { id: 1, userLogin: "bot[bot]", state: "CHANGES_REQUESTED", commitId: "sha-abc" },
+      { id: 2, userLogin: "human", state: "APPROVED", commitId: "sha-def" },
     ]);
     expect(listReviews).toHaveBeenCalledOnce();
   });
@@ -114,9 +117,10 @@ describe("fetchAllReviews", () => {
       id: i + 1,
       user: { login: "bot[bot]" },
       state: "CHANGES_REQUESTED",
+      commit_id: `sha-${i}`,
     }));
     // Second page: 1 item (signals last page).
-    const page2 = [{ id: 101, user: { login: "human" }, state: "APPROVED" }];
+    const page2 = [{ id: 101, user: { login: "human" }, state: "APPROVED", commit_id: "sha-100" }];
 
     const listReviews = vi
       .fn()
@@ -137,17 +141,20 @@ describe("fetchAllReviews", () => {
       2,
       expect.objectContaining({ page: 2 })
     );
+    // Spot-check that commitId is mapped from commit_id.
+    expect(reviews[0].commitId).toBe("sha-0");
+    expect(reviews[100].commitId).toBe("sha-100");
   });
 
   it("maps a null user to a null userLogin", async () => {
     const listReviews = vi.fn().mockResolvedValueOnce({
-      data: [{ id: 99, user: null, state: "COMMENTED" }],
+      data: [{ id: 99, user: null, state: "COMMENTED", commit_id: "sha-xyz" }],
     });
     const octokit = makeOctokit({ listReviews });
 
     const reviews = await fetchAllReviews(octokit, "owner", "repo", 1);
 
-    expect(reviews).toEqual([{ id: 99, userLogin: null, state: "COMMENTED" }]);
+    expect(reviews).toEqual([{ id: 99, userLogin: null, state: "COMMENTED", commitId: "sha-xyz" }]);
   });
 
   it("returns an empty array and does not throw when the API call fails (fail-open)", async () => {
@@ -169,66 +176,129 @@ describe("fetchAllReviews", () => {
 
 describe("filterStaleReviews", () => {
   const BOT = "reviewer-bot[bot]";
+  const HEAD_SHA = "current-sha-111111";
+  const OLD_SHA = "old-sha-aaaaaa";
 
   it("returns an empty array for an empty reviews list", () => {
-    expect(filterStaleReviews([], BOT)).toEqual([]);
+    expect(filterStaleReviews([], BOT, HEAD_SHA)).toEqual([]);
   });
 
   it("returns an empty array when no reviews are authored by the bot", () => {
     const reviews = [
-      makeReview(1, "human", "CHANGES_REQUESTED"),
-      makeReview(2, "other-bot[bot]", "CHANGES_REQUESTED"),
+      makeReview(1, "human", "CHANGES_REQUESTED", OLD_SHA),
+      makeReview(2, "other-bot[bot]", "CHANGES_REQUESTED", OLD_SHA),
     ];
-    expect(filterStaleReviews(reviews, BOT)).toEqual([]);
+    expect(filterStaleReviews(reviews, BOT, HEAD_SHA)).toEqual([]);
   });
 
   it("returns an empty array when the bot has reviews but none are CHANGES_REQUESTED", () => {
     const reviews = [
-      makeReview(1, BOT, "APPROVED"),
-      makeReview(2, BOT, "COMMENTED"),
-      makeReview(3, BOT, "DISMISSED"),
+      makeReview(1, BOT, "APPROVED", OLD_SHA),
+      makeReview(2, BOT, "COMMENTED", OLD_SHA),
+      makeReview(3, BOT, "DISMISSED", OLD_SHA),
     ];
-    expect(filterStaleReviews(reviews, BOT)).toEqual([]);
+    expect(filterStaleReviews(reviews, BOT, HEAD_SHA)).toEqual([]);
   });
 
   it("skips a review already in DISMISSED state (already in target state)", () => {
-    const reviews = [makeReview(1, BOT, "DISMISSED")];
-    expect(filterStaleReviews(reviews, BOT)).toEqual([]);
+    const reviews = [makeReview(1, BOT, "DISMISSED", OLD_SHA)];
+    expect(filterStaleReviews(reviews, BOT, HEAD_SHA)).toEqual([]);
   });
 
   it("returns the one matching review when exactly one qualifies", () => {
-    const target = makeReview(42, BOT, "CHANGES_REQUESTED");
+    const target = makeReview(42, BOT, "CHANGES_REQUESTED", OLD_SHA);
     const reviews = [
-      makeReview(1, BOT, "APPROVED"),
+      makeReview(1, BOT, "APPROVED", OLD_SHA),
       target,
-      makeReview(2, "human", "CHANGES_REQUESTED"),
+      makeReview(2, "human", "CHANGES_REQUESTED", OLD_SHA),
     ];
-    expect(filterStaleReviews(reviews, BOT)).toEqual([target]);
+    expect(filterStaleReviews(reviews, BOT, HEAD_SHA)).toEqual([target]);
   });
 
   it(
     "targets only CHANGES_REQUESTED among a mixed set of " +
       "APPROVED / COMMENTED / CHANGES_REQUESTED / DISMISSED",
     () => {
-      const cr1 = makeReview(10, BOT, "CHANGES_REQUESTED");
-      const cr2 = makeReview(11, BOT, "CHANGES_REQUESTED");
+      const cr1 = makeReview(10, BOT, "CHANGES_REQUESTED", OLD_SHA);
+      const cr2 = makeReview(11, BOT, "CHANGES_REQUESTED", OLD_SHA);
       const reviews = [
-        makeReview(1, BOT, "APPROVED"),
-        makeReview(2, BOT, "COMMENTED"),
+        makeReview(1, BOT, "APPROVED", OLD_SHA),
+        makeReview(2, BOT, "COMMENTED", OLD_SHA),
         cr1,
-        makeReview(3, BOT, "DISMISSED"),
+        makeReview(3, BOT, "DISMISSED", OLD_SHA),
         cr2,
-        makeReview(4, "human", "CHANGES_REQUESTED"),
+        makeReview(4, "human", "CHANGES_REQUESTED", OLD_SHA),
       ];
-      expect(filterStaleReviews(reviews, BOT)).toEqual([cr1, cr2]);
+      expect(filterStaleReviews(reviews, BOT, HEAD_SHA)).toEqual([cr1, cr2]);
     }
   );
 
   it("returns multiple matching reviews when several qualify", () => {
-    const cr1 = makeReview(7, BOT, "CHANGES_REQUESTED");
-    const cr2 = makeReview(8, BOT, "CHANGES_REQUESTED");
-    expect(filterStaleReviews([cr1, cr2], BOT)).toEqual([cr1, cr2]);
+    const cr1 = makeReview(7, BOT, "CHANGES_REQUESTED", OLD_SHA);
+    const cr2 = makeReview(8, BOT, "CHANGES_REQUESTED", OLD_SHA);
+    expect(filterStaleReviews([cr1, cr2], BOT, HEAD_SHA)).toEqual([cr1, cr2]);
   });
+
+  // -------------------------------------------------------------------------
+  // SHA-filter: only old-SHA reviews are dismissed; current-SHA reviews are
+  // preserved (sibling-leg race safety, Issue #449 Decision 4c).
+  // -------------------------------------------------------------------------
+
+  it(
+    "dismisses only old-SHA CHANGES_REQUESTED reviews in a mixed set of " +
+      "old and current head SHAs",
+    () => {
+      // Reviews against the OLD SHA — eligible for dismissal.
+      const oldCr1 = makeReview(10, BOT, "CHANGES_REQUESTED", OLD_SHA);
+      const oldCr2 = makeReview(11, BOT, "CHANGES_REQUESTED", OLD_SHA);
+      // Review against the CURRENT HEAD SHA — must NOT be dismissed
+      // (it may have been posted by a sibling leg for this exact head).
+      const currentCr = makeReview(12, BOT, "CHANGES_REQUESTED", HEAD_SHA);
+      // Approved review on the old SHA — not CHANGES_REQUESTED, should be skipped.
+      const oldApproved = makeReview(13, BOT, "APPROVED", OLD_SHA);
+
+      const reviews = [oldCr1, oldApproved, currentCr, oldCr2];
+      expect(filterStaleReviews(reviews, BOT, HEAD_SHA)).toEqual([oldCr1, oldCr2]);
+    }
+  );
+
+  it(
+    "sibling-leg race: a CHANGES_REQUESTED review on the current head SHA " +
+      "is NOT dismissed",
+    () => {
+      // A sibling matrix leg just posted this verdict against the current head SHA.
+      const siblingReview = makeReview(99, BOT, "CHANGES_REQUESTED", HEAD_SHA);
+      expect(filterStaleReviews([siblingReview], BOT, HEAD_SHA)).toEqual([]);
+    }
+  );
+
+  it(
+    "returns an empty array when all bot CHANGES_REQUESTED reviews are on " +
+      "the current head SHA (nothing stale to dismiss)",
+    () => {
+      const reviews = [
+        makeReview(1, BOT, "CHANGES_REQUESTED", HEAD_SHA),
+        makeReview(2, BOT, "CHANGES_REQUESTED", HEAD_SHA),
+        makeReview(3, "human", "CHANGES_REQUESTED", OLD_SHA),
+      ];
+      expect(filterStaleReviews(reviews, BOT, HEAD_SHA)).toEqual([]);
+    }
+  );
+
+  it(
+    "dismisses old-SHA reviews while preserving current-SHA reviews, " +
+      "regardless of non-CHANGES_REQUESTED states on the current SHA",
+    () => {
+      const stale = makeReview(5, BOT, "CHANGES_REQUESTED", OLD_SHA);
+      const reviews = [
+        stale,
+        makeReview(6, BOT, "APPROVED", HEAD_SHA),
+        makeReview(7, BOT, "COMMENTED", HEAD_SHA),
+        makeReview(8, BOT, "CHANGES_REQUESTED", HEAD_SHA),
+      ];
+      expect(filterStaleReviews(reviews, BOT, HEAD_SHA)).toEqual([stale]);
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------
