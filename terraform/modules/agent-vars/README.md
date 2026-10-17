@@ -1,6 +1,6 @@
 # agent-vars module
 
-Manages the five GitHub Actions repository variables that configure agentic workflow behavior.
+Manages the GitHub Actions repository variables that configure agentic workflow behavior.
 
 | Variable | Type | Purpose |
 |----------|------|---------|
@@ -9,6 +9,7 @@ Manages the five GitHub Actions repository variables that configure agentic work
 | `ADMIN_ASSIGNEES` | JSON array | Usernames assigned to issues/PRs when the agent applies `human-required` and needs a human in the loop. |
 | `CODE_REVIEWERS` | JSON array | Usernames requested as PR reviewers when the agent opens a PR and wants human sign-off. |
 | `AUTO_TRIGGER_AGENTS` | JSON object | Per-stage gates (`groom`, `design`, `developer`, `review`) that auto-advance the SDLC pipeline without manual labeling. All default to `false` (opt-in). |
+| `REVIEWER_MODELS` | JSON array | Ordered list of model identifiers for the multi-reviewer feature. Empty array (`[]`) disables multi-reviewer. Workflow guards use `vars.REVIEWER_MODELS != ''` before `fromJSON`. |
 
 ## Usage
 
@@ -28,6 +29,7 @@ module "agent_vars" {
     developer = false
     review    = false
   }
+  # reviewer_models = ["sonnet", "claude-sonnet-4-5"]  # omit or leave [] to disable multi-reviewer
 }
 ```
 
@@ -47,6 +49,7 @@ module "agent_vars" {
     developer = false
     review    = false
   }
+  # reviewer_models = ["sonnet", "claude-sonnet-4-5"]  # omit or leave [] to disable multi-reviewer
 }
 ```
 
@@ -78,6 +81,7 @@ provider "github" {
 | `admin_assignees` | `list(string)` | no | `[]` | Usernames to assign to escalation issues/PRs. |
 | `code_reviewers` | `list(string)` | no | `[]` | Usernames to request as PR reviewers. |
 | `auto_trigger_agents` | `object({groom,design,developer,review: bool})` | no | all `false` | Per-stage auto-trigger gates. |
+| `reviewer_models` | `list(string)` | no | `[]` | Ordered list of model identifiers for the multi-reviewer feature. Empty disables multi-reviewer. |
 
 ## Outputs
 
@@ -88,8 +92,10 @@ provider "github" {
 | `admin_assignees_variable_name` | `string` | Name of the `ADMIN_ASSIGNEES` Actions variable (`"ADMIN_ASSIGNEES"`). |
 | `code_reviewers_variable_name` | `string` | Name of the `CODE_REVIEWERS` Actions variable (`"CODE_REVIEWERS"`). |
 | `auto_trigger_agents_variable_name` | `string` | Name of the `AUTO_TRIGGER_AGENTS` Actions variable (`"AUTO_TRIGGER_AGENTS"`). |
+| `reviewer_models_variable_name` | `string` | Name of the `REVIEWER_MODELS` Actions variable (`"REVIEWER_MODELS"`). |
 
 ## Notes
 
 - `AUTO_TRIGGER_AGENTS` must never be absent from the repository — the workflow guard `vars.AUTO_TRIGGER_AGENTS != ''` prevents `fromJSON('')` from throwing a runtime error. All gates default to `false` so behavior is unchanged unless you opt in.
+- `REVIEWER_MODELS` defaults to `[]` (JSON-encoded empty array). Workflows guard with `vars.REVIEWER_MODELS != ''` before calling `fromJSON` — an absent variable evaluates to `''` and `fromJSON('')` would throw a runtime error; the guard fails closed (multi-reviewer disabled) instead. An empty list (`[]`) is the canonical signal that multi-reviewer is disabled.
 - Include the developer-agent and reviewer-agent bot identities (e.g. `mfrancza-developer-agent[bot]`) in `agent_allowlist` so that agents can apply `agent:*` labels to route work to one another.
