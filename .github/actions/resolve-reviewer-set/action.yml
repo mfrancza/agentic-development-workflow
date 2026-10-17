@@ -1,0 +1,82 @@
+name: 'Resolve reviewer set'
+description: >
+  Resolves the reviewer set for a given PR using a three-tier waterfall:
+  (1) per-PR model:review:* labels, (2) repo-wide REVIEWER_MODELS variable,
+  (3) single-reviewer fallback via the existing model:* → default waterfall.
+  Output contract: `set` — a JSON array of { model } objects shaped for
+  strategy.matrix.include. An empty output never occurs; resolution failure
+  calls core.setFailed() with a clear error message.
+inputs:
+  token:
+    description: 'GitHub token with read access to the pull request'
+    required: true
+  pr-number:
+    description: 'Pull request number'
+    required: true
+  repo:
+    description: 'Repository in owner/name format (e.g. "octocat/hello-world")'
+    required: true
+  reviewer-models:
+    description: >
+      JSON-encoded list of model names from the REVIEWER_MODELS Actions
+      variable (e.g. '["sonnet","gpt-5"]'). An empty string or empty JSON
+      array ("[]") disables Tier 2 and falls through to the single-reviewer
+      fallback. Default: empty string (feature disabled; single-reviewer
+      mode preserved).
+    required: false
+    default: ''
+  default-model:
+    description: 'Model name to use when no label or list specifies a reviewer'
+    required: true
+  pair-policy:
+    description: >
+      Reserved for the future pair-policy tier that will auto-populate the
+      reviewer set from the implementer model. Not yet consumed; present so
+      the future tier can slot in without a breaking API change.
+    required: false
+    default: ''
+outputs:
+  set:
+    description: >
+      JSON array of reviewer-set entries shaped for strategy.matrix.include,
+      e.g. [{"model":"opus"},{"model":"gpt-5"}]. Always non-empty.
+    value: ${{ steps.run.outputs.set }}
+runs:
+  using: composite
+  steps:
+    # setup-node's cache-dependency-path is a glob resolved by @actions/glob,
+    # which rejects '.' / '..' path segments, so the action-relative scripts
+    # path must be normalized to an absolute path before it is used there.
+    - name: Resolve scripts directory
+      id: scripts-dir
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        echo "dir=$(cd "$ACTION_PATH/../../scripts" && pwd)" >> "$GITHUB_OUTPUT"
+
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ steps.scripts-dir.outputs.dir }}/package-lock.json
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      run: npm ci
+
+    - name: Resolve reviewer set
+      id: run
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_REVIEWER_MODELS: ${{ inputs.reviewer-models }}
+        INPUT_DEFAULT_MODEL: ${{ inputs.default-model }}
+        INPUT_PAIR_POLICY: ${{ inputs.pair-policy }}
+      run: npx --no-install tsx src/resolve-reviewer-set.ts
