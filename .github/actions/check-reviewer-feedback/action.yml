@@ -35,6 +35,20 @@ inputs:
   pr-author:
     description: 'GitHub login of the PR author (github.event.pull_request.user.login)'
     required: true
+  head-sha:
+    description: >
+      Current PR head SHA (github.event.pull_request.head.sha). When empty,
+      the stale-SHA guard is skipped (fail-open) and the existing decision flow
+      is applied unchanged.
+    required: false
+    default: ''
+  review-commit-id:
+    description: >
+      The commit SHA the review was submitted against
+      (github.event.review.commit_id). When empty, the stale-SHA guard falls
+      through (does not skip on a missing value).
+    required: false
+    default: ''
 
 outputs:
   proceed:
@@ -82,3 +96,5 @@ runs:
         INPUT_REPO_NAME: ${{ inputs.repo-name }}
         INPUT_REVIEW_AUTHOR: ${{ inputs.review-author }}
         INPUT_PR_AUTHOR: ${{ inputs.pr-author }}
+        INPUT_HEAD_SHA: ${{ inputs.head-sha }}
+        INPUT_REVIEW_COMMIT_ID: ${{ inputs.review-commit-id }}

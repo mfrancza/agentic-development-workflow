@@ -23,6 +23,18 @@ export interface FeedbackCheckInput {
   reviewAuthor: string;
   /** GitHub login of the PR author (github.event.pull_request.user.login). */
   prAuthor: string;
+  /**
+   * Current PR head SHA (github.event.pull_request.head.sha).
+   * Empty string when the caller did not supply it — the stale-SHA guard
+   * is skipped (fail-open) in that case.
+   */
+  headSha: string;
+  /**
+   * The commit SHA the review was submitted against (github.event.review.commit_id).
+   * Empty string when missing from the event payload — the stale-SHA guard
+   * falls through (does not skip) in that case.
+   */
+  reviewCommitId: string;
 }
 
 /**
@@ -63,6 +75,12 @@ export interface FeedbackCheckResult {
  * loop at the activity layer.
  *
  * Decision flow:
+ * -1. Stale-SHA guard — if `headSha` is non-empty and `reviewCommitId` is
+ *     non-empty but does not match `headSha`, skip immediately: the review was
+ *     posted against an earlier head SHA and the code it reviewed no longer
+ *     exists at HEAD. Fail-open when `headSha` is empty (log a warning and
+ *     proceed to the existing checks). Fall through when `reviewCommitId` is
+ *     empty (do not skip on a missing value).
  *  0. PR is not open (closed or merged) — skip immediately; a review on a
  *     closed/merged PR never needs a response. On API error, fail open and
  *     continue to the feedback checks.
@@ -84,7 +102,25 @@ export async function checkReviewerFeedback(
   input: FeedbackCheckInput,
   deps: FeedbackCheckDeps,
 ): Promise<FeedbackCheckResult> {
-  const { state, body, reviewAuthor, prAuthor } = input;
+  const { state, body, reviewAuthor, prAuthor, headSha, reviewCommitId } = input;
+
+  // --- Step -1: stale-SHA guard ---
+  // Skip when the review was posted against a SHA that is no longer the PR head.
+  // Fail-open when headSha is missing (empty string): log a warning and fall
+  // through to the existing decision flow rather than skipping.
+  // Fall through when reviewCommitId is missing (empty string): do not skip on
+  // a missing value.
+  if (headSha === "") {
+    core.warning(
+      "head-sha input is empty; skipping stale-SHA guard and proceeding to existing checks.",
+    );
+  } else if (reviewCommitId !== "" && reviewCommitId !== headSha) {
+    return {
+      proceed: false,
+      reason: `Review commit_id '${reviewCommitId}' does not match current PR head SHA '${headSha}'; skipping respond-review — review is stale.`,
+    };
+  }
+  // When reviewCommitId is empty, fall through without skipping.
 
   // --- Step 0: skip if PR is no longer open (closed or merged) ---
   let prState: string | undefined;
@@ -333,11 +369,13 @@ async function run(): Promise<void> {
   const repo = core.getInput("repo_name", { required: true });
   const reviewAuthor = core.getInput("review_author", { required: true });
   const prAuthor = core.getInput("pr_author", { required: true });
+  const headSha = core.getInput("head_sha");
+  const reviewCommitId = core.getInput("review_commit_id");
 
   const octokit = getOctokit(token);
 
   const result = await checkReviewerFeedback(
-    { state, body, reviewId, prNumber, owner, repo, reviewAuthor, prAuthor },
+    { state, body, reviewId, prNumber, owner, repo, reviewAuthor, prAuthor, headSha, reviewCommitId },
     {
       getPrState: makePrStateGetter(octokit, owner, repo, prNumber),
       countUnresolvedThreads: makeUnresolvedThreadCounter(
