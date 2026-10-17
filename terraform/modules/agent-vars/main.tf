@@ -73,3 +73,20 @@ resource "github_actions_variable" "reviewer_models" {
   variable_name = "REVIEWER_MODELS"
   value         = jsonencode(var.reviewer_models)
 }
+
+# Expose the reviewer model-pair preferences as a JSON-encoded repository
+# Actions variable so the agent-review workflow can pass the pairing policy to
+# the resolve-model composite action. When enabled, the pairing tier fires below
+# the model:review:* / model:* label tiers and above DEFAULT_MODEL, selecting a
+# reviewer model based on the authoring model recorded in the PR body.
+# The non-empty guard (vars.REVIEW_MODEL_PAIRING != '') must precede any
+# fromJSON() call in workflow if: expressions — if the variable does not yet
+# exist the expression evaluates to '' and fromJSON('') would throw a runtime
+# error; the guard causes the condition to fail closed (pairing disabled) instead.
+# The default (enabled = false) preserves existing behavior for any repo that
+# has not yet explicitly opted in.
+resource "github_actions_variable" "review_model_pairing" {
+  repository    = var.repository
+  variable_name = "REVIEW_MODEL_PAIRING"
+  value         = jsonencode(var.review_model_pairing)
+}

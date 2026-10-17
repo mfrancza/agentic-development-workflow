@@ -40,3 +40,33 @@ auto_trigger_agents = {
 # is a model name accepted by the agent --model flag. Leave empty ([]) to
 # disable multi-reviewer (the default). Stored as REVIEWER_MODELS Actions variable.
 # reviewer_models = ["sonnet", "claude-sonnet-4-5", "gpt-5.6-sol"]
+
+# Reviewer model-pair preferences. When enabled, the agent-review workflow picks
+# a reviewer model based on the authoring model of the PR (recorded in the PR
+# body by the developer/design agent). Explicit model:review:* / model:* labels
+# on the PR take precedence over this setting. Defaults to enabled = false
+# (fail-safe opt-in — no behavioral change until you explicitly set enabled = true).
+# Stored as the REVIEW_MODEL_PAIRING Actions variable (JSON-encoded object).
+# See docs/design/configurable-model-pair-preferences.md for resolver semantics.
+#
+# To opt in with the default different-vendor-same-class policy:
+# review_model_pairing = {
+#   enabled           = true
+#   policy            = "different-vendor-same-class"
+#   preferred_vendors = ["openai", "xai", "anthropic"]
+#   explicit_map      = {}
+#   fallback_chain    = ["default-model"]
+# }
+#
+# To use an explicit author → reviewer map instead:
+# review_model_pairing = {
+#   enabled           = true
+#   policy            = "explicit-map"
+#   preferred_vendors = ["openai", "xai", "anthropic"]
+#   explicit_map      = {
+#     "sonnet"           = "gpt-5.6-terra"
+#     "claude-sonnet-4-5" = "gpt-5"
+#     "opus"             = "gpt-5.6-sol"
+#   }
+#   fallback_chain    = ["different-vendor-same-class", "default-model"]
+# }

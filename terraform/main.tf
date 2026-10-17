@@ -67,14 +67,15 @@ module "security" {
 }
 
 module "agent_vars" {
-  source              = "./modules/agent-vars"
-  repository          = github_repository.this.name
-  agent_allowlist     = var.agent_allowlist
-  default_model       = var.default_model
-  admin_assignees     = var.admin_assignees
-  code_reviewers      = var.code_reviewers
-  auto_trigger_agents = var.auto_trigger_agents
-  reviewer_models     = var.reviewer_models
+  source               = "./modules/agent-vars"
+  repository           = github_repository.this.name
+  agent_allowlist      = var.agent_allowlist
+  default_model        = var.default_model
+  admin_assignees      = var.admin_assignees
+  code_reviewers       = var.code_reviewers
+  auto_trigger_agents  = var.auto_trigger_agents
+  reviewer_models      = var.reviewer_models
+  review_model_pairing = var.review_model_pairing
 }
 
 module "branch_protection" {

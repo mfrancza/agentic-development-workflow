@@ -53,3 +53,21 @@ variable "reviewer_models" {
   type        = list(string)
   default     = []
 }
+
+variable "review_model_pairing" {
+  description = "Reviewer model-pair preferences. When enabled, the agent-review workflow picks a reviewer model based on the authoring model of the PR (recorded in the PR body by the developer/design agent). Explicit model:review:* / model:* labels on the PR take precedence. See docs/design/configurable-model-pair-preferences.md for the resolver semantics and docs/model-guidance.md for the cross-vendor class table."
+  type = object({
+    enabled           = bool
+    policy            = string       # "different-vendor-same-class" | "same-vendor-same-class" | "same-model" | "explicit-map" | "off"
+    preferred_vendors = list(string) # tie-breaking order for "different-vendor-same-class"; also drives the "same-vendor-different-model" fallback vendor sequence
+    explicit_map      = map(string)  # author-model → reviewer-model; consulted only when policy == "explicit-map"
+    fallback_chain    = list(string) # ordered fallbacks when the primary policy pick is not satisfiable; supported entries: "different-vendor-same-class", "same-vendor-different-model", "default-model"
+  })
+  default = {
+    enabled           = false
+    policy            = "different-vendor-same-class"
+    preferred_vendors = ["openai", "xai", "anthropic"]
+    explicit_map      = {}
+    fallback_chain    = ["default-model"]
+  }
+}
