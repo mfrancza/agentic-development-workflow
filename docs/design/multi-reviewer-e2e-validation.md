@@ -3,11 +3,25 @@
 **Issue:** [#473](https://github.com/mfrancza/agentic-development-workflow/issues/473)
 **Design under test:** [multi-reviewer-agents.md](multi-reviewer-agents.md) (Issue #449)
 
-## Validation approach
+## Validation status
 
-This document records the E2E validation of the multi-reviewer feature
-introduced in Issue #449 and implemented across sub-issues #462–#471.
-Validation covered two complementary surfaces:
+| Layer | Status |
+|---|---|
+| Unit test suite (`npm test`) | ✅ Complete — 394 tests, 23 files, all pass |
+| TypeScript type-check (`tsc --noEmit`) | ✅ Complete — clean |
+| Static code / YAML analysis | ✅ Complete — see scenario findings below |
+| **Live workflow runs (real PRs)** | ⏳ **Pending** — not yet executed; see [Pending live-run scenarios](#pending-live-run-scenarios) |
+
+> **Note:** Issue #473 requires live workflow exercises — actual GitHub Actions runs
+> with recorded PR numbers, run IDs, review IDs, and observed logs — for the
+> acceptance criteria to be met.  The static and unit-test layer is complete, but
+> the live-run layer has not been executed yet (credentials and a suitable test PR
+> are required).  **Do not close #473 or claim production readiness until the
+> pending scenarios below are recorded.**
+
+## Validation approach (completed)
+
+Validation completed to date covered two complementary surfaces:
 
 - **Unit test suite** — `npm test` in `.github/scripts/`, running all
   394 tests across 23 files.  All pass.  TypeScript strict-mode
@@ -16,7 +30,7 @@ Validation covered two complementary surfaces:
   workflow YAML, and reviewer prompt reviewed against the six decisions
   in `multi-reviewer-agents.md`.
 
-## Scenario findings
+## Scenario findings (static / unit-test layer)
 
 ### 1 — Baseline: repo-wide multi-reviewer (`REVIEWER_MODELS` = two providers)
 
@@ -49,6 +63,8 @@ This rule is stated under "Review body header" and marked mandatory
 Model slug produced in the "Slugify model name for artifact" step via
 `env: MODEL: ${{ matrix.model }}` (output-injection hygiene preserved).
 
+⚠️ **Live-run evidence pending** — no test PR run recorded yet.  See scenario L1 below.
+
 ### 2 — Re-review + stale-SHA guard
 
 **Synchronize trigger.** `agent-review.yml` caller stub fires on
@@ -71,6 +87,10 @@ immediately when `reviewCommitId !== headSha`, returning
 Covered by `check-reviewer-feedback.test.ts` — "stale-SHA guard"
 describe block, 4 tests.
 
+⚠️ **Live-run evidence pending** — no observed run demonstrating that a pushed fix
+dismisses only prior-SHA verdicts and that the queued stale-review race skips
+developer dispatch.  See scenario L2 below.
+
 ### 3 — Terminal APPROVE (Decision 4a)
 
 Each matrix leg independently checks whether its `APPROVED` review
@@ -85,6 +105,9 @@ leaves any actionable feedback:
   — "approved review — primary unresolved-thread check" describe block,
   6 tests.
 
+⚠️ **Live-run evidence pending** — no observed run confirming that both terminal
+approvals skip developer dispatch.  See scenario L3 below.
+
 ### 4 — Per-PR label override (Decision 1, Tier 1)
 
 `resolveReviewerSet()` checks for `model:review:*` labels before
@@ -95,6 +118,9 @@ regardless of what `REVIEWER_MODELS` contains.  Covered by
 including the explicit "Tier 1 takes precedence over a non-empty
 reviewerModels list" case.
 
+⚠️ **Live-run evidence pending** — no test PR run recorded confirming label override
+in a real workflow execution.  See scenario L4 below.
+
 ### 5 — Single-reviewer fallback (Decision 1, Tier 3)
 
 When `reviewerModels = []` and no `model:review:*` labels are present,
@@ -102,6 +128,9 @@ When `reviewerModels = []` and no `model:review:*` labels are present,
 a single-element array, preserving the pre-existing single-reviewer
 behavior unchanged.  Covered by `resolve-reviewer-set.test.ts` — "Tier
 3" describe block, 7 tests.
+
+⚠️ **Live-run evidence pending** — no test PR run recorded for fallback path.
+See scenario L5 below.
 
 ### 6 — Cost-warning log line (Decision 5)
 
@@ -121,11 +150,24 @@ the entry-point side-effect during test runs, so this path is tested
 manually rather than by unit tests — consistent with the pattern used
 for all other entry-point scripts in the package).
 
-## No issues found
+⚠️ **Live-run evidence pending** — no observed run with > 3 reviewers confirming
+the warning appears in Actions logs.  See scenario L6 below.
 
-All six scenarios validate cleanly against the implementation.  No
-findings to feed back into the implementation sub-issues.  The
-multi-reviewer loop is ready for production use once `REVIEWER_MODELS`
-is set via Terraform and the GitHub Actions secrets for the second
-provider (`OPENAI_API_KEY` or `XAI_API_KEY`) are configured in the
-repository.
+## Pending live-run scenarios
+
+The following scenarios require an actual GitHub Actions run to complete the
+acceptance criteria for #473.  For each, record: test PR number, run ID,
+relevant review IDs / head SHAs, and a summary of observed behaviour.
+
+| ID | Scenario | What to record |
+|---|---|---|
+| L1 | Two-provider baseline | Both provider legs post reviews; per-leg artifacts present with correct slug; review body headers present |
+| L2 | Re-review after push | Prior-SHA reviews dismissed; sibling-leg (same-head) verdicts preserved; stale-review job exits without dispatching developer agent |
+| L3 | Both legs approve | Developer agent dispatch skipped after each approval; confirm via run logs |
+| L4 | Label override (`model:review:*`) | Resolver selects label-specified models, ignoring `REVIEWER_MODELS`; only labeled-model legs run |
+| L5 | Single-reviewer fallback (`REVIEWER_MODELS` empty) | Single leg runs; pre-existing behaviour preserved |
+| L6 | Four-model warning | `> 3` reviewer set triggers warning annotation in Actions log from both emission points |
+
+Once all six live-run scenarios are recorded here with their references,
+`Closes #473` may be added to the PR and the production-readiness claim
+reinstated.
