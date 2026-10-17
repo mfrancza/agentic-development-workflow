@@ -10,9 +10,9 @@ on:
   pull_request_target:
     types: [labeled, synchronize]
 
-# Deny-all at the workflow level; the write scopes the resolve step needs are
-# granted on the calling job so any future job added to this workflow starts
-# with no permissions.
+# Deny-all at the workflow level; the write scopes the reusable jobs need are
+# declared on those jobs so any future job added to this workflow starts with
+# no permissions.
 permissions: {}
 
 jobs:
@@ -62,8 +62,9 @@ jobs:
       group: agent-review-pr-${{ github.event.pull_request.number }}
       cancel-in-progress: false
     # contents: write + pull-requests: write are forwarded to the reusable so
-    # the resolve-review-threads step can call the resolveReviewThread GraphQL
-    # mutation with the workflow GITHUB_TOKEN (see agent-review-reusable.yml).
+    # the resolve-review-threads step in each matrix leg can call the
+    # resolveReviewThread GraphQL mutation with the workflow GITHUB_TOKEN
+    # (see agent-review-reusable.yml).
     permissions:
       contents: write
       pull-requests: write
@@ -73,6 +74,7 @@ jobs:
       repo: ${{ github.repository }}
       image: ${{ vars.REVIEWER_IMAGE }}
       default-model: ${{ vars.DEFAULT_MODEL }}
+      reviewer-models: ${{ vars.REVIEWER_MODELS }}
       logs-retention-days: 30
       helpers-ref: ${{ github.sha }}
     secrets:
