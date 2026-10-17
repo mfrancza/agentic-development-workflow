@@ -22,3 +22,8 @@ output "auto_trigger_agents_variable_name" {
   description = "Name of the AUTO_TRIGGER_AGENTS Actions variable."
   value       = github_actions_variable.auto_trigger_agents.variable_name
 }
+
+output "reviewer_models_variable_name" {
+  description = "Name of the REVIEWER_MODELS Actions variable."
+  value       = github_actions_variable.reviewer_models.variable_name
+}

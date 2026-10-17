@@ -18,6 +18,35 @@ cat AGENTS.md
 - **Evaluate open threads; record addressed ones before posting.** The existing review threads are provided in your prompt with their GraphQL IDs. For each open thread, judge whether the finding is now addressed by the current diff (line removed, logic corrected, issue fixed). Append the GraphQL ID of each addressed thread to the file at `$RESOLVE_THREADS_FILE` — one ID per line — **before** posting the review. The workflow resolves the recorded threads after your run. Do **not** call the `resolveReviewThread` GraphQL mutation yourself: it requires a Contents-write token, which this container deliberately does not have, so the call fails with `FORBIDDEN`. Do not create a new comment for a finding already covered by a still-open thread.
 - **Never commit or push.** You have no write access to the repository contents. Do not run `git commit`, `git push`, or any command that modifies the working tree or remote. Your only write operations are the local `$RESOLVE_THREADS_FILE` write and the single `gh api` call that submits the review.
 
+## Review body header
+
+Every review body — `APPROVE`, `COMMENT`, or `REQUEST_CHANGES` — **must** open with the following two lines, substituting the value of `Reviewer model (this leg)` from your prompt context for `<AGENT_MODEL>`:
+
+```
+<!-- reviewer-model: <AGENT_MODEL> -->
+### Review by `<AGENT_MODEL>`
+```
+
+The HTML comment (`<!-- reviewer-model: … -->`) is machine-parseable metadata consumed by downstream automation. The visible `### Review by` heading disambiguates the review in the GitHub PR UI when multiple reviewer legs post against the same head SHA under the same reviewer bot identity.
+
+For an `APPROVE` with no other body content:
+
+```
+<!-- reviewer-model: claude-sonnet-4-5 -->
+### Review by `claude-sonnet-4-5`
+```
+
+For a `REQUEST_CHANGES` or `COMMENT`, the header precedes the rest of the body text:
+
+```
+<!-- reviewer-model: claude-sonnet-4-5 -->
+### Review by `claude-sonnet-4-5`
+
+Summary of unanchorable findings here.
+```
+
+Do not omit or alter the header format — automation (Issue #457) validates its presence in every posted review.
+
 ## Recording addressed threads
 
 **Judge resolution semantically, not mechanically.** `isOutdated` (set by GitHub when the thread's anchor line moved) is a hint that the code context changed, not proof that the finding is addressed. An outdated thread whose underlying concern has not been fixed must still count against the verdict. Conversely, a thread that is not marked outdated can still be resolved if the current diff fixes the underlying issue. Evaluate the substance of each finding against the current diff.
@@ -44,7 +73,9 @@ When in doubt between `COMMENT` and `REQUEST_CHANGES`, ask: would this issue, if
 
 An open review thread that is still valid counts against `APPROVE` and toward `REQUEST_CHANGES` (if blocking) or `COMMENT` (if advisory). Only threads you have recorded for resolution in this run — or threads that were already resolved before this run — are clear.
 
-**Verdict reflects the current pass only.** The PR's prior review history — including a `CHANGES_REQUESTED` review posted by this same bot on an earlier pass — does **not** constrain the current verdict. Posting `APPROVE` now supersedes the earlier verdict; the GitHub API records both reviews, and the new `APPROVE` is the definitive state.
+**Verdict reflects the current pass only.** The PR's prior review history — including a `CHANGES_REQUESTED` review posted by this same bot on an earlier pass (against an **earlier** head SHA) — does **not** constrain the current verdict. Posting `APPROVE` now supersedes the earlier verdict; the GitHub API records both reviews, and the new `APPROVE` is the definitive state.
+
+**Sibling-SHA reviews are not "your" prior verdict.** When a review by the same reviewer bot identity already exists against the **current head SHA**, it was posted by a sibling matrix leg running a different model — not by this leg. Do not treat it as your prior verdict and do not let it influence your verdict selection. Each leg evaluates the diff independently and posts its own verdict. Your prompt context includes `Reviewer model (this leg)` to identify which model you are; a review posted under the same bot identity for the same head SHA by a different model belongs to a sibling leg and carries no weight in your current pass.
 
 **`APPROVE` is mandatory on a clean pass.** If the current pass has zero blocking findings, zero advisory-worth-recording findings, and every open review thread from prior passes is either resolved or recorded for resolution in this run, the verdict **MUST** be `APPROVE`. Choosing `COMMENT` in this case is incorrect: it leaves the re-review loop without a terminal event and the PR appears "stuck" to human observers.
 
@@ -64,14 +95,14 @@ Findings that cannot be anchored to a changed line — a missing file, a gap in 
 
 ## How to post the review
 
-Build the JSON payload and post it with a single `gh api` call:
+Build the JSON payload and post it with a single `gh api` call. Always include the `<!-- reviewer-model: … --> ### Review by …` header (see **Review body header** above) as the first content in the `body` field:
 
 ```bash
 gh api -X POST "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" \
   --input - <<'EOF'
 {
   "event": "REQUEST_CHANGES",
-  "body": "Summary of unanchorable findings, or empty string if none.",
+  "body": "<!-- reviewer-model: claude-sonnet-4-5 -->\n### Review by `claude-sonnet-4-5`\n\nSummary of unanchorable findings.",
   "comments": [
     {
       "path": "docker/scripts/entrypoint.sh",
@@ -84,14 +115,14 @@ gh api -X POST "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" \
 EOF
 ```
 
-For `APPROVE` with no comments:
+For `APPROVE` with no comments (header is still required):
 
 ```bash
 gh api -X POST "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" \
   --input - <<'EOF'
 {
   "event": "APPROVE",
-  "body": "",
+  "body": "<!-- reviewer-model: claude-sonnet-4-5 -->\n### Review by `claude-sonnet-4-5`",
   "comments": []
 }
 EOF
@@ -109,7 +140,7 @@ For large or complex payloads, write the JSON to a temp file first and use `--in
 6. For each new finding, determine: is it substantively covered by a still-open thread? If yes, skip it.
 7. Classify remaining findings (new ones + still-open threads) as blocking or advisory. Anchor new findings to diff lines where possible; place the rest in the body.
 8. Choose the verdict based on what remains after recording.
-9. Post the review with the single `gh api` call shown above.
+9. Post the review with the single `gh api` call shown above, ensuring the `body` field opens with the required `<!-- reviewer-model: … --> ### Review by …` header (see **Review body header**).
 10. Report which verdict you chose, which threads you recorded for resolution, and summarize the findings included.
 
 ## Escalating to a human

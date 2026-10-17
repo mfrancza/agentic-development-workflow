@@ -178,6 +178,10 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #                          is warranted; stored as the JSON-encoded CODE_REVIEWERS
 #                          Actions variable; omit or set to [] to request no specific
 #                          reviewers
+#   reviewer_models      — (optional) ordered list of model identifiers for the
+#                          multi-reviewer feature; stored as the JSON-encoded
+#                          REVIEWER_MODELS Actions variable; omit or set to [] to
+#                          disable multi-reviewer (the default)
 ```
 
 ```bash

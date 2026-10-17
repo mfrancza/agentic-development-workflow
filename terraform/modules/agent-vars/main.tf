@@ -59,3 +59,17 @@ resource "github_actions_variable" "auto_trigger_agents" {
   variable_name = "AUTO_TRIGGER_AGENTS"
   value         = jsonencode(var.auto_trigger_agents)
 }
+
+# Expose the reviewer models list as a JSON-encoded repository Actions variable
+# so the resolve-reviewer-set action can iterate the ordered list of model
+# identifiers to try when the multi-reviewer feature selects a reviewer.
+# The non-empty guard (vars.REVIEWER_MODELS != '') must precede any fromJSON()
+# call in workflow if: expressions — if the variable does not yet exist or is
+# empty the expression evaluates to '' and fromJSON('') would throw a runtime
+# error; the guard causes the condition to fail closed (multi-reviewer disabled)
+# instead.
+resource "github_actions_variable" "reviewer_models" {
+  repository    = var.repository
+  variable_name = "REVIEWER_MODELS"
+  value         = jsonencode(var.reviewer_models)
+}
