@@ -52,6 +52,11 @@ See [`docs/design-philosophy.md`](docs/design-philosophy.md) for the reasoning b
 5. On a submitted PR review, the `agent-respond-review` workflow runs `AGENT_ACTION=respond-review`, which
    addresses feedback and pushes updates. The workflow skips cleanly when there is nothing to respond to.
    The `check-reviewer-feedback` activity applies the following checks in order:
+   - **Stale SHA** (guard, step -1): if the review's `commit_id` does not match the current PR head SHA,
+     skip immediately — the review was posted against an earlier commit and the code it reviewed no longer
+     exists at HEAD, so there is nothing to address. Fails open when `head-sha` is empty (warns and
+     falls through to the remaining checks); falls through without skipping when `commit_id` is empty
+     (does not skip on a missing value).
    - **PR not open** (guard): if the PR is already closed or merged at the time the activity runs, skip
      immediately — a review on a closed or merged PR never needs a response. This eliminates a race
      condition where a human approves and merges within seconds, the head branch is auto-deleted, and the
