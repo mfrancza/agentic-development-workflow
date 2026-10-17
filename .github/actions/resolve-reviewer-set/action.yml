@@ -30,9 +30,29 @@ inputs:
     required: true
   pair-policy:
     description: >
-      Reserved for the future pair-policy tier that will auto-populate the
-      reviewer set from the implementer model. Not yet consumed; present so
-      the future tier can slot in without a breaking API change.
+      Optional JSON string containing the REVIEW_MODEL_PAIRING configuration
+      object (shape: { enabled, policy, preferred_vendors, explicit_map,
+      fallback_chain }). Consulted by the Tier 3 single-reviewer fallback when
+      neither per-PR model:review:* labels (Tier 1) nor the REVIEWER_MODELS list
+      (Tier 2) yielded a reviewer set. When absent or empty, the pairing tier is
+      skipped and the waterfall falls through to DEFAULT_MODEL.
+    required: false
+    default: ''
+  authoring-model:
+    description: >
+      The model that authored the PR under review, parsed from the
+      <!-- authored-by-model: … --> HTML-comment marker in the PR body. Only
+      consulted by the Tier 3 pairing tier when pair-policy is non-empty. When
+      absent, the pairing tier is skipped with a loud warning.
+    required: false
+    default: ''
+  available-providers:
+    description: >
+      JSON-encoded list of provider names whose API key is set in the calling
+      workflow (e.g. '["anthropic","openai"]'). Supported values: "anthropic",
+      "openai", "xai". Only consulted by the Tier 3 pairing tier when
+      pair-policy is non-empty. When absent, the pairing resolver treats all
+      providers as unavailable.
     required: false
     default: ''
 outputs:
@@ -79,4 +99,6 @@ runs:
         INPUT_REVIEWER_MODELS: ${{ inputs.reviewer-models }}
         INPUT_DEFAULT_MODEL: ${{ inputs.default-model }}
         INPUT_PAIR_POLICY: ${{ inputs.pair-policy }}
+        INPUT_AUTHORING_MODEL: ${{ inputs.authoring-model }}
+        INPUT_AVAILABLE_PROVIDERS: ${{ inputs.available-providers }}
       run: npx --no-install tsx src/resolve-reviewer-set.ts

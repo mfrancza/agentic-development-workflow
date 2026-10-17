@@ -335,6 +335,34 @@ To mint a reviewer-agent installation token that matches the CI identity exactly
 
 The entrypoint clones the repo read-only, gathers the diff against the merge-base, fetches open review threads and CI check status, invokes Claude, then verifies that a review by the authenticated GitHub identity was posted against the PR head SHA — exiting non-zero if the agent did not complete the review.
 
+### 6. Enable cross-vendor reviewer pairing (optional)
+
+The `agent-review` workflow can automatically select a reviewer model based on the model that authored the PR — for example, picking an OpenAI sonnet-class reviewer when an Anthropic sonnet-class model wrote the code. This is the `REVIEW_MODEL_PAIRING` feature; it is disabled by default (fail-safe opt-in).
+
+**How it works:**
+- When the developer or design agent opens (or updates) a PR, the entrypoint injects a `<!-- authored-by-model: <model> -->` marker into the PR body.
+- On each review trigger, `agent-review.yml` reads this marker and computes which provider API keys are set.
+- The `resolve-model` composite passes both signals into the pairing resolver, which selects a cross-vendor same-class reviewer (or walks a configurable fallback chain when the preferred vendor is unavailable).
+- Explicit `model:review:*` or `model:*` labels on the PR always take precedence over the pairing tier.
+
+**To opt in**, set `review_model_pairing` in `terraform/terraform.tfvars`:
+
+```hcl
+review_model_pairing = {
+  enabled           = true
+  policy            = "different-vendor-same-class"
+  preferred_vendors = ["openai", "xai", "anthropic"]
+  explicit_map      = {}
+  fallback_chain    = ["default-model"]
+}
+```
+
+Then run `terraform apply` (or let the CI pipeline apply on merge to `main`). Terraform writes the JSON-encoded value to the `REVIEW_MODEL_PAIRING` Actions variable, which the reviewer workflow reads at runtime.
+
+For the pairing tier to pick a cross-vendor model, the corresponding provider's API key must be set (see step 3 above — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`). If a preferred provider's key is absent, the resolver logs a warning and walks the `fallback_chain` to the next entry.
+
+See [`docs/design/configurable-model-pair-preferences.md`](docs/design/configurable-model-pair-preferences.md) for the full policy semantics, fallback-chain reference, and `terraform/modules/agent-vars/README.md` for the Terraform variable shape.
+
 ### Published container images
 
 The developer and reviewer images are published to GHCR on every `v*` tag push by [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml). Two tags are published per release:
