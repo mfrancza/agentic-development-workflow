@@ -4,6 +4,7 @@ import {
   getClass,
   getCanonicalPick,
   listModels,
+  validateModelClassData,
 } from "../src/lib/model-classes.js";
 
 // ---------------------------------------------------------------------------
@@ -281,5 +282,121 @@ describe("model-classes: listModels accessor", () => {
         expect(canonical).toBe(list[0]);
       }
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Import-time validation: malformed data must be rejected with a useful error.
+// These tests exercise validateModelClassData() directly so that malformed
+// fixtures never need to touch the filesystem.
+// ---------------------------------------------------------------------------
+
+describe("model-classes: import-time validation rejects malformed data", () => {
+  it("rejects a non-object root (null)", () => {
+    expect(() => validateModelClassData(null)).toThrow(
+      "root must be an object",
+    );
+  });
+
+  it("rejects a non-object root (string)", () => {
+    expect(() => validateModelClassData("not an object")).toThrow(
+      "root must be an object",
+    );
+  });
+
+  it("rejects a missing 'classes' property", () => {
+    expect(() => validateModelClassData({ modelToClass: {} })).toThrow(
+      "'classes' must be an object",
+    );
+  });
+
+  it("rejects a null 'classes' property", () => {
+    expect(() =>
+      validateModelClassData({ classes: null, modelToClass: {} }),
+    ).toThrow("'classes' must be an object");
+  });
+
+  it("rejects a missing 'modelToClass' property", () => {
+    expect(() => validateModelClassData({ classes: {} })).toThrow(
+      "'modelToClass' must be an object",
+    );
+  });
+
+  it("rejects a null 'modelToClass' property", () => {
+    expect(() =>
+      validateModelClassData({ classes: {}, modelToClass: null }),
+    ).toThrow("'modelToClass' must be an object");
+  });
+
+  it("rejects an unrecognized class key (e.g. 'mega')", () => {
+    expect(() =>
+      validateModelClassData({
+        classes: { mega: { anthropic: [] } },
+        modelToClass: {},
+      }),
+    ).toThrow('classes key "mega" is not a valid ClassName');
+  });
+
+  // Regression for: classes.sonnet = null imports successfully but later
+  // throws inside the accessor instead of at import time.
+  it("rejects a null vendor map (classes.sonnet = null)", () => {
+    expect(() =>
+      validateModelClassData({
+        classes: { sonnet: null },
+        modelToClass: {},
+      }),
+    ).toThrow("classes.sonnet must be a non-null object");
+  });
+
+  it("rejects an unrecognized vendor key (e.g. 'google')", () => {
+    expect(() =>
+      validateModelClassData({
+        classes: { sonnet: { google: ["gemini-pro"] } },
+        modelToClass: {},
+      }),
+    ).toThrow('classes.sonnet key "google" is not a valid VendorName');
+  });
+
+  // Regression for: classes.sonnet.openai = "gpt-5.6-terra" (string instead
+  // of array) imports successfully and getCanonicalPick returns "g" (first
+  // char of the string) instead of a real model ID.
+  it("rejects a vendor entry that is a string instead of an array", () => {
+    expect(() =>
+      validateModelClassData({
+        classes: { sonnet: { openai: "gpt-5.6-terra" } },
+        modelToClass: { "gpt-5.6-terra": "sonnet" },
+      }),
+    ).toThrow("classes.sonnet.openai must be an array");
+  });
+
+  it("rejects a vendor array containing a non-string element", () => {
+    expect(() =>
+      validateModelClassData({
+        classes: { haiku: { anthropic: [42] } },
+        modelToClass: {},
+      }),
+    ).toThrow("classes.haiku.anthropic[0] must be a string");
+  });
+
+  // Regression for: modelToClass["gpt-6-astra"] = "opuz" escapes validation
+  // and is treated as a valid ClassName by typed accessors.
+  it("rejects a modelToClass value that is not a valid ClassName", () => {
+    expect(() =>
+      validateModelClassData({
+        classes: {},
+        modelToClass: { "gpt-6-astra": "opuz" },
+      }),
+    ).toThrow('modelToClass["gpt-6-astra"] = "opuz" is not a valid ClassName');
+  });
+
+  it("accepts a well-formed minimal document", () => {
+    expect(() =>
+      validateModelClassData({
+        classes: {
+          sonnet: { anthropic: ["sonnet"] },
+        },
+        modelToClass: { sonnet: "sonnet" },
+      }),
+    ).not.toThrow();
   });
 });

@@ -23,17 +23,31 @@ interface ModelClassData {
 }
 
 // ---------------------------------------------------------------------------
-// Load and validate at import time
+// Validation helpers
 // ---------------------------------------------------------------------------
 
-function loadData(): ModelClassData {
-  const raw = JSON.parse(
-    readFileSync(
-      new URL("../../data/model-classes.json", import.meta.url),
-      "utf8",
-    ),
-  ) as unknown;
+const VALID_CLASS_NAMES = new Set<string>(["haiku", "sonnet", "opus"]);
+const VALID_VENDOR_NAMES = new Set<string>(["anthropic", "openai", "xai"]);
 
+function isClassName(value: unknown): value is ClassName {
+  return typeof value === "string" && VALID_CLASS_NAMES.has(value);
+}
+
+/**
+ * Validates a parsed JSON value against the full ModelClassData schema and
+ * returns a typed ModelClassData on success, or throws a descriptive Error.
+ *
+ * Validation covers:
+ *  - root is a non-null object
+ *  - `classes` is a non-null object whose keys are valid ClassNames, whose
+ *    values are non-null objects whose keys are valid VendorNames, and whose
+ *    leaf values are arrays of strings
+ *  - `modelToClass` is a non-null object whose values are valid ClassNames
+ *
+ * Exported so that tests can exercise it with arbitrary (malformed) input
+ * without touching the filesystem.
+ */
+export function validateModelClassData(raw: unknown): ModelClassData {
   if (typeof raw !== "object" || raw === null) {
     throw new Error("model-classes.json: root must be an object");
   }
@@ -48,7 +62,70 @@ function loadData(): ModelClassData {
     throw new Error("model-classes.json: 'modelToClass' must be an object");
   }
 
+  // Validate nested structure of `classes`.
+  const classesObj = obj["classes"] as Record<string, unknown>;
+  for (const [className, vendorMap] of Object.entries(classesObj)) {
+    if (!VALID_CLASS_NAMES.has(className)) {
+      throw new Error(
+        `model-classes.json: classes key "${className}" is not a valid ClassName` +
+          ` (expected one of: ${[...VALID_CLASS_NAMES].join(", ")})`,
+      );
+    }
+    if (typeof vendorMap !== "object" || vendorMap === null) {
+      throw new Error(
+        `model-classes.json: classes.${className} must be a non-null object`,
+      );
+    }
+    const vendorObj = vendorMap as Record<string, unknown>;
+    for (const [vendorName, models] of Object.entries(vendorObj)) {
+      if (!VALID_VENDOR_NAMES.has(vendorName)) {
+        throw new Error(
+          `model-classes.json: classes.${className} key "${vendorName}" is not a valid VendorName` +
+            ` (expected one of: ${[...VALID_VENDOR_NAMES].join(", ")})`,
+        );
+      }
+      if (!Array.isArray(models)) {
+        throw new Error(
+          `model-classes.json: classes.${className}.${vendorName} must be an array`,
+        );
+      }
+      for (let i = 0; i < (models as unknown[]).length; i++) {
+        if (typeof (models as unknown[])[i] !== "string") {
+          throw new Error(
+            `model-classes.json: classes.${className}.${vendorName}[${i}] must be a string`,
+          );
+        }
+      }
+    }
+  }
+
+  // Validate every value in `modelToClass` is a valid ClassName.
+  const modelToClassObj = obj["modelToClass"] as Record<string, unknown>;
+  for (const [modelId, className] of Object.entries(modelToClassObj)) {
+    if (!isClassName(className)) {
+      throw new Error(
+        `model-classes.json: modelToClass["${modelId}"] = "${String(className)}" is not a valid ClassName` +
+          ` (expected one of: ${[...VALID_CLASS_NAMES].join(", ")})`,
+      );
+    }
+  }
+
   return raw as ModelClassData;
+}
+
+// ---------------------------------------------------------------------------
+// Load and validate at import time
+// ---------------------------------------------------------------------------
+
+function loadData(): ModelClassData {
+  const raw = JSON.parse(
+    readFileSync(
+      new URL("../../data/model-classes.json", import.meta.url),
+      "utf8",
+    ),
+  ) as unknown;
+
+  return validateModelClassData(raw);
 }
 
 const data: ModelClassData = loadData();
