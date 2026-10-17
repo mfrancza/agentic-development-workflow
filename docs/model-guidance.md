@@ -90,6 +90,28 @@ The CLI default and the vendor's recommended model are not necessarily the same.
 - `model:grok-4.6`: the vendor-recommended starting point for an xAI coding evaluation,
   including complex work; its standard input/output rates equal Grok 4.5's.
 
+## Cross-Vendor Class Table
+
+> This section mirrors `.github/scripts/data/model-classes.json`; edit the JSON and refresh this section in the same PR.
+
+The table below maps each capability class to its canonical and alternative model IDs per vendor.
+The **first model listed** in each vendor cell is the **canonical pick** — the model the pairing
+resolver selects by default when it needs one representative for a `(class, vendor)` combination.
+Additional entries in the same cell are recognized members of that class (alternative IDs the
+resolver treats as equivalent for pairing purposes).
+
+| Class | Anthropic | OpenAI | xAI |
+|---|---|---|---|
+| `haiku` | `haiku`, `claude-haiku-4-5` | `gpt-5.6-luna` | `grok-build-0.1` |
+| `sonnet` | `sonnet`, `claude-sonnet-4-5` | `gpt-5.6-terra` | `grok-4.3`, `grok-4.20-0309-non-reasoning`, `grok-4.5` |
+| `opus` | `opus` | `gpt-5.6-sol`, `gpt-6-astra` | `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-4.6` |
+
+No model currently appears under more than one class. If a future edit places a model in multiple
+classes, add a short paragraph here naming the model, listing every class it appears under in the
+JSON, and stating which class `modelToClass` resolves it to and why. The Vitest test in
+`.github/scripts/test/model-classes.test.ts` (check 3) enforces that dual-class models are named
+in this section.
+
 ## Cross-Vendor Cost Analysis
 
 ### Sources and assumptions
