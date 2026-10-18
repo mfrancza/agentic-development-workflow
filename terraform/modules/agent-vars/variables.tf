@@ -42,6 +42,12 @@ variable "auto_trigger_agents" {
   }
 }
 
+variable "design_default_model" {
+  description = "Design-agent default model, stored as the DESIGN_DEFAULT_MODEL Actions variable. When non-empty, the agent-design workflow uses this value in place of DEFAULT_MODEL, giving the design stage its own model preference without affecting other agent types. Leave empty (the default) to fall back to DEFAULT_MODEL — the existing behavior is preserved for any repo that omits this variable."
+  type        = string
+  default     = ""
+}
+
 variable "reviewer_models" {
   description = "Ordered list of model identifiers to try when the multi-reviewer feature selects a reviewer. Each entry is a model name accepted by the agent --model flag (e.g. \"sonnet\", \"claude-sonnet-4-5\", \"gpt-5.6-sol\"). Stored as a JSON-encoded repository Actions variable REVIEWER_MODELS so the resolve-reviewer-set action can iterate the list without hardcoding model names in YAML. Defaults to [] (empty — multi-reviewer is disabled)."
   type        = list(string)

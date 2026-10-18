@@ -23,6 +23,11 @@ output "auto_trigger_agents_variable_name" {
   value       = github_actions_variable.auto_trigger_agents.variable_name
 }
 
+output "design_default_model_variable_name" {
+  description = "Name of the DESIGN_DEFAULT_MODEL Actions variable."
+  value       = github_actions_variable.design_default_model.variable_name
+}
+
 output "reviewer_models_variable_name" {
   description = "Name of the REVIEWER_MODELS Actions variable."
   value       = github_actions_variable.reviewer_models.variable_name

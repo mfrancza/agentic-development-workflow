@@ -71,6 +71,7 @@ module "agent_vars" {
   repository           = github_repository.this.name
   agent_allowlist      = var.agent_allowlist
   default_model        = var.default_model
+  design_default_model = var.design_default_model
   admin_assignees      = var.admin_assignees
   code_reviewers       = var.code_reviewers
   auto_trigger_agents  = var.auto_trigger_agents

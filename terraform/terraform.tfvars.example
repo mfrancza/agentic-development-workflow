@@ -10,6 +10,14 @@ agent_allowlist = [
 ]
 default_model = "sonnet"
 
+# Design-agent default model. When set, agent-design workflows use this value
+# instead of DEFAULT_MODEL, letting you give the design stage a different model
+# tier from the rest of the SDLC (e.g. a more capable model for planning-heavy
+# work) without changing other agent types. Leave unset (empty string "") to fall
+# back to DEFAULT_MODEL — the existing behavior is preserved by default.
+# Stored as the DESIGN_DEFAULT_MODEL Actions variable.
+# design_default_model = "opus"
+
 # Humans to assign to issues and PRs when the agent applies the human-required
 # label (e.g. escalations requiring security, billing, or permission decisions).
 # Stored as ADMIN_ASSIGNEES Actions variable; workflows parse it with fromJSON().

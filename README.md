@@ -167,6 +167,9 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #   agent_allowlist      — GitHub usernames and agent bot identities (e.g.
 #                          myfork-developer-agent[bot]) permitted to trigger workflows
 #   default_model        — repo-wide default model (e.g. "sonnet")
+#   design_default_model — (optional) design-agent default model; when set,
+#                          agent-design prefers this over default_model; omit or
+#                          set to "" to fall back to default_model (the default)
 #   auto_trigger_agents  — per-stage auto-trigger switches (all false by default;
 #                          set a key to true to auto-apply that stage's agent:* label)
 #   admin_assignees      — (optional) list of GitHub usernames assigned by the groom
