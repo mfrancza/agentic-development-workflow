@@ -6,6 +6,7 @@ Manages the GitHub Actions repository variables that configure agentic workflow 
 |----------|------|---------|
 | `AGENT_ALLOWLIST` | JSON array | Usernames/bot identities permitted to trigger agent workflows. Workflow `if` conditions use `fromJSON(vars.AGENT_ALLOWLIST)`. |
 | `DEFAULT_MODEL` | string | Repo-wide default model for all agent containers. Issue-driven workflows can override per-issue via `model:*` labels. |
+| `DESIGN_DEFAULT_MODEL` | string | Design-agent default model. When non-empty, `agent-design` workflows prefer this value over `DEFAULT_MODEL`. Empty string (the default) means "not configured — fall through to `DEFAULT_MODEL`"; the caller stub uses `vars.DESIGN_DEFAULT_MODEL \|\| vars.DEFAULT_MODEL` so the fallback is transparent. |
 | `ADMIN_ASSIGNEES` | JSON array | Usernames assigned to issues/PRs when the agent applies `human-required` and needs a human in the loop. |
 | `CODE_REVIEWERS` | JSON array | Usernames requested as PR reviewers when the agent opens a PR and wants human sign-off. |
 | `AUTO_TRIGGER_AGENTS` | JSON object | Per-stage gates (`groom`, `design`, `developer`, `review`) that auto-advance the SDLC pipeline without manual labeling. All default to `false` (opt-in). |
@@ -22,6 +23,7 @@ module "agent_vars" {
   repository          = github_repository.this.name
   agent_allowlist     = ["your-github-username", "<developer-agent-app-slug>[bot]"]
   default_model       = "sonnet"
+  # design_default_model = "opus"  # omit or leave "" to fall back to default_model
   admin_assignees     = ["your-github-username"]
   code_reviewers      = ["your-github-username"]
   auto_trigger_agents = {
@@ -49,6 +51,7 @@ module "agent_vars" {
   repository          = "<your-repo-name>"
   agent_allowlist     = ["your-github-username", "<developer-agent-app-slug>[bot]"]
   default_model       = "sonnet"
+  # design_default_model = "opus"  # omit or leave "" to fall back to default_model
   admin_assignees     = ["your-github-username"]
   code_reviewers      = ["your-github-username"]
   auto_trigger_agents = {
@@ -93,6 +96,7 @@ provider "github" {
 | `repository` | `string` | yes | — | Name of the GitHub repository to manage Actions variables for. |
 | `agent_allowlist` | `list(string)` | yes | — | Usernames/bot identities permitted to trigger agent workflows. |
 | `default_model` | `string` | no | `"sonnet"` | Repo-wide default model for agent containers. |
+| `design_default_model` | `string` | no | `""` | Design-agent default model. When non-empty, `agent-design` uses this instead of `default_model`. Empty (the default) falls through to `default_model`. |
 | `admin_assignees` | `list(string)` | no | `[]` | Usernames to assign to escalation issues/PRs. |
 | `code_reviewers` | `list(string)` | no | `[]` | Usernames to request as PR reviewers. |
 | `auto_trigger_agents` | `object({groom,design,developer,review: bool})` | no | all `false` | Per-stage auto-trigger gates. |
@@ -105,6 +109,7 @@ provider "github" {
 |------|------|-------------|
 | `agent_allowlist_variable_name` | `string` | Name of the `AGENT_ALLOWLIST` Actions variable (`"AGENT_ALLOWLIST"`). |
 | `default_model_variable_name` | `string` | Name of the `DEFAULT_MODEL` Actions variable (`"DEFAULT_MODEL"`). |
+| `design_default_model_variable_name` | `string` | Name of the `DESIGN_DEFAULT_MODEL` Actions variable (`"DESIGN_DEFAULT_MODEL"`). |
 | `admin_assignees_variable_name` | `string` | Name of the `ADMIN_ASSIGNEES` Actions variable (`"ADMIN_ASSIGNEES"`). |
 | `code_reviewers_variable_name` | `string` | Name of the `CODE_REVIEWERS` Actions variable (`"CODE_REVIEWERS"`). |
 | `auto_trigger_agents_variable_name` | `string` | Name of the `AUTO_TRIGGER_AGENTS` Actions variable (`"AUTO_TRIGGER_AGENTS"`). |
@@ -113,6 +118,7 @@ provider "github" {
 
 ## Notes
 
+- `DESIGN_DEFAULT_MODEL` defaults to `""` (empty string). The caller stub expresses the fallback as `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL` — when empty, GitHub Actions evaluates the empty string as falsy and falls through to `DEFAULT_MODEL`, preserving existing behavior for repos that have not set this variable. Set it to any model identifier accepted by the agent `--model` flag to give the design stage its own model tier.
 - `AUTO_TRIGGER_AGENTS` must never be absent from the repository — the workflow guard `vars.AUTO_TRIGGER_AGENTS != ''` prevents `fromJSON('')` from throwing a runtime error. All gates default to `false` so behavior is unchanged unless you opt in.
 - `REVIEWER_MODELS` defaults to `[]` (JSON-encoded empty array). Workflows guard with `vars.REVIEWER_MODELS != ''` before calling `fromJSON` — an absent variable evaluates to `''` and `fromJSON('')` would throw a runtime error; the guard fails closed (multi-reviewer disabled) instead. An empty list (`[]`) is the canonical signal that multi-reviewer is disabled.
 - Include the developer-agent and reviewer-agent bot identities (e.g. `mfrancza-developer-agent[bot]`) in `agent_allowlist` so that agents can apply `agent:*` labels to route work to one another.

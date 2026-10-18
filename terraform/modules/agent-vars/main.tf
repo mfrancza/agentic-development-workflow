@@ -60,6 +60,19 @@ resource "github_actions_variable" "auto_trigger_agents" {
   value         = jsonencode(var.auto_trigger_agents)
 }
 
+# Expose the design-agent default model as a repository Actions variable so
+# agent-design workflows can prefer it over DEFAULT_MODEL for the design stage.
+# An empty value (the default) means "not configured — fall through to
+# DEFAULT_MODEL"; the caller stub expresses this as
+# `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL`, which evaluates to
+# DEFAULT_MODEL when DESIGN_DEFAULT_MODEL is empty, preserving existing behavior
+# for any repo that has not yet set this variable.
+resource "github_actions_variable" "design_default_model" {
+  repository    = var.repository
+  variable_name = "DESIGN_DEFAULT_MODEL"
+  value         = var.design_default_model
+}
+
 # Expose the reviewer models list as a JSON-encoded repository Actions variable
 # so the resolve-reviewer-set action can iterate the ordered list of model
 # identifiers to try when the multi-reviewer feature selects a reviewer.

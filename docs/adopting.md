@@ -671,7 +671,7 @@ Two cooperating jobs in one reusable, activated by separate boolean flags:
 - GitHub App: **developer-agent**.
 - Secrets: `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`. `ANTHROPIC_API_KEY`,
   `OPENAI_API_KEY`, `XAI_API_KEY` are required only for the `design` job.
-- Actions variables: `AGENT_ALLOWLIST`, `DEFAULT_MODEL`.
+- Actions variables: `AGENT_ALLOWLIST`, `DEFAULT_MODEL`. Optional: `DESIGN_DEFAULT_MODEL` (when set, the design workflow prefers it over `DEFAULT_MODEL`; leave unset or empty to inherit `DEFAULT_MODEL`).
 - Labels: all labels from the `labels` module.
 
 **Caller stub.**
@@ -703,7 +703,7 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       repo: ${{ github.repository }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
-      default-model: ${{ vars.DEFAULT_MODEL }}
+      default-model: ${{ vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
       logs-retention-days: 30
       helpers-ref: v0
     secrets:
