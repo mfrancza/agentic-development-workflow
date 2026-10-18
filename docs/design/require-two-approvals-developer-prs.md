@@ -166,7 +166,7 @@ variable "require_two_developer_approvals_check_generation" {
 }
 
 variable "require_two_developer_approvals_reconcile_minutes" {
-  description = "Scheduled interval, in minutes, for the Decision 8a pending-replacement safety-net sweep (`require-two-developer-approvals-reconcile.yml`). Exposed as the REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES Actions variable; sets the maximum staleness window for a shared-SHA block after the blocking dev-agent PR has moved on and the per-event cleanup was dropped by Actions concurrency pending-run replacement. Smaller values react faster but burn more Actions minutes. Defaults to 10. The workflow's cron expression is itself a build-time literal (GitHub Actions does not evaluate `${{ vars.X }}` inside `on.schedule.cron`), so this variable controls the activity's own early-exit guard — a run that fires before `minutes` minutes have elapsed since the last sweep completed exits early."
+  description = "Minimum interval, in minutes, between sweeps of the Decision 8a pending-replacement safety-net workflow (`require-two-developer-approvals-reconcile.yml`). Exposed as the REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES Actions variable; sets the maximum staleness window for a shared-SHA block after the blocking dev-agent PR has moved on and the per-event cleanup was dropped by Actions concurrency pending-run replacement. Smaller values react faster but burn more Actions minutes. Defaults to 10, with a floor of 1 (the cron fires every minute). Implementation note: because `on.schedule.cron` is a build-time literal (GitHub Actions does not evaluate `${{ vars.X }}` inside it), the workflow commits to `cron: \"* * * * *\"` so every value of this variable from 1 upward is a real reduction in sweep latency. The activity's own early-exit guard queries this workflow's own recent completed runs via `GET /repos/{owner}/{repo}/actions/workflows/require-two-developer-approvals-reconcile.yml/runs?status=success&per_page=10`, excludes the current run by `GITHUB_RUN_ID`, and exits early when the most recent successful prior run completed less than `minutes` minutes ago. Values smaller than 1 are not useful; values up to any arbitrary ceiling are supported with no code change."
   type        = number
   default     = 10
 }
@@ -369,6 +369,23 @@ on:
 
 ```yaml
 # require-two-developer-approvals-notify.yml (untrusted; empty on purpose)
+#
+# IMPORTANT: `name:` is required here. GitHub's `on.workflow_run.workflows`
+# filter matches the workflow's `name:` field; when `name:` is omitted,
+# GitHub derives the workflow name from the relative path
+# (`.github/workflows/require-two-developer-approvals-notify.yml`), which
+# does NOT match the filename stem the publisher's filter uses. Without
+# an explicit `name:` matching the filter string in the publisher sketch
+# above (`workflows: ["require-two-developer-approvals-notify"]`), review
+# `submitted` / `edited` / `dismissed` events would never start the
+# publisher; a developer-agent PR would get the initial `failure` on
+# `opened` and then stay failed forever even after two qualifying
+# approvals landed. This repo already relies on the same discipline:
+# `ci.yml` sets `name: CI` so `agent-fix-checks.yml` can filter
+# `workflows: ["CI"]`. The publisher's filter string and this `name:`
+# MUST stay in lockstep.
+name: require-two-developer-approvals-notify
+
 on:
   pull_request_review:
     types: [submitted, edited, dismissed]
@@ -608,6 +625,30 @@ The computation is a TypeScript activity under `.github/scripts/src/`
 wrapped as a composite action under `.github/actions/` (per AGENTS.md
 § "Workflow Activity Conventions").
 
+The `workflow_run` leg of the publisher caller stub **also** carries
+the `agent-fix-checks.yml`-style null guard on its job `if:` so the
+reusable is never invoked with an empty `pr-number`:
+
+```yaml
+# publisher caller stub (workflow_run leg)
+jobs:
+  publish:
+    if: github.event.workflow_run.pull_requests[0] != null
+    uses: ./.github/workflows/require-two-developer-approvals-publisher-reusable.yml
+    with:
+      pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
+      event-head-sha: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
+      helpers-ref: ${{ github.sha }}
+```
+
+`workflow_run.pull_requests` is empty when GitHub cannot associate the
+triggering run with a PR — the documented case is fork-headed PRs — so
+without this guard the reusable would be invoked with an empty
+`pr-number` input and fail inside the activity. The pair of (null `if:`
+guard, `|| github.event.workflow_run.id` fallback in the concurrency
+key) is copied verbatim from `agent-fix-checks.yml` so adopters have a
+single reference implementation to follow.
+
 **Alternatives considered.**
 
 | Alternative | Reason rejected |
@@ -844,8 +885,27 @@ concurrency:
   cancel-in-progress: false
 
 # publisher (workflow_run leg)
+#
+# `github.event.workflow_run.pull_requests` is EMPTY when GitHub cannot
+# associate the triggering run with a PR — the documented case is
+# fork-headed PRs (GitHub Docs, "Events that trigger workflows >
+# workflow_run"), where `pull_requests` is omitted entirely. Without a
+# fallback the group key collapses to `require-two-developer-approvals-pr-`
+# for every fork-headed trigger, serializing unrelated events across all
+# fork PRs. `agent-fix-checks.yml` already uses the correct shape — this
+# sketch must copy both the `|| github.event.workflow_run.id` fallback in
+# the group key AND the null guard on the job's `if:` condition so the
+# reusable isn't invoked with an empty `pr-number`:
+#
+#     if: github.event.workflow_run.pull_requests[0] != null
+#
+# `[0]` is also only sufficient as a concurrency-key hint / starting
+# point: Decision 8a already re-resolves the full candidate PR set from
+# the live head SHA via `GET /commits/{sha}/pulls`, so a case where two
+# PRs share a head SHA is handled correctly in the activity even though
+# `workflow_run.pull_requests[0]` only names one of them.
 concurrency:
-  group: require-two-developer-approvals-pr-${{ github.event.workflow_run.pull_requests[0].number }}
+  group: require-two-developer-approvals-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
   cancel-in-progress: false
 ```
 
@@ -1081,10 +1141,27 @@ To make reconciliation survive this (and the equivalent case where
 the design adds a **periodic reconciliation sweep workflow**
 `require-two-developer-approvals-reconcile.yml`:
 
-- Triggered by `schedule: cron: "*/10 * * * *"` (every 10 minutes;
+- Triggered by `schedule: cron: "* * * * *"` (every minute — a
+  build-time literal because `on.schedule.cron` does not evaluate
+  `${{ vars.X }}`), **and** by `workflow_dispatch` for operator-
+  initiated reconciliation. The sweep's effective interval is
   tunable via a Terraform-managed Actions variable
-  `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES`), **and** by
-  `workflow_dispatch` for operator-initiated reconciliation.
+  `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES` (default
+  10 minutes) consumed by the activity's own early-exit guard:
+  before doing any work, the activity calls
+  `GET /repos/{owner}/{repo}/actions/workflows/require-two-developer-approvals-reconcile.yml/runs?status=success&per_page=10`,
+  excludes the current run (identified by `GITHUB_RUN_ID`), and
+  exits 0 immediately when the most recent prior successful run
+  completed less than `minutes` ago. The committed `* * * * *` cron
+  guarantees that smaller `minutes` values are a real reduction in
+  sweep latency (down to a floor of 1 minute); larger values are
+  honoured because the surplus cron fires early-exit cheaply.
+  Choosing a per-minute cron with early-exit — rather than
+  committing a specific `*/N * * * *` literal and treating the
+  variable as a no-op below the committed N — is intentional: the
+  reviewer correctly pointed out that under a committed `*/10 * * * *`,
+  values below 10 would be silently ignored and the "smaller values
+  react faster" promise would be false.
 - Takes its own repository-wide concurrency group
   `require-two-developer-approvals-reconcile` with
   `cancel-in-progress: false`, so it does not share concurrency
@@ -1108,11 +1185,12 @@ inline per-event departing-SHA cleanup still runs on every
 non-replaced `synchronize` and `closed` event and provides sub-minute
 reconciliation in the common case. The sweep's role is purely to
 upper-bound reconciliation latency at the sweep interval when the
-inline path was dropped. The sweep interval therefore directly sets
-the maximum staleness window for a shared-SHA block after the
-blocking dev-agent PR has moved on; 10 minutes is a conservative
-default and adopters can lower it (at the cost of more Actions
-minutes) via the variable above.
+inline path was dropped. The effective sweep interval
+(`REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES`, floor 1,
+default 10) therefore directly sets the maximum staleness window
+for a shared-SHA block after the blocking dev-agent PR has moved
+on; adopters can lower it (at the cost of more Actions minutes
+spent on early-exit-no-op runs) by reducing the variable toward 1.
 
 Alternatives for the pending-replacement fix — dispatching a
 dedicated per-SHA cleanup workflow from inside the triggering
@@ -1166,6 +1244,7 @@ rejected in the Alternatives table below with their reasons.
 | Dispatch a dedicated per-SHA cleanup workflow from inside the triggering publisher run (via `gh workflow run` with the departing SHA) and let it run with its own repository-wide concurrency key | Does not survive the specific pending-replacement scenario the reviewer identified: if the triggering publisher run B is itself replaced in the pending queue by a later notifier-driven run C, B never starts and therefore never calls `gh workflow run` for the cleanup. The dispatch is only as reliable as the triggering run's own lifecycle, which Decision 8 already documents as subject to replacement. The scheduled sweep in the Decision above is independent of any single triggering run's lifecycle. |
 | Widen the per-PR concurrency pending queue (e.g. by partitioning the concurrency group so synchronize and workflow_run do not share a queue) | GitHub Actions `concurrency.group` keys serialize all matching runs regardless of trigger, and splitting across groups re-opens the Decision 8 race (two publishers for the same PR writing non-monotonically). The sweep is a safer invariant layer that does not touch the per-PR serialization boundary. |
 | Rely on an external scheduler (cron on a VM, a GitHub App worker, etc.) | Introduces new infrastructure. A scheduled Actions workflow is already available, costs no extra permissions, and the sweep's work is bounded by the number of open PRs — the same scope as the existing backfill workflow. |
+| Commit the sweep cron to a specific `*/N * * * *` literal (e.g. `*/10 * * * *`) and treat the `_RECONCILE_MINUTES` variable as a tunable floor below that interval | Would make `_RECONCILE_MINUTES` values **smaller** than `N` silently no-op: the variable's "smaller values react faster" promise would be false below `N`. The reviewer correctly flagged this as a contract mismatch between the variable description, Decision 8a's "adopters can lower it", and the fact that `on.schedule.cron` is a build-time literal that cannot read `${{ vars.X }}`. Committing to `cron: "* * * * *"` + an activity-side early-exit guard (specified in Decision 8a) is the only shape where every value of the variable from 1 upward is a real interval. The surplus cron fires are cheap because the early-exit returns immediately. |
 
 Decision 9 items 10–12 cover the three same-SHA acceptance cases.
 
@@ -1417,8 +1496,9 @@ AGENTS.md § "Keeping Documentation Current"):
   the one-shot `require-two-developer-approvals-backfill.yml`
   workflow, the periodic
   `require-two-developer-approvals-reconcile.yml` sweep workflow
-  (default interval: 10 minutes, tunable via
-  `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES`) and the fact
+  (committed `cron: "* * * * *"` + activity-side early-exit guard
+  reading `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES`;
+  default 10 minutes, floor 1) and the fact
   that the sweep is a safety net for pending-run replacement rather
   than the primary mechanism — i.e. the maximum staleness window
   for a shared-SHA block after the blocking dev-agent PR has moved
@@ -1567,7 +1647,7 @@ AGENTS.md § "Keeping Documentation Current"):
 |-------|------|-----------|
 | [#661](https://github.com/mfrancza/agentic-development-workflow/issues/661) | Terraform: add `developer_bot_login`, `require_two_developer_approvals`, `require_two_developer_approvals_check_generation`, and `require_two_developer_approvals_reconcile_minutes` top-level variables; wire through `terraform/main.tf` to the `agent-vars` module (which exposes them as `DEVELOPER_BOT_LOGIN`, `REQUIRE_TWO_DEVELOPER_APPROVALS`, `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`, and `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES` Actions variables) and to the `branch-protection` module. Extend `branch-protection` with the four new inputs (`require_two_developer_approvals`, `require_two_developer_approvals_check_context` defaulting to `null` and composed via the locals in Decision 3, `require_two_developer_approvals_check_integration_id` defaulted to 15368, and `require_two_developer_approvals_check_generation` defaulted to 1) and the dynamic `required_status_checks` block in the ruleset. Document the admin-bypass caveat, the generation-counter semantics, the shared-SHA cross-PR note, the modified-notifier residual risk, the reconcile-sweep interval trade-off, and the two-step enable/disable + backfill procedure in both module READMEs and `terraform.tfvars.example`. | — |
 | [#662](https://github.com/mfrancza/agentic-development-workflow/issues/662) | TypeScript activity + composite action: implement `.github/scripts/src/check-two-developer-approvals.ts` and `.github/actions/check-two-developer-approvals/action.yml`. Activity reads inputs `developer-bot-login`, `require-two-developer-approvals`, `check-generation`, `pr-number`, `pr-author`, `event-head-sha`, `event-name`, `event-before-sha`, `repo`; fetches the PR and reviews via Octokit **inside** the serialization boundary (Decision 8), resolves all open PRs that share `liveHeadSha` and applies the strictest-wins intersection from Decision 8a, groups latest-per-reviewer per PR, counts qualifying approvals, and publishes the check conclusion via the Checks API against `liveHeadSha` under context `require-two-developer-approvals-g${generation}` (enforcing) or `require-two-developer-approvals-g${generation} (preview)` (opt-in off, per Decision 7). Always publishes against `liveHeadSha` even when it disagrees with the event SHA (Decision 8). On `pull_request_target: synchronize` and `pull_request_target: closed`, also runs the Decision 8a departed-SHA reconciliation against the departing SHA (`event-before-sha` for synchronize; `event-head-sha` of the closed PR for closed) and republishes the intersected check-run on that SHA under the per-SHA concurrency lock. Honours the draft-handling contract: skips the main path on draft PRs except when the triggering event is `ready_for_review`. Fails loudly per Decision 7. Unit tests cover the full matrix in Decision 9 that is unit-testable (counting, self-exclusion, DISMISSED, opt-in-off → preview context only, opt-in-on + empty login → `::error::` + failure, event-SHA ≠ live-SHA → publishes against live SHA, two-PR same-SHA strictest-wins intersection, departed-SHA reconciliation on closure and on synchronize, draft-to-ready reconciliation with unchanged head). | — |
-| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add `require-two-developer-approvals-publisher.yml` (caller stub, triggered by `pull_request_target: [opened, reopened, synchronize, edited, ready_for_review, closed]` and `workflow_run`), `require-two-developer-approvals-notify.yml` (empty, zero-permission `pull_request_review` trigger), and the paired reusable with the four-step helper-checkout bootstrap. Also add `require-two-developer-approvals-backfill.yml` (`workflow_dispatch` only) that fans out across open PRs for the Decision 7 opt-in reconciliation, **and** `require-two-developer-approvals-reconcile.yml` (triggered by `schedule: cron: "*/10 * * * *"` and `workflow_dispatch`) that is the Decision 8a pending-replacement safety net; the reconcile workflow enumerates all open PRs, deduplicates to unique live head SHAs, and runs the Decision 8a strictest-wins intersection once per SHA under its own repository-wide concurrency group `require-two-developer-approvals-reconcile` with `cancel-in-progress: false`. The scheduled interval is derived from `vars.REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES` where feasible, with a committed default of 10 minutes. All publisher/notifier/backfill stubs set the per-PR concurrency group with `cancel-in-progress: false` per Decision 8, and the publisher additionally takes a secondary per-head-SHA concurrency group per Decision 8a (both for the live-head publication and for the departed-SHA reconciliation sibling job, each in its own job because Actions supports one `concurrency` block per job). The publisher's departed-SHA sibling job must restrict its no-op condition to the case where the triggering PR is **still open** at `liveHeadSha` so that `pull_request_target: closed` with an unchanged head still reconciles. Publisher stubs read `vars.DEVELOPER_BOT_LOGIN`, `vars.REQUIRE_TWO_DEVELOPER_APPROVALS`, and `vars.REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION` and pass them to the reusable, which invokes the composite action from Issue #662. Publisher stubs pass `event-name` and `event-before-sha` (populated from `github.event.before` on `synchronize`; from `github.event.pull_request.head.sha` on `closed`) so the activity can run the departed-SHA reconciliation. Publisher stubs select the trusted `helpers-ref: ${{ github.sha }}` per Decision 5 on both legs (base-branch HEAD under both `pull_request_target` and `workflow_run`). | Issue #662 |
+| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add `require-two-developer-approvals-publisher.yml` (caller stub, triggered by `pull_request_target: [opened, reopened, synchronize, edited, ready_for_review, closed]` and `workflow_run`), `require-two-developer-approvals-notify.yml` (empty, zero-permission `pull_request_review` trigger; **MUST set `name: require-two-developer-approvals-notify`** so the publisher's `workflow_run.workflows:` filter matches — see Decision 5), and the paired reusable with the four-step helper-checkout bootstrap. Also add `require-two-developer-approvals-backfill.yml` (`workflow_dispatch` only) that fans out across open PRs for the Decision 7 opt-in reconciliation, **and** `require-two-developer-approvals-reconcile.yml` (triggered by `schedule: cron: "* * * * *"` — a build-time literal — and `workflow_dispatch`) that is the Decision 8a pending-replacement safety net; the reconcile workflow enumerates all open PRs, deduplicates to unique live head SHAs, and runs the Decision 8a strictest-wins intersection once per SHA under its own repository-wide concurrency group `require-two-developer-approvals-reconcile` with `cancel-in-progress: false`. The effective sweep interval is enforced by the activity's own early-exit guard reading `vars.REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES` and querying `GET /actions/workflows/require-two-developer-approvals-reconcile.yml/runs?status=success&per_page=10` (excluding `GITHUB_RUN_ID`): if the most recent prior successful run completed less than `minutes` minutes ago, the activity exits 0. The default is 10 minutes with a floor of 1; this contract — per-minute cron + early-exit guard — is deliberate so smaller values are a real reduction in sweep latency, which `cron: "*/10 * * * *"` could not provide. All publisher/notifier/backfill stubs set the per-PR concurrency group with `cancel-in-progress: false` per Decision 8, and the publisher additionally takes a secondary per-head-SHA concurrency group per Decision 8a (both for the live-head publication and for the departed-SHA reconciliation sibling job, each in its own job because Actions supports one `concurrency` block per job). The publisher's `workflow_run` leg caller stub MUST copy both the `|| github.event.workflow_run.id` fallback in the concurrency group key AND the `if: github.event.workflow_run.pull_requests[0] != null` guard on the job from `agent-fix-checks.yml` so fork-headed trigger runs (where `workflow_run.pull_requests` is empty) do not collapse the group key or invoke the reusable with an empty `pr-number`. The publisher's departed-SHA sibling job must restrict its no-op condition to the case where the triggering PR is **still open** at `liveHeadSha` so that `pull_request_target: closed` with an unchanged head still reconciles. Publisher stubs read `vars.DEVELOPER_BOT_LOGIN`, `vars.REQUIRE_TWO_DEVELOPER_APPROVALS`, and `vars.REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION` and pass them to the reusable, which invokes the composite action from Issue #662. Publisher stubs pass `event-name` and `event-before-sha` (populated from `github.event.before` on `synchronize`; from `github.event.pull_request.head.sha` on `closed`) so the activity can run the departed-SHA reconciliation. Publisher stubs select the trusted `helpers-ref: ${{ github.sha }}` per Decision 5 on both legs (base-branch HEAD under both `pull_request_target` and `workflow_run`). | Issue #662 |
 | [#664](https://github.com/mfrancza/agentic-development-workflow/issues/664) | Documentation: update `AGENTS.md` (new workflows in the Repository Layout note, new Actions variables in the doc-update checklist, branch-protection-immutability bullet, admin-bypass caveat cross-reference, honest modified-notifier degradation cross-reference) and `docs/adopting.md` (section for external adopters covering `developer_bot_login`, `require_two_developer_approvals_check_integration_id` override, the generation-counter bump requirement on re-enable, the shared-SHA cross-PR note, the departed-SHA reconciliation behaviour, the modified-notifier residual-risk discussion with the honest effective-gate-degradation statement, and the enable/disable + backfill procedure). | Issue #661, Issue #663 |
 | [#665](https://github.com/mfrancza/agentic-development-workflow/issues/665) | End-to-end validation: execute every acceptance test in Decision 9 against a scratch repository configured per the Decision 10 docs, including the fork-PR publication case, the extended trust-anchor "PR modifies the gate" case (publisher + reusable + composite action + activity + notifier + spoof-publisher workflow all in one PR) with the honest 3a/3b assertions (authoritative-publisher correctness and the one-approval-under-attack effective-gate-degradation case), the integration_id binding case, the stale-event replacement (three-run interleaving) case, the OFF → ON → OFF → ON cycle with dismissal while OFF, the three same-SHA cross-PR cases, the draft-to-ready reconciliation case, the departed-SHA reconciliation on close with the unchanged-head sub-case that specifically triggers the Decision 8a `liveHeadSha == departingSha` guard, the departed-SHA reconciliation on synchronize, **and** the pending-run replacement sweep test (Decision 9 item 16) which must assert the sweep workflow reconciles a shared-SHA block within its interval when the per-event cleanup was dropped. Also exercise the misconfiguration path (opt-in on + empty login). | Issues #661, #662, #663, #664 |
 
