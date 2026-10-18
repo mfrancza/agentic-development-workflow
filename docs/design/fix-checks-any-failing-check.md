@@ -310,7 +310,9 @@ jobs:
       proceed:   ${{ steps.resolve.outputs.proceed }}
       head_sha:  ${{ steps.resolve.outputs.head_sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
       - id: resolve
         uses: ./.github/actions/resolve-check-pr
         with:
@@ -382,29 +384,69 @@ sufficient** for requirement 3. Two real races remain:
    new HEAD have reported — so the queued run (triggered by a check
    failure on the *previous* HEAD) can enter the container, observe
    failing checks on the old HEAD, and launch an agent pass that
-   duplicates work the in-flight run already addressed.
+   duplicates work the in-flight run already addressed. The guard must
+   distinguish these *stale replacement* pending checks from *unrelated*
+   pending checks (checks that are pending for reasons unrelated to the
+   in-flight fix); otherwise exiting on any pending check creates a
+   lost-wakeup bug where an unrelated pending check later reporting
+   `success` strands the original failure (see the "lost-wakeup bug"
+   note below).
 
 **Guard.** `action_fix_checks()` grows a short preamble, run after
-`gh pr checkout` and before `run_agent`:
+`gh pr checkout` and before `run_agent`. The guard reads the ignore list
+from `FIX_CHECKS_IGNORE` (passed through to the container as an env var
+by the reusable workflow — a one-line plumbing addition) and the
+trigger-time HEAD SHA from `GITHUB_HEAD_SHA_AT_TRIGGER` (passed as an
+env var via the new `head-sha-at-trigger` reusable-workflow input), and
+distinguishes two classes of pending check so a pending-check completion
+cannot permanently discard the failure that triggered the run:
 
-- Enumerate current PR checks via `gh pr checks "$GITHUB_PR_NUMBER"
-  --json name,state,bucket --jq ...`.
-- If no checks are in a failing conclusion (`failure`, `timed_out`,
-  `action_required`), log the no-op and exit 0 without invoking the
-  agent and without pushing.
-- Honour the ignore list: a check whose name appears in
-  `FIX_CHECKS_IGNORE` (passed through to the container as an env var by
-  the reusable workflow — a one-line plumbing addition) does not count
-  as a failing check for the purposes of the guard.
-- If any check is still *pending* on the current HEAD, log and exit 0;
-  the next `check_run.completed` (or `workflow_run.completed`) will
-  re-trigger once the pending check reports. This closes the "pending
-  replacement check" race by refusing to act on partial information.
-- If the HEAD SHA observed inside the container no longer matches
-  `head-sha-at-trigger` (the SHA captured at trigger time and passed
-  into the reusable workflow as an input), and the current HEAD has no
-  failing checks, log and exit 0. The run was for an obsolete HEAD and
-  the in-flight run has already pushed; there is nothing left to fix.
+- **Snapshot.** Enumerate current PR checks via `gh pr checks
+  "$GITHUB_PR_NUMBER" --json name,state,bucket --jq ...`. Apply the
+  ignore list throughout: a check whose name appears in
+  `FIX_CHECKS_IGNORE` is excluded from both the failing-set and the
+  pending-set the guard considers.
+- **Pending-check classification by HEAD SHA.** Compare the container's
+  checked-out HEAD SHA to `GITHUB_HEAD_SHA_AT_TRIGGER`:
+  - **HEAD changed since trigger** → non-ignored pending checks are
+    *stale replacement* checks for the fix the in-flight run already
+    pushed. Perform a bounded wait (default 15 min, overridable via
+    `FIX_CHECKS_WAIT_SECONDS`) polling `gh pr checks` until every
+    non-ignored check is terminal **or** the timeout fires, then
+    re-evaluate.
+  - **HEAD unchanged since trigger** → non-ignored pending checks are
+    *unrelated* to the failure that triggered this run. Do **not** wait
+    on them: their own `check_run.completed` (or
+    `workflow_run.completed`) events are the valid re-triggers for a
+    future `agent-fix-checks` run on whatever conclusion they report.
+    Proceed to the final evaluation immediately so the failure that
+    triggered *this* run is addressed now.
+- **Final evaluation.** Re-run `gh pr checks` (post-wait if we waited)
+  and apply the ignore list:
+  - If any non-ignored check is in a failing conclusion (`failure`,
+    `timed_out`, `action_required`), fall through to `run_agent`.
+  - Otherwise, log the no-op and exit 0 without invoking the agent and
+    without pushing. On the HEAD-changed branch this means the
+    in-flight run's push resolved the failure; on the HEAD-unchanged
+    branch this means another run already handled it between the
+    trigger event and the lock acquisition.
+- **Stale-HEAD escape hatch.** If HEAD has changed since trigger and
+  the initial snapshot already shows no non-ignored failing *or*
+  pending checks, exit 0 without entering the polling loop. The run
+  was for an obsolete HEAD and the in-flight run has already pushed;
+  there is nothing left to fix.
+
+**Why the HEAD-based classification matters (lost-wakeup bug).** An
+earlier draft of this guard exited unconditionally whenever *any*
+pending check was observed. That created a lost-wakeup bug: if check A
+had just failed and check B was unrelatedly pending, the guard would
+exit; if B then reported `success`, Decision 3's `if:` rejects
+`success`, so no further `agent-fix-checks` event would fire for A, and
+A's failure would be permanently stranded. The HEAD-based split closes
+this: *unrelated* pending checks (HEAD unchanged) do not block the
+current run from addressing A, and *stale replacement* pending checks
+(HEAD changed) are the ones we actually need to wait for because they
+belong to the in-flight run's fix push.
 
 **Why in the entrypoint, not in the workflow.** The guard needs to run
 *after* the concurrency lock is acquired, inside the container, so it
@@ -419,9 +461,13 @@ it was premised on the (incorrect) belief that the native concurrency
 group was sufficient. The guard is the minimum change needed to actually
 achieve requirement 3; the agent *prompt* is still unchanged, and the
 contract that the agent fixes every failing check in one pass is
-preserved. The validation task includes an explicit burst scenario
+preserved. Validation (Issue #659) includes an explicit burst scenario
 (two checks fail in close succession on the same PR) and asserts that
-only one agent pass runs — not one in-flight plus one queued no-op.
+only one agent pass runs — not one in-flight plus one queued no-op —
+plus a pending-check-succeeds regression scenario covering both HEAD
+classifications (unrelated pending with HEAD unchanged, stale
+replacement pending with HEAD changed) so the lost-wakeup path cannot
+regress silently.
 
 **Alternatives considered.**
 
@@ -429,6 +475,7 @@ only one agent pass runs — not one in-flight plus one queued no-op.
 |-------------|-----------------|
 | `cancel-in-progress: true` | Cancels an in-flight fix pass when a second check fails, risking a partial write to the branch. The agent's work is cheap to re-run but non-trivial to abort cleanly; preferring queued runs over cancelled runs is strictly safer. |
 | Rely on concurrency alone (prior draft) | Does not address the already-fixed-failures or pending-replacement-check races — the queued run still invokes the agent against stale or absent failures and may push against the same HEAD twice. |
+| Exit 0 on **any** pending check (earlier guard draft) | Creates the lost-wakeup bug described above: an unrelated pending check that later reports `success` is rejected by the Decision 3 `if:`, stranding the real failure. The HEAD-based classification above distinguishes stale replacement (wait) from unrelated pending (don't wait). |
 | A persistent "we already queued a run" ledger | Stateful cross-run persistence in a stateless workflow; the in-container guard already short-circuits duplicate work without a datastore. |
 | Debounce window (e.g. "wait 60s before firing") | Adds latency to the user-visible feedback loop and would still miss checks that complete after the debounce; the guard addresses the root cause instead. |
 
@@ -510,9 +557,9 @@ permission grants.
 |-------|------|-----------|
 | [#656](https://github.com/mfrancza/agentic-development-workflow/issues/656) | Terraform: add `fix_checks_ignore` variable (`list(string)`, default `[]`), expose as `FIX_CHECKS_IGNORE` Actions variable via `github_actions_variable` in `terraform/modules/agent-vars/`, update `terraform.tfvars.example` with a documented example entry, extend `AGENTS.md`'s Terraform Actions-variable list to reference the new var | — |
 | [#657](https://github.com/mfrancza/agentic-development-workflow/issues/657) | `resolve-check-pr` TypeScript activity + composite action: `.github/scripts/src/resolve-check-pr.ts` accepts `event_name` and branches between `check_run` and `workflow_run` payload shapes (both resolve via `pull_requests[0]` first, then `listPullRequestsAssociatedWithCommit(head_sha)`); outputs `pr_number`, `head_sha`, and `proceed`; `.github/actions/resolve-check-pr/action.yml` thin wrapper; vitest tests under `.github/scripts/test/` covering both event types and the fallback paths; follows the composite-action portability pattern (`${{ github.action_path }}/../../scripts`, Resolve-scripts-directory step) | — |
-| [#658](https://github.com/mfrancza/agentic-development-workflow/issues/658) | Caller stub + reusable workflow rewiring using a **hybrid** trigger: `.github/workflows/agent-fix-checks.yml` subscribes to **both** `workflow_run: [completed]` (preserving the existing same-repo Actions path — `workflows:` still enumerates the covered same-repo workflows) and `check_run: [completed]` (for cross-repo and third-party checks that the `check_run` recursion guard does not block); split the stub into a **resolve-pr job** that calls `resolve-check-pr` and publishes `pr_number`/`head_sha`/`proceed` as job outputs, plus a dependent **fix-checks job** that calls the reusable with `needs: resolve-pr`, is gated on `needs.resolve-pr.outputs.proceed == 'true'`, and whose `concurrency.group` reads `needs.resolve-pr.outputs.pr_number` (no `check_run.id` fallback needed — events the resolver cannot map are skipped at the `if:`); add the conclusion-whitelist + `FIX_CHECKS_IGNORE` filter on the resolver job's `if:` with the conclusion comparisons parenthesised as a group before the `&&` with the ignore-list check (see Decision 3); extend the reusable workflow to accept `head-sha-at-trigger` and plumb `FIX_CHECKS_IGNORE` through to the container as an env var; update `AGENTS.md` MVP Workflow step 4 and `README.md` as needed to describe the hybrid trigger and the ignore-list variable | Issue #656, Issue #657 |
-| [#660-guard](https://github.com/mfrancza/agentic-development-workflow/issues/) *(new sub-issue to be filed)* | Entrypoint freshness / duplicate-work guard in `action_fix_checks()` (`docker/scripts/entrypoint.sh`): after `gh pr checkout` and before `run_agent`, enumerate PR checks via `gh pr checks --json name,state,bucket`; if no non-ignored check is in a failing conclusion, exit 0; if any check is still pending, exit 0; if the container's HEAD SHA no longer matches `GITHUB_HEAD_SHA_AT_TRIGGER` and the current HEAD has no failing checks, exit 0. Read the ignore list from `FIX_CHECKS_IGNORE` env var (plumbed in by Issue #658). Include a bats-style or shellcheck-tested covering unit for the guard logic (extract to a helper function to keep the test tractable). | Issue #658 |
-| [#659](https://github.com/mfrancza/agentic-development-workflow/issues/659) | End-to-end validation on a disposable agent-authored PR, with **each origin exercised independently** (per the review feedback): (1) a failing same-repo workflow job *other than* a job in `CI` starts fix-checks via the `workflow_run` branch of the trigger; (2) a failing check reported by a workflow defined in another repository (e.g. a test organization ruleset) starts fix-checks via the `check_run` branch; (3) a synthesized third-party check (posted via the Checks API from a GitHub App that is **not** GitHub Actions) starts fix-checks via the `check_run` branch — exercised as its own case, not substituted for case (2); (4) adding each check's name to `FIX_CHECKS_IGNORE` suppresses the next run, with explicit cases for `failure`, `timed_out`, and `action_required` conclusions on the ignored name (to catch regressions of the Decision 3 `if:` grouping); (5) with two different non-ignored checks failing on the same PR in close succession, only one agent pass runs — the queued run exercises the Decision 4c freshness guard and exits 0 without invoking the agent; (6) a failing check on a human-authored PR does *not* start fix-checks | Issue #658, #660-guard |
+| [#658](https://github.com/mfrancza/agentic-development-workflow/issues/658) | Caller stub + reusable workflow rewiring using a **hybrid** trigger: `.github/workflows/agent-fix-checks.yml` subscribes to **both** `workflow_run: [completed]` (preserving the existing same-repo Actions path — `workflows:` still enumerates the covered same-repo workflows) and `check_run: [completed]` (for cross-repo and third-party checks that the `check_run` recursion guard does not block); split the stub into a **resolve-pr job** that calls `resolve-check-pr` and publishes `pr_number`/`head_sha`/`proceed` as job outputs, plus a dependent **fix-checks job** that calls the reusable with `needs: resolve-pr`, is gated on `needs.resolve-pr.outputs.proceed == 'true'`, and whose `concurrency.group` reads `needs.resolve-pr.outputs.pr_number` (no `check_run.id` fallback needed — events the resolver cannot map are skipped at the `if:`); add the conclusion-whitelist + `FIX_CHECKS_IGNORE` filter on the resolver job's `if:` with the conclusion comparisons parenthesised as a group before the `&&` with the ignore-list check (see Decision 3); extend the reusable workflow to accept `head-sha-at-trigger` and plumb `FIX_CHECKS_IGNORE` through to the container as an env var; the resolver job's `checkout` step uses the repo-standard pinned SHA (`actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0`) with `persist-credentials: false` (per `AGENTS.md`'s security defaults); update `AGENTS.md` MVP Workflow step 4 and `README.md` as needed to describe the hybrid trigger and the ignore-list variable | Issue #656, Issue #657 |
+| [#667](https://github.com/mfrancza/agentic-development-workflow/issues/667) | Entrypoint freshness / duplicate-work guard in `action_fix_checks()` (`docker/scripts/entrypoint.sh`): after `gh pr checkout` and before `run_agent`, enumerate PR checks via `gh pr checks --json name,state,bucket` (ignore-list applied throughout); classify non-ignored *pending* checks by comparing the container's HEAD SHA to `GITHUB_HEAD_SHA_AT_TRIGGER` — if HEAD **changed** since trigger, treat pending as *stale replacement* and bounded-wait (default 15 min, overridable via `FIX_CHECKS_WAIT_SECONDS`) for them to become terminal; if HEAD **unchanged**, treat pending as *unrelated* and do **not** wait (their own completion events are valid re-triggers). After the wait (or immediately on the HEAD-unchanged branch), if any non-ignored check is still failing (`failure`/`timed_out`/`action_required`), fall through to `run_agent`; otherwise exit 0. Stale-HEAD escape hatch: if HEAD changed and the initial snapshot already shows no non-ignored failing or pending checks, exit 0 without entering the wait. Read `FIX_CHECKS_IGNORE` and `GITHUB_HEAD_SHA_AT_TRIGGER` from env (plumbed in by Issue #658). Extract the guard into a helper function (e.g. `fix_checks_should_run`) and cover with bats-style/shellcheck-tested units. | Issue #658 |
+| [#659](https://github.com/mfrancza/agentic-development-workflow/issues/659) | End-to-end validation on a disposable agent-authored PR, with **each origin and each guard behaviour exercised independently** (per the review feedback): (1) a failing same-repo workflow job *other than* a job in `CI` starts fix-checks via the `workflow_run` branch of the trigger; (2) a failing check reported by a workflow defined in another repository (e.g. a test organization ruleset) starts fix-checks via the `check_run` branch; (3) a synthesized third-party check (posted via the Checks API from a GitHub App that is **not** GitHub Actions) starts fix-checks via the `check_run` branch — exercised as its own case, not substituted for case (2); (4)/(5)/(6) adding each check's name to `FIX_CHECKS_IGNORE` suppresses the next run, with explicit cases for `failure`, `timed_out`, and `action_required` conclusions on the ignored name (to catch regressions of the Decision 3 `if:` grouping); (7) with two different non-ignored checks failing on the same PR in close succession, only one agent pass runs — the queued run exercises the Decision 4c freshness guard and exits 0 without invoking the agent; (8) **pending-check-succeeds regression** — with HEAD unchanged, a failing check A + an unrelated pending check B must still fix A immediately (the guard does not wait); with HEAD changed by the in-flight fix push, a pending replacement check A' must trigger the bounded wait and the original failure must not be stranded even when A' later reports `success`; (9) a failing check on a human-authored PR does *not* start fix-checks | Issue #658, Issue #667 |
 
 Issues #656 and #657 are independent of each other — one defines the
 Actions variable contract (`FIX_CHECKS_IGNORE`, JSON array, default `[]`);
@@ -520,10 +567,18 @@ the other defines the composite action contract (inputs: `event_name`,
 `token`, `repository`; outputs: `proceed`, `pr_number`, `head_sha`).
 Issue #658 integrates both, wires the hybrid trigger, and restructures
 the stub into the resolver + reusable-call job pair. The entrypoint
-guard task (`#660-guard`) depends on Issue #658 only for the
+guard task (#667) depends on Issue #658 only for the
 `FIX_CHECKS_IGNORE` env-var plumbing and the `head-sha-at-trigger`
 input; the shell logic itself is independent. Issue #659 exercises the
-entire chain, with each check origin validated on its own case.
+entire chain end-to-end — with each check origin, each ignored
+conclusion, the burst-dedup scenario, and the pending-check-succeeds
+regression validated on its own case — and is blocked by all four
+implementation issues (#656, #657, #658, #667). The sub-issue bodies
+(#658, #659) have been resynchronised with the revised design (hybrid
+trigger, two-job stub, entrypoint plumbing, independent-origin
+validation, pending-succeeds regression) so the issue-driven
+implementation pipeline is consistent with this doc.
 
-Dependencies will be recorded natively as GitHub blocked-by
-relationships on the sub-issues.
+Dependencies are recorded natively on GitHub via the parent/sub-issue
+relationship on #627 (all five sub-issues are linked) and via the
+`Blocked by:` / `Blocks:` lists in each sub-issue body.
