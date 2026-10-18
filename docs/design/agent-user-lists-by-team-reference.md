@@ -20,7 +20,11 @@ resolution mechanism:
   sender login and fails the job (fail-closed) if the sender is not covered by
   any explicit login or any resolved team member. Caller `if:` expressions drop
   the `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` clause; only the
-  event/label/concurrency gates remain in the caller.
+  event/label/trust-model clauses remain in the caller. (The `concurrency:`
+  block **also** moves out of the caller — see Decision 1's "Concurrency
+  groups move inside the reusable, after the gate" subsection — because
+  keeping it on the caller would reintroduce the queued-run-displacement
+  bug this design is specifically designed to prevent.)
 - **`ADMIN_ASSIGNEES`** — issue assignees must be users. The grooming
   container's entrypoint expands team references to logins before invoking
   Claude, so the prompt still receives a flat list and the existing
@@ -199,11 +203,25 @@ Caller stubs lose both the `contains(fromJSON(vars.AGENT_ALLOWLIST),
 …)` clause **and** the `concurrency:` block (the concurrency group key
 is now hard-coded in the reusable, derived from the same input the
 caller already passes — issue number for the issue-triggered
-reusables, PR number for the PR-triggered reusables). The `work` job
-re-runs its own copy of detect-team-refs + conditional/nonfatal mint
-if the groom container needs the resolver token (per Decision 3's
-boundary 2), because minted-token outputs from the `authorize` job
-cannot cross a job boundary.
+reusables, PR number for the PR-triggered reusables). This removal
+applies to the block at **whichever YAML scope the caller currently
+uses** — most callers (`agent-groom.yml`, `agent-design.yml`,
+`agent-implement.yml`, `agent-review.yml`) carry a **job-level**
+`concurrency:` block, but `agent-respond-review.yml` carries a
+**workflow-level** `concurrency:` block (see `agent-respond-review.yml`
+lines 11–13: `group: agent-respond-review-pr-${{
+github.event.pull_request.number }}`, `cancel-in-progress: false`).
+A workflow-level block applies to **every job** the workflow starts,
+including the new `authorize` job, so leaving it in place would let
+unauthorized `pull_request_review` events occupy and displace
+`agent-respond-review-pr-<N>` before the gate denies — the exact
+displacement window this restructuring exists to close. Both scopes
+must be removed from the caller for the fix to hold; the group moves
+onto the reusable's `work` job regardless of which scope it came from.
+The `work` job re-runs its own copy of detect-team-refs + conditional/
+nonfatal mint if the groom container needs the resolver token (per
+Decision 3's boundary 2), because minted-token outputs from the
+`authorize` job cannot cross a job boundary.
 
 **Why not keep concurrency on the caller and solve this another way?**
 Three alternatives were considered and rejected:
@@ -269,14 +287,27 @@ pattern:
   used to live on the caller** (`cancel-in-progress: false`,
   identical group key). This job does not launch any containers
   itself; its sole purpose is to hold the PR-level lock around the
-  entire fan-out. It uses `uses:` to invoke a new nested worker
-  reusable:
+  entire fan-out. It must declare the same `permissions:` block the
+  current matrix `review` job carries (`contents: write` +
+  `pull-requests: write`) because `agent-review-reusable.yml` sets
+  workflow-level `permissions: {}` (deny-all) and because **nested
+  reusables cannot elevate scopes above their caller job** — they
+  can only keep or reduce the calling job's permissions. Omitting
+  the block leaves the wrapper job (and therefore the nested
+  worker's matrix `review` job) with no permissions, so the
+  per-matrix-leg `resolveReviewThread` GraphQL mutation would be
+  rejected. It uses `uses:` to invoke a new nested worker reusable:
   ```yaml
   review:
     needs: authorize
     concurrency:
       group: agent-review-pr-${{ inputs.pr-number }}
       cancel-in-progress: false
+    # Scopes mirror the pre-restructuring matrix `review` job's
+    # permissions. The nested worker cannot elevate above this.
+    permissions:
+      contents: write
+      pull-requests: write
     uses: ./.github/workflows/agent-review-worker-reusable.yml
     with:
       pr-number: ${{ inputs.pr-number }}
