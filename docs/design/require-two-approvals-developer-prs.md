@@ -31,7 +31,23 @@ notifier workflow). This split, detailed in Decision 5, (a) always runs
 trusted base-branch workflow code (not the attacker-controllable PR
 head), and (b) carries a write-capable `GITHUB_TOKEN` so the Checks API
 POST succeeds on fork-authored PRs — which the earlier `pull_request`
-design would have silently blocked.
+design would have silently blocked. Decision 5 also documents the
+residual risk from a same-repository PR that edits the notifier (or
+adds another workflow with `checks: write`) to post a spoofed
+check-run under the GitHub Actions App ID, and the baseline-review +
+PR-diff-visibility layers that bound that risk.
+
+The context name carries a **generation suffix**
+(`require-two-developer-approvals-g${N}`) so that an ON → OFF → ON
+cycle in which approvals change while the gate is OFF cannot reuse a
+stale `success` check-run from the previous ON interval. Decision 7
+covers the full ON ↔ OFF reconciliation. Decision 8 covers per-PR
+serialization, re-fetch against the live head SHA, and the
+three-run concurrency replacement case. Decision 8a covers the case
+where two PRs share the same head commit SHA — the publisher
+intersects the per-PR qualifying rule across all PRs on the SHA so
+that one PR's `success` cannot borrow another PR's less-strict
+outcome.
 
 Identity (the login of the developer agent) is sourced from a new
 Terraform-managed Actions variable `DEVELOPER_BOT_LOGIN` so that external
@@ -133,14 +149,22 @@ variable "require_two_developer_approvals" {
   type        = bool
   default     = false
 }
+
+variable "require_two_developer_approvals_check_generation" {
+  description = "Monotonic integer generation suffix for the required check context name. The composed context is `require-two-developer-approvals-g<N>` (ruleset + publisher workflow both reference it). Bump this on every ON → OFF → ON cycle so stale check-runs from a previous ON interval cannot satisfy the newly enforcing rule on an unchanged head SHA. See Decision 7 for the ON ↔ OFF reconciliation discussion. Starts at 1."
+  type        = number
+  default     = 1
+}
 ```
 
-Both variables are wired through `terraform/main.tf` → `agent_vars` module
-→ `github_actions_variable` resources named `DEVELOPER_BOT_LOGIN` and
-`REQUIRE_TWO_DEVELOPER_APPROVALS`. The branch-protection module gains a
-new input `require_two_developer_approvals_check_context` (defaulted to
-the stable check-context name defined by Decision 6) that is referenced
-only when the opt-in is on.
+All three variables are wired through `terraform/main.tf` →
+`agent_vars` module → `github_actions_variable` resources named
+`DEVELOPER_BOT_LOGIN`, `REQUIRE_TWO_DEVELOPER_APPROVALS`, and
+`REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`. The
+branch-protection module gains a new input
+`require_two_developer_approvals_check_context` (defaulted to the
+composed context name defined by Decision 6, which embeds the
+generation suffix) that is referenced only when the opt-in is on.
 
 **Alternatives considered.**
 
@@ -167,12 +191,24 @@ Sketch (final syntax to be settled by the implementer against the
 # In terraform/modules/branch-protection/main.tf, within the existing
 # `rules { ... }` block of github_repository_ruleset.main:
 
+locals {
+  # Compose the generation-suffixed context name unless the caller
+  # explicitly overrode `require_two_developer_approvals_check_context`.
+  # The default-null + coalesce pattern keeps the context name derived
+  # from the generation variable, so a Terraform `generation` bump
+  # flows through to the ruleset without a second override.
+  require_two_developer_approvals_check_context_final = coalesce(
+    var.require_two_developer_approvals_check_context,
+    "require-two-developer-approvals-g${var.require_two_developer_approvals_check_generation}",
+  )
+}
+
 dynamic "required_status_checks" {
   for_each = var.require_two_developer_approvals ? [1] : []
   content {
     strict_required_status_checks_policy = false
     required_check {
-      context        = var.require_two_developer_approvals_check_context
+      context        = local.require_two_developer_approvals_check_context_final
       # integration_id MUST be set — leaving it unset does not default to
       # GitHub Actions; it leaves the required check's source unrestricted,
       # meaning any identity with status/check-publication permission on the
@@ -182,6 +218,9 @@ dynamic "required_status_checks" {
       # the required context to the publisher we actually execute. See
       # GitHub Docs, "Available rules for rulesets > Require status checks
       # to pass" for the "specified source App vs. accept any source" split.
+      # (See Decision 5's "Modified-notifier residual risk and defence-in-
+      # depth" subsection for the residual spoofing concern this does
+      # *not* defend against on its own.)
       integration_id = var.require_two_developer_approvals_check_integration_id
     }
   }
@@ -198,9 +237,15 @@ variable "require_two_developer_approvals" {
 }
 
 variable "require_two_developer_approvals_check_context" {
-  description = "Status-check context name produced by the two-approvals workflow. Only used when require_two_developer_approvals is true. Defaults to the stable context published by this repo's require-two-developer-approvals-publisher.yml via the Checks API (see Decision 6)."
+  description = "Status-check context name produced by the two-approvals workflow. Only used when require_two_developer_approvals is true. Defaults to the generation-suffixed context published by this repo's require-two-developer-approvals-publisher.yml via the Checks API (see Decision 6 and Decision 7). Composed from the generation input: `require-two-developer-approvals-g<generation>`. Operators should normally let this default track the generation rather than override it."
   type        = string
-  default     = "require-two-developer-approvals"
+  default     = null  # Composed from the generation variable; see locals in main.tf
+}
+
+variable "require_two_developer_approvals_check_generation" {
+  description = "Numeric generation suffix for the check context name (mirrors the top-level variable of the same name; see Decision 7). Starts at 1 and increments on every ON → OFF → ON cycle to invalidate stale check-runs from the previous ON interval."
+  type        = number
+  default     = 1
 }
 
 variable "require_two_developer_approvals_check_integration_id" {
@@ -347,25 +392,91 @@ jobs:
   attacker-controlled workflow definition executes nothing.
 
 **Trusted helper-ref contract.**
-- Under `pull_request_target`, `github.sha` already equals the base-branch
-  HEAD, so the caller stub can safely pass `helpers-ref: ${{ github.sha }}`
-  for the four-step helper-checkout bootstrap (same guarantee the
-  existing [`agent-review.yml`](../../.github/workflows/agent-review.yml)
-  stub relies on).
-- Under `workflow_run`, `github.sha` is the SHA that triggered the
-  originating workflow (the notifier's run), which for `pull_request_review`
-  events is the PR head SHA — **not** a trusted ref. The publisher's
-  caller stub therefore MUST NOT pass `${{ github.sha }}` as
-  `helpers-ref`. It instead passes
-  `${{ github.event.workflow_run.head_repository.default_branch }}` and
-  the reusable resolves that ref to a concrete commit SHA inside the
-  trusted job before any helper code runs. The implementer must include
-  a dedicated acceptance test (see Decision 9) in which the PR itself
-  modifies the publisher workflow and/or the composite action; the
-  gate's behaviour must be unchanged by that modification.
+- Under both `pull_request_target` and `workflow_run`, `github.sha` is
+  the current base-branch (default-branch) HEAD of **this** repository:
+  - `pull_request_target` — GitHub docs, "Events that trigger workflows
+    > pull_request_target", state the workflow runs with the base commit
+    checked out (`GITHUB_SHA = base-branch HEAD`).
+  - `workflow_run` — GitHub docs, "Events that trigger workflows >
+    workflow_run", explicitly state `GITHUB_SHA` for `workflow_run` is
+    the **last commit on the default branch**, not the SHA of the
+    originating run. (A previous draft of this document had the opposite
+    claim — the reviewer corrected it.)
+  Both legs of the publisher caller stub therefore pass
+  `helpers-ref: ${{ github.sha }}`, matching the pattern established by
+  [`agent-review.yml`](../../.github/workflows/agent-review.yml) and
+  [`agent-fix-checks.yml`](../../.github/workflows/agent-fix-checks.yml).
+  This selects a concrete commit SHA on the trusted base branch of the
+  caller's repository.
+- The alternative previously considered — passing
+  `${{ github.event.workflow_run.head_repository.default_branch }}` —
+  is **fork-controllable**. A fork can rename its own default branch to
+  an arbitrary string, and that string is then resolved as a ref against
+  the upstream helper repository. If a branch of the same name exists
+  upstream (which a prior PR to the helpers repo could have created), the
+  helper checkout pulls untrusted code; if the ref is absent, the
+  checkout fails. Using the caller repo's `github.sha` instead avoids
+  both failure modes because the value is derived from the upstream
+  repo's own state, not from the fork payload.
+- The published-reusable version pin for external callers remains the
+  separate `helpers-ref` input described in
+  [`docs/design/reusable-workflow-helper-resolution.md`](reusable-workflow-helper-resolution.md).
+  External adopters pin to a tag or SHA of the helpers repo; the pattern
+  above only applies when the caller is this repo.
 - The notifier is intentionally stub-only; it does not take a
   `helpers-ref` input and performs no checkout, so there is no helper-ref
   concern on that path.
+
+**Modified-notifier residual risk and defence-in-depth.**
+Making the checked-in notifier empty does **not** make a PR-modified
+notifier empty. Because `pull_request_review` loads workflow YAML from
+the PR head commit, a same-repository PR can edit
+`require-two-developer-approvals-notify.yml` to declare
+`permissions: write-all` and add a `curl` step that POSTs a fake
+`conclusion: success` check-run under the enforcing context name. Any
+such run authenticates as the GitHub Actions App (integration_id 15368),
+so the `integration_id` pin from Decision 6 does **not** reject it.
+Equivalently, any other PR-controlled workflow in `.github/workflows/`
+with `checks: write` can publish the same context. The design accepts
+this specific attack class and relies on three layers of mitigation
+documented together here:
+
+1. **The baseline `required_approving_review_count = 1` rule is
+   unaffected.** It still demands a write-access human approval before
+   merge. An attacker who spoofs the enforcing-context `success` with a
+   modified notifier cannot merge their PR without a human reviewer; the
+   worst-case regression is that one human approval merges a dev-agent
+   PR instead of two. The baseline rule is itself unspoofable from a
+   workflow (it is evaluated by GitHub against actual review submissions,
+   not against status checks).
+2. **PR-visible blast radius.** Any attack of this shape requires
+   editing a file under `.github/workflows/` (either
+   `require-two-developer-approvals-notify.yml`, or any other
+   workflow granting `checks: write`), which is highly visible in the
+   PR diff and reviewable by the human approver. The repository's
+   existing `agent-review` posture already flags workflow edits for
+   human attention.
+3. **Trust-anchor acceptance test (Decision 9 item 3).** The acceptance
+   test specifically edits the publisher workflow, the reusable, the
+   composite action, the TypeScript activity, **and** the notifier (and
+   additionally adds a spoof publisher workflow with `checks: write`)
+   on the same PR, and asserts that the enforcing-context conclusion
+   on that PR still reflects the real approval count. Any accepted
+   attack of this class fails this test.
+
+**A stronger posture is possible but out of scope.** The only way to
+reject spoofed check-runs structurally — not just by procedure plus
+code review — is to publish the enforcing-context check-run from a
+dedicated GitHub App whose private key is not available to any workflow
+in `.github/workflows/`, and to pin `integration_id` to that App's ID
+rather than to 15368. That would require provisioning a new App, a new
+Terraform-managed App ID / private key pair, and a new publication
+runtime outside Actions (or a self-hosted runner with scoped
+credentials). The present design is explicit that the shipping posture
+accepts the modified-notifier attack as a trade-off against that cost,
+on the strength of the three mitigations above; a dedicated publisher
+App is listed in "Out of scope" and can be adopted later without
+breaking the context name or ruleset shape.
 
 **Event-by-event rationale.**
 
@@ -416,7 +527,8 @@ wrapped as a composite action under `.github/actions/` (per AGENTS.md
 |-------------|-----------------|
 | Trigger only on `pull_request` + `pull_request_review` with `checks: write` | Does not work for fork PRs (read-only token on those events — see rationale above) and does not establish a trusted execution anchor (both events run the PR-head workflow definition). Blocks Requirement 6 and lets same-repo PRs rewrite the gate. |
 | Use `pull_request_target` for both the PR-side and the review-side events | `pull_request_target` has no `pull_request_review` sub-type; it does not fire on review submissions. Chaining through a notifier + `workflow_run` is the standard GitHub-sanctioned pattern. |
-| Pin `helpers-ref` to a hardcoded repository branch name like `main` | Loses the single-source-of-truth property that `agent-review.yml` relies on and makes external adopters whose default branch is not `main` patch the stub. Using the `workflow_run` payload's `default_branch` field keeps the stub portable. |
+| Pin `helpers-ref` to a hardcoded repository branch name like `main` | Loses the single-source-of-truth property that `agent-review.yml` relies on and makes external adopters whose default branch is not `main` patch the stub. The caller repo's `github.sha` (default-branch HEAD under both `pull_request_target` and `workflow_run`) is already a trusted ref derived from upstream state, so no hardcoded branch name is needed. |
+| Pass `${{ github.event.workflow_run.head_repository.default_branch }}` as `helpers-ref` | Fork-controllable: a fork can name its default branch anything, and that name is then resolved against the upstream helpers repo. If a same-named branch exists upstream (which an earlier PR to the helpers repo could have created), the publisher checks out untrusted code; if absent, the checkout fails. The caller repo's `github.sha` is derived from upstream repo state, not the fork payload, and avoids both failure modes. |
 | Trigger only on `pull_request_review` (ignore pull-request events entirely) | Misses the initial state when a PR is opened or when new commits land before any reviews exist. The check stays in "no status" / pending indefinitely, which some GitHub UIs render as a merge block without context. |
 | Trigger on `pull_request_review_thread` | Thread resolution does not change the approval count. Not relevant. |
 | Trigger on `schedule` as a safety net | Not needed. The event triggers cover every state change that matters; a cron rerun would recompute the same answer most of the time and add noise. |
@@ -424,13 +536,20 @@ wrapped as a composite action under `.github/actions/` (per AGENTS.md
 ### Decision 6 — Publish the check conclusion via the Checks API, with a stable context name bound to the GitHub Actions App
 
 **Decision.** The activity publishes the check conclusion using the
-Checks API (`POST /repos/{owner}/{repo}/check-runs`) with a stable `name`
-of `require-two-developer-approvals`. The ruleset's `required_status_checks`
-block references that context **and pins its `integration_id` to the
-GitHub Actions App (public ID 15368)** so only check-runs produced by the
-publisher workflow can satisfy the required context (see Decision 3).
-The workflow job itself also pass/fails for debuggability, but it is the
-Checks API conclusion the ruleset evaluates.
+Checks API (`POST /repos/{owner}/{repo}/check-runs`) with a `name`
+composed from the generation suffix:
+`require-two-developer-approvals-g${REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION}`.
+When the opt-in is OFF, the preview context is
+`require-two-developer-approvals-g${generation} (preview)` (see
+Decision 7 for why the enforcing context is not published in OFF
+mode). The ruleset's `required_status_checks` block references the
+same composed enforcing context **and pins its `integration_id` to
+the GitHub Actions App (public ID 15368)** so only check-runs
+produced by the publisher workflow can satisfy the required context
+(see Decision 3 for the ruleset side and Decision 5 for the residual
+risk the pin alone does not defend against). The workflow job itself
+also pass/fails for debuggability, but it is the Checks API
+conclusion the ruleset evaluates.
 
 **Rationale.** Using an explicit Checks API call gives us:
 
@@ -507,29 +626,66 @@ handles each with a specific publication posture:
    PRs through on a single approval or silently blocking only a subset
    of authors.
 
-**Activation reconciliation (OFF → ON on existing PRs).**
+**Activation reconciliation across the full ON ↔ OFF cycle.**
 Flipping `require_two_developer_approvals` from `false` to `true` in
 Terraform (and the matching Actions-variable change) does not by itself
 fire any of Decision 5's events on existing open PRs — the ruleset
 change and the `vars.*` change are not PR events. Without extra
 handling, an already-open developer-agent PR whose head SHA had not
 changed could satisfy the newly enforcing context from (a) a stale
-`success` check-run posted while the gate was OFF, or (b) sheer absence
-of a matching check-run on a head SHA that pre-dates the activation.
-Because Decision 7 above prohibits (a) by never publishing the
-enforcing context in OFF mode, (b) is the remaining concern — a
-missing check-run means the ruleset blocks until one is posted, which
-is the fail-closed posture we want.
+`success` check-run posted during an earlier ON interval and never
+invalidated, (b) sheer absence of a matching check-run on an unchanged
+head (fail-closed, which is desired), or (c) an updated-review state
+that happened entirely while the gate was OFF.
 
-To ensure the fail-closed posture holds in practice, enablement is a
-**two-step** operator procedure, documented in both
+Case (c) is the specific defect the reviewer identified for the
+ON → OFF → ON cycle. Example: start ON with two qualifying approvals
+and a published `success`; flip OFF; dismiss one approval while OFF
+(the publisher updates only the preview context, as Decision 7
+mandates); flip ON again without changing the head. The ruleset now
+requires the enforcing context, and the pre-OFF `success` check-run
+is still the most-recent one for that context on the unchanged head
+SHA, so the ruleset accepts it even though the live approval state is
+now 1-not-2.
+
+To make activation safe across the full cycle, the design requires
+two mechanisms working together: a **generation counter** that
+decouples each ON interval from the previous one, and a mandatory
+**backfill-before-enable** operator procedure. Both are documented in
 [`terraform/modules/branch-protection/README.md`](../../terraform/modules/branch-protection/README.md)
-and `docs/adopting.md`:
+and `docs/adopting.md`.
 
-1. Flip `require_two_developer_approvals = true` in Terraform and
-   `terraform apply` **before** flipping the Actions variable. The
-   ruleset now requires a context that no PR currently has, so merges
-   are blocked across all PRs — fail-closed by construction.
+**Generation counter.** The context name published and required is
+not a bare `require-two-developer-approvals` — it carries a numeric
+generation suffix sourced from a new Terraform variable
+`require_two_developer_approvals_check_generation` (integer, default
+`1`). The composed context name is
+`require-two-developer-approvals-g${generation}` (e.g.
+`require-two-developer-approvals-g1`). The same variable is exposed
+as the `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION` Actions
+variable that the publisher reads at run time, so Terraform and the
+workflow stay in sync via a single source of truth.
+
+Operators must bump the generation integer every time they
+re-enable the gate after any OFF interval during which approvals,
+PR authors, or `DEVELOPER_BOT_LOGIN` could have changed (operationally:
+every ON transition after the first). Terraform's `terraform plan`
+output will show the ruleset's required-check `context` field
+changing, so the bump is visible in review. The ruleset now requires
+`-g${N+1}` while the stale `success` check-run is under `-g${N}`;
+rulesets evaluate per-exact-context-name, so the stale success is
+ignored and the gate is fail-closed until the backfill repopulates
+`-g${N+1}` on every open PR.
+
+**Enable procedure (OFF → ON).**
+
+1. In Terraform, bump
+   `require_two_developer_approvals_check_generation` to a value
+   never previously used, set
+   `require_two_developer_approvals = true`, and `terraform apply`.
+   The ruleset now requires a fresh generation's context that no PR
+   currently has, so merges are blocked across all PRs
+   fail-closed by construction.
 2. Set `REQUIRE_TWO_DEVELOPER_APPROVALS = true` in the Actions-variable
    layer (either in the same `terraform apply` if the Actions variable
    is Terraform-managed via `agent-vars`, which it is in this repo; or
@@ -538,15 +694,35 @@ and `docs/adopting.md`:
    `require-two-developer-approvals-backfill.yml` (a trivial
    `workflow_dispatch`-only wrapper around the publisher activity that
    fans out across `gh pr list --state open --json number,headRefOid`)
-   so the enforcing context is posted on every open PR with its
-   current head SHA. Once that completes, the ruleset's required-check
-   evaluation reflects the gate's intended semantics everywhere.
+   so the fresh-generation context is posted on every open PR with
+   its current head SHA. Once that completes, the ruleset's
+   required-check evaluation reflects the gate's intended semantics
+   everywhere.
 
-Disabling (ON → OFF) is the inverse and is safe without a backfill:
-after `terraform apply` removes the required-check entry, the stale
-enforcing-context check-runs on open PRs are no longer evaluated by
-the ruleset, so they do not block merges even if they were `failure`.
-The publisher stops posting them going forward.
+**Disable procedure (ON → OFF).** Set
+`require_two_developer_approvals = false` and `terraform apply`. The
+required-check entry is removed from the ruleset, so stale
+enforcing-context check-runs on open PRs stop being evaluated and
+cannot block merges. The publisher stops posting the enforcing
+context going forward (per state 1 of Decision 7). No invalidation
+pass is needed on disable because the next enable will carry a fresh
+generation suffix anyway — the stale check-runs become orphans under
+a context name the ruleset no longer references and will never
+reference again.
+
+**Why the generation counter is required even with the backfill
+procedure.** An operator who follows only step 1 of the enable
+procedure (ruleset flip without the backfill) would, under the
+pre-generation design, nonetheless re-expose the ON → OFF → ON reuse
+defect — because the stale `success` from the prior ON interval
+remains the most-recent check-run under the fixed context name on
+the unchanged head SHA. The generation counter removes that
+possibility structurally: no amount of operator error on the backfill
+step can resurrect a stale success under a context name the ruleset
+is no longer looking at. The procedure then exists to make the
+transition quick (post the fresh context now rather than waiting for
+the next natural PR event) and smooth (operators see immediate green
+on compliant PRs instead of fail-closed red).
 
 **Alternatives considered.**
 
@@ -557,6 +733,8 @@ The publisher stops posting them going forward.
 | Fail open (treat empty login as "no PRs match → always success") when the opt-in is on | Silently defeats the whole feature. Explicitly against the issue's intent. |
 | Fail closed on only the dev-agent-author path when the login is empty | Insufficient: without `DEVELOPER_BOT_LOGIN` the publisher cannot tell which PRs are dev-agent-authored, so it cannot know which subset to block. Blocking every PR with `::error::` is the correct behaviour because the misconfiguration genuinely prevents the gate from working on *any* PR. |
 | Enable in a single step (flip both Terraform and the Actions variable in the same `terraform apply`) | Also acceptable because the fail-closed posture holds between the two apply operations — Terraform sequences the ruleset change before the Actions-variable change within one apply only when the dependency graph requires it, and in this repo they are independent resources. The two-step document still recommends the backfill because the ruleset flip alone does not re-post anything on existing open PRs, so the backfill is where the operator confirms activation worked. |
+| Keep a fixed context name and rely only on the operator-run backfill to invalidate prior ON-interval successes | Was the previous draft; the reviewer identified an ON → OFF → ON cycle where approvals change *while OFF* (so the prior success is still the most-recent check-run under the fixed context when the gate re-enables) and the stale success is reused. The generation counter in the Decision above removes this failure mode structurally: a bumped generation makes the previous success invisible to the ruleset's required-check lookup regardless of whether the operator remembers to run the backfill. The backfill then exists purely to make the transition green quickly, not to defend correctness. |
+| Encode the generation in the ruleset `required_check` entry only (not in the context name) | GitHub rulesets evaluate check-runs by exact context name — there is no "generation" field on the `required_check` entry. Encoding the generation in the name itself is the only mechanism that makes prior check-runs invisible without requiring the operator to also invalidate them. |
 
 ### Decision 8 — Per-PR serialization and stale-write guard
 
@@ -588,41 +766,77 @@ publication is the specific failure mode flagged by the reviewer
 published failure, leaving the merge-gate inconsistent with the live
 review state).
 
-**Re-fetch and head-SHA verification inside the boundary.** Before the
-Checks API POST, the activity:
+**Re-fetch and always-publish-against-live-head.** Before the Checks
+API POST, the activity:
 
 1. Re-fetches the PR via `GET /repos/{owner}/{repo}/pulls/{number}` and
-   captures `pr.head.sha` as `verifiedHeadSha`. If this disagrees with
-   the head SHA the workflow was triggered on (`event.pull_request.head.sha`
-   or `event.workflow_run.pull_requests[0].head.sha`), the activity
-   logs the mismatch, exits 0, and publishes nothing — a newer event is
-   already queued behind this run on the same concurrency group and
-   will publish the correct conclusion.
+   captures `pr.head.sha` as `liveHeadSha`. This value is the authority
+   for both the counting target and the publication target — the event
+   payload's head SHA is treated as advisory only.
 2. Re-fetches reviews via `GET /repos/{owner}/{repo}/pulls/{number}/reviews`
    (paginated) and applies the Decision 4 counting rule to the latest
-   per-reviewer `APPROVED` set.
-3. Posts the check-run with `head_sha: verifiedHeadSha`. Rulesets
-   evaluate check-runs against the current head SHA, so a check-run
-   written for a stale head SHA cannot overwrite the enforcement
-   decision for the newer head.
+   per-reviewer `APPROVED` set as of `liveHeadSha`.
+3. Publishes the check-run with `head_sha: liveHeadSha`, regardless of
+   whether `liveHeadSha` agrees with the SHA the workflow was triggered
+   on. If `liveHeadSha` differs from the event SHA, the activity logs
+   the correction (which is useful for debugging stale-event delivery)
+   but still publishes — the publication is for the live head, not the
+   stale event. See the reconciliation discussion below for why "exit
+   silently on mismatch" was rejected.
 
-**Why re-fetch is necessary even with `cancel-in-progress: false`.**
-GitHub Actions concurrency serializes job start order within a group,
-but the event payloads delivered to each run are snapshots from when
-the event fired. If run A was triggered by review #1 and run B by
-review #2 (where #2 dismissed #1), and they are queued in A→B order,
-A's event payload still contains the pre-dismissal state. Re-fetching
-inside the boundary ensures the publication reflects the current
-server-side state, not the event-payload state. The head-SHA check
-additionally guards against the case where the ordering above is
-inverted (B observed by Actions before A due to webhook delivery
-jitter) — the stale A run detects it is behind and publishes nothing.
+**Why always-publish-against-live-head is necessary (and why queueing
+alone is not).** GitHub Actions concurrency with `cancel-in-progress:
+false` serializes job *start* order within a group, but the
+documented behaviour (GitHub Docs, "Control the concurrency of
+workflows and jobs > Example: using concurrency and the default
+behaviour") is that **at most one run is kept pending** per group; a
+third event arriving while A is running and B is pending **replaces B
+with the new event**, dropping B entirely. The three-run interleaving
+the reviewer identified is therefore live:
 
-**Acceptance test for out-of-order publication.** Decision 9 includes
-a specific test case in which two review events are fired in rapid
-succession (approve, then dismiss) and the final check-run on the head
-SHA reflects the post-dismissal state, with no intermediate stale
-`success` left behind.
+- Run A triggered by event at head H1 — in progress.
+- Run B triggered by event at head H2 (synchronize to new commit) —
+  queued as pending.
+- Run C triggered by a delayed webhook for an earlier state at head
+  H1 — replaces pending B. B is discarded.
+- A completes.
+- C starts. C's event SHA is H1, which is stale (live head is now H2).
+
+Under the earlier draft of Decision 8 ("exit 0, publish nothing on
+head-SHA mismatch"), C would exit without publishing, and because B
+was discarded by the replacement, **no run would ever publish for
+H2** — the gate would stay in whatever state A left it. If A ran
+against stale H1 state too, H2 could remain missing a required
+check-run indefinitely, so the ruleset would block merge forever
+(fail-closed, but surprising). If A happened to publish `success`
+against H1 and the ruleset is lenient about `strict_required_status_checks_policy`
+being `false` (which it is per Decision 3), the stale success could
+in principle be inherited.
+
+The corrected rule — **always publish against `liveHeadSha`, never
+against the event SHA** — removes the dependency on "a newer event
+is queued behind us". Each run reconciles the ruleset's expectation
+against the live head itself, so a run started for H1 publishes for
+whatever the head is at run time (H2 if a synchronize already landed,
+or still H1 if not). Combined with `cancel-in-progress: false`, the
+sequence of publications on a group is still monotonic in start
+order, and the final publication of each group always matches the
+final `pr.head.sha` at that run's start time.
+
+A `synchronize` event is dispatched for every push to the PR branch
+and always triggers a publisher run under `pull_request_target:
+synchronize`, so after any head change at least one more publisher
+run will begin and reconcile. The combination guarantees "eventually
+the live head has a publication reflecting the live state", which is
+the invariant the ruleset requires.
+
+**Acceptance test for stale-event replacement.** Decision 9 item 5 is
+extended to cover the three-run interleaving above: fire approve on
+H1, push a new commit landing H2, then deliver a stale webhook for
+H1 — assert that the final check-run on H2 reflects the real
+post-synchronize approval state (i.e. 0 qualifying approvals, since
+`dismiss_stale_reviews_on_push = true` wiped the H1 approval), with
+no stale H2 result inherited from the pre-synchronize world.
 
 **Alternatives considered.**
 
@@ -630,7 +844,96 @@ SHA reflects the post-dismissal state, with no intermediate stale
 |-------------|-----------------|
 | `cancel-in-progress: true` | Cancelling in-flight runs sounds like it serializes correctly, but it introduces the opposite race: the in-flight run (reading post-dismissal state) gets cancelled by the arrival of a stale event, which then publishes a stale success. The correct posture is queue-and-recompute, not cancel. |
 | Rely on event ordering without re-fetch | Webhook delivery is not strictly ordered relative to review state transitions. Re-fetching from the API inside the boundary is the only way to be sure the published conclusion matches the live state. |
+| On event-vs-live head SHA mismatch, exit 0 and publish nothing (previous draft) | Relies on "a newer event is already queued behind us", which GitHub's documented concurrency behaviour does not guarantee — a third event can replace the pending second, so no run ever runs for the live head. See the "Why always-publish-against-live-head is necessary" discussion above. The corrected rule publishes against `liveHeadSha` in all cases. |
 | Use an external lock / Redis / etc. | Workflow-level concurrency plus API re-fetch is sufficient for a per-PR serialization boundary and introduces no new infrastructure. |
+
+### Decision 8a — Cross-PR head-SHA sharing
+
+**Decision.** The Checks API publishes check-runs keyed by
+`(repository, head_sha, context_name)` — not by PR number — and the
+ruleset evaluates per-head-SHA. Two or more open PRs can therefore
+share a head commit SHA (e.g. two branches that both point at the
+same commit; a human-opened PR and a dev-agent-opened PR each
+proposing the same commit; a dev-agent reopen of a prior branch).
+Per-PR concurrency groups (Decision 8) serialize writers *for the
+same PR* but do not serialize two different PRs' publishers racing on
+the same head SHA, and a `success` posted for a non-dev PR on a SHA
+would otherwise satisfy the required-check lookup for a dev-agent PR
+sharing that SHA with fewer than two approvals.
+
+To make the published check-run on a head SHA reflect **the strictest
+qualifying-approval requirement across every open PR that currently
+has that SHA as its head**, the activity:
+
+1. Resolves `candidatePrNumbers` by calling
+   `GET /repos/{owner}/{repo}/commits/{liveHeadSha}/pulls` and
+   filtering to PRs with `state == "open"` and
+   `head.sha == liveHeadSha` (defensively re-checking per-PR because
+   the commit-to-PR index can lag). The trigger-PR is included.
+2. For each candidate PR, re-fetches the PR via
+   `GET /repos/{owner}/{repo}/pulls/{number}` to read `user.login`
+   (PR author) and the latest `pr.head.sha` (to drop any PR whose
+   head has moved since step 1).
+3. For each remaining candidate, applies the per-PR qualifying rule
+   from Decision 4:
+   - If PR author is **not** `DEVELOPER_BOT_LOGIN`, the per-PR
+     outcome is `success` (Requirement 6).
+   - If PR author **is** `DEVELOPER_BOT_LOGIN`, re-fetches reviews
+     via `GET /repos/{owner}/{repo}/pulls/{number}/reviews`, counts
+     latest-per-reviewer `APPROVED` reviews excluding
+     `DEVELOPER_BOT_LOGIN`, and the per-PR outcome is `success` iff
+     count ≥ 2.
+4. Publishes a single check-run for `liveHeadSha` under the generation
+   context name with `conclusion = success` iff **every** candidate
+   PR's per-PR outcome is `success` (strictest wins — if any dev-PR
+   needs 2 and has fewer, the whole SHA is `failure`). The
+   `output.summary` lists the candidate PR numbers and each one's
+   per-PR outcome so reviewers can see why the SHA was blocked.
+
+The per-PR concurrency group from Decision 8 is extended on the
+publisher side to **additionally** take a shared lock on the head SHA
+via a secondary concurrency group
+`require-two-developer-approvals-sha-${liveHeadSha}` on a dedicated
+sibling job that runs the per-SHA publication; the per-PR job
+computes and hands off, and the per-SHA job serializes publications
+on the SHA. This prevents two different PRs' publishers from racing
+on the same SHA. (Actions supports at most one `concurrency` block
+per job, which is why this is split across two jobs rather than one.)
+
+**Rationale.**
+
+- Requirement 6 (non-dev-author PRs pass immediately) still holds for
+  a non-dev PR whose head is not shared with any dev PR: the single
+  candidate's outcome is `success` and the published conclusion is
+  `success` with no delay.
+- A non-dev PR that happens to share a SHA with an under-approved
+  dev-agent PR will see its merge blocked until the dev PR is either
+  approved to the required count, closed, or has its head advanced to
+  a different SHA. This is the only correct outcome — the shared
+  commit is the thing being merged, and the gate's purpose is to
+  demand two approvals on that commit when any proposer is the dev
+  agent. The non-dev PR author can advance their head by one no-op
+  commit to split the SHA if they need to unblock their own merge
+  without approving the dev PR.
+- An attacker cannot borrow a non-dev PR's `success` to merge a
+  shared-SHA dev-agent PR with 0 approvals, because the shared-SHA
+  publisher strictly intersects per-PR outcomes.
+- Two dev-agent PRs with different approval counts on the same SHA
+  intersect to the lower approval count's outcome, which is
+  consistent with "the SHA is only safe to merge when every proposer
+  of this SHA has met the bar".
+
+**Alternatives considered.**
+
+| Alternative | Reason rejected |
+|-------------|-----------------|
+| Give each PR its own context name (e.g. `require-two-developer-approvals-g${N}-pr-${number}`) | GitHub rulesets require a literal context name on the `required_check` entry — there is no templating. One context per possible PR number is operationally impossible. |
+| Publish per-PR check-runs with distinct names and have the ruleset accept any one matching a pattern | No "any of" matching exists in rulesets. Required checks are named individually. |
+| Trust the per-PR concurrency group alone and ignore the SHA-sharing case | The reviewer's concrete scenario — a human-opened PR's `success` satisfying a shared-SHA dev-agent PR's enforcement — is a real merge-gate bypass. Not acceptable. |
+| Only publish from the dev-agent-author PR when a conflict exists | Requires the publisher to know, from the non-dev PR's run, that a dev PR exists and defer to its publication order. The strictest-wins intersection in the Decision above achieves the same outcome symmetrically without ordering fragility. |
+| Advance the gate's granularity from commit SHA to PR+SHA via a `details_url`/annotation hack | The ruleset's evaluation is still per-context-per-SHA. Metadata on the check-run does not change what the ruleset accepts. |
+
+Decision 9 items 10–12 cover the three same-SHA acceptance cases.
 
 ### Decision 9 — Acceptance test contract
 
@@ -648,36 +951,101 @@ end-to-end validation on a scratch PR under Issue #665.
    `success` posted; the ruleset must not block it. This directly
    exercises the `pull_request_target` write-capable token path.
 3. **Trust-anchor test (same-repo PR modifies the gate)** — open a
-   same-repository PR whose diff edits the publisher workflow, the
-   reusable, the composite action, and the TypeScript activity to
-   publish unconditional `success`. The gate's conclusion on that PR
-   must still reflect its real approval count. This proves the
-   base-branch execution path is in force.
+   same-repository PR whose diff **simultaneously** edits:
+   - the publisher workflow (`require-two-developer-approvals-publisher.yml`),
+   - the reusable it calls,
+   - the composite action and the TypeScript activity (so that any
+     non-base-branch execution path would publish unconditional
+     `success`),
+   - the notifier (`require-two-developer-approvals-notify.yml`) to
+     escalate `permissions:` to `write-all` and add a `curl` step
+     POSTing a spoofed `conclusion: success` check-run under the
+     current generation's enforcing context name, and
+   - adds a brand-new workflow in `.github/workflows/` that declares
+     `checks: write` and attempts to POST the same spoofed success
+     (covering the "another PR-controlled workflow under the same
+     Actions App ID" variant).
+
+   The gate's effective merge decision for the PR must still reflect
+   its real approval count. The *authoritative* publisher workflow
+   (base-branch definition) must publish the correct conclusion; and
+   even if the modified notifier or spoof workflow succeeds in
+   posting a spoofed check-run, the PR must not actually be mergeable
+   with fewer than two qualifying approvals, because the baseline
+   `required_approving_review_count = 1` rule still demands a
+   write-access human approval and the human reviewer would have the
+   `.github/workflows/` diff visible to reject it. The test must
+   assert **both** the per-check-run outcome and the effective merge
+   gate.
+
+   This test documents and bounds the residual risk discussed in
+   Decision 5's "Modified-notifier residual risk and defence-in-depth"
+   subsection — specifically that a spoofed check-run posted via a
+   PR-modified workflow under the Actions App ID can satisfy the
+   `integration_id` pin, but the baseline review requirement and the
+   PR-visible diff mean such an attack cannot merge code without a
+   human approver who sees the workflow edits.
 4. **Integration_id binding** — simulate an unrelated GitHub App
    posting a check-run of the gate's context name with `conclusion:
    success` on an under-approved developer-agent PR. The ruleset must
    still block merge. (Covers Decision 6.)
-5. **Out-of-order publication** — fire an approve review and a
-   dismiss review in rapid succession on a developer-agent PR; the
-   final check-run on the current head SHA must be `failure`, with no
-   stale `success` observable at any point after the dismiss event is
-   processed. (Covers Decision 8.)
+5. **Out-of-order publication / stale-event replacement** — two
+   sub-cases, both on a developer-agent PR:
+   - Fire an approve review and a dismiss review in rapid succession
+     and assert the final check-run on the current head SHA is
+     `failure` with no stale `success` observable at any point after
+     the dismiss event is processed.
+   - Fire approve on head H1, push a new commit landing head H2, then
+     deliver a stale webhook for H1 while H1-run A is in flight.
+     Assert that the final check-run on H2 reflects the real
+     post-synchronize approval state (0 qualifying approvals, since
+     `dismiss_stale_reviews_on_push = true` wiped the H1 approval),
+     with no inherited stale H2 publication — specifically exercising
+     the three-run interleaving where the pending H2 run has been
+     replaced by the delayed H1 event (Decision 8).
 6. **OFF → ON on an unchanged open PR** — with an open developer-agent
-   PR that has one human approval under opt-in OFF, flip the opt-in ON
-   and run the backfill workflow. Merge must be blocked until a second
-   non-self approval lands. (Covers Decision 7.)
+   PR that has one human approval under opt-in OFF, bump the
+   generation counter, flip the opt-in ON, and run the backfill
+   workflow. Merge must be blocked until a second non-self approval
+   lands. (Covers Decision 7.)
 7. **ON → OFF on an under-approved PR** — with an open developer-agent
    PR currently failing the gate under opt-in ON, flip the opt-in OFF.
    Merge must be allowed as soon as the baseline
    `required_approving_review_count = 1` is satisfied. (Covers
    Decision 7.)
-8. **Opt-in on with empty login** — set the Actions variable to the
+8. **ON → OFF → ON cycle with dismissal while OFF** — start ON with
+   two qualifying approvals on an open developer-agent PR (gate
+   publishes `success`); flip OFF; dismiss one approval while OFF
+   (publisher updates only the preview context); flip ON again
+   **without bumping the generation counter** and assert that the
+   merge is unblocked — then redo the same sequence with the
+   generation counter **bumped** on the second ON, assert that the
+   merge is blocked until the second approval re-lands. This is the
+   specific defect the generation counter prevents. (Covers
+   Decision 7.)
+9. **Opt-in on with empty login** — set the Actions variable to the
    opt-in on and leave `DEVELOPER_BOT_LOGIN` empty. Every PR (human,
    agent, bot) must see `::error::` and a `failure` conclusion.
    (Covers Decision 7.)
-9. **Standard counting cases** — the full matrix listed in Issue #662
-   (0/1/2/3 non-self approvals, self-approval ignored, DISMISSED
-   latest-per-reviewer, etc.).
+10. **Shared head SHA — human + developer** — open two PRs whose head
+    branches point at the same commit SHA, one authored by a human
+    and one by the developer agent with 0 qualifying approvals. The
+    published check-run on the shared SHA must be `failure`; the
+    human PR must be blocked from merging as long as the dev PR's
+    requirement is unmet. (Covers Decision 8a.)
+11. **Shared head SHA — two dev-agent PRs with different approval
+    counts** — open two developer-agent PRs on the same head SHA, one
+    with 2 qualifying approvals and one with 1. The published
+    check-run on the shared SHA must be `failure` (the strictest wins)
+    regardless of the order in which the two PRs' publishers run.
+    (Covers Decision 8a.)
+12. **Shared head SHA — ordering independence** — publish from the
+    non-dev PR's publisher first, then the dev PR's publisher; and
+    then the reverse. The final check-run on the SHA must be
+    `failure` in both orderings. (Covers Decision 8a.)
+13. **Standard counting cases** — the full matrix listed in Issue #662
+    (0/1/2/3 non-self approvals, self-approval ignored, DISMISSED
+    latest-per-reviewer, etc.).
 
 ### Decision 10 — Documentation surfaces
 
@@ -685,7 +1053,8 @@ The following must be updated in the same PR as the implementation (per
 AGENTS.md § "Keeping Documentation Current"):
 
 - `AGENTS.md`:
-  - Add `DEVELOPER_BOT_LOGIN` and `REQUIRE_TWO_DEVELOPER_APPROVALS` to the
+  - Add `DEVELOPER_BOT_LOGIN`, `REQUIRE_TWO_DEVELOPER_APPROVALS`, and
+    `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION` to the
     "Terraform-managed … Actions variables" list in the documentation-update
     checklist.
   - Add a short bullet under § "Code Review Standards" → "Repo-specific
@@ -698,26 +1067,41 @@ AGENTS.md § "Keeping Documentation Current"):
     `require-two-developer-approvals-notify.yml`,
     `require-two-developer-approvals-backfill.yml`) in the Repository Layout
     section.
-- `terraform/modules/branch-protection/README.md`: document the three new
-  module variables (`require_two_developer_approvals`,
+- `terraform/modules/branch-protection/README.md`: document the four
+  new module variables (`require_two_developer_approvals`,
   `require_two_developer_approvals_check_context`,
-  `require_two_developer_approvals_check_integration_id`), the dynamic
-  `required_status_checks` block, **and** the admin-bypass caveat
-  described in the Interactions section (admins with `bypass_mode =
-  "pull_request"` can bypass the two-approval check when merging a PR —
-  this is explicit, documented, and auditable). Also document the
-  two-step enable/disable procedure and the one-shot
-  `require-two-developer-approvals-backfill.yml` workflow.
-- `terraform/modules/agent-vars/README.md`: document the two new Actions
-  variables and the usage example.
+  `require_two_developer_approvals_check_integration_id`,
+  `require_two_developer_approvals_check_generation`), the dynamic
+  `required_status_checks` block, the generation-counter semantics
+  from Decision 7 (bump on every ON → OFF → ON cycle), **and** the
+  admin-bypass caveat described in the Interactions section (admins
+  with `bypass_mode = "pull_request"` can bypass the two-approval
+  check when merging a PR — this is explicit, documented, and
+  auditable). Also document the two-step enable/disable procedure,
+  the one-shot `require-two-developer-approvals-backfill.yml`
+  workflow, the modified-notifier residual-risk discussion from
+  Decision 5, and the shared head-SHA cross-PR behaviour from
+  Decision 8a (so operators and reviewers are not surprised by a
+  human-opened PR being blocked because it shares a commit SHA with
+  an under-approved dev-agent PR).
+- `terraform/modules/agent-vars/README.md`: document the three new
+  Actions variables (`DEVELOPER_BOT_LOGIN`,
+  `REQUIRE_TWO_DEVELOPER_APPROVALS`,
+  `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`) and the usage
+  example.
 - `terraform/terraform.tfvars.example`: show commented-out example values
-  for `developer_bot_login` and `require_two_developer_approvals`.
+  for `developer_bot_login`, `require_two_developer_approvals`, and
+  `require_two_developer_approvals_check_generation`.
 - `docs/adopting.md`: add a section for external adopters explaining
   the identity-configuration contract (set `developer_bot_login` to
   their own App's `<slug>[bot]`), the enable/disable + backfill
-  procedure, and the override path for
+  procedure, the generation-counter bump requirement on re-enable,
+  the override path for
   `require_two_developer_approvals_check_integration_id` when they
-  publish from a GitHub App other than GitHub Actions.
+  publish from a GitHub App other than GitHub Actions, and the
+  cross-PR shared-SHA note from Decision 8a (so adopters understand a
+  human PR can be blocked by a shared commit with an under-approved
+  dev-agent PR).
 
 ## Interactions with existing design decisions
 
@@ -803,27 +1187,37 @@ AGENTS.md § "Keeping Documentation Current"):
   gate operates purely on review counts.
 - **Rulesets scoped to agent branches** (e.g. `agent/*`, `design/*`).
   Rejected in Decision 1.
+- **A dedicated publisher GitHub App** (separate credentials, with
+  its own `integration_id` pin) to structurally reject the spoofed
+  check-run attack described in Decision 5's "Modified-notifier
+  residual risk and defence-in-depth" subsection. Noted there as a
+  future hardening; the shipping posture relies on the baseline
+  review rule and PR-diff visibility. Adopting a dedicated App later
+  does not break the context name or ruleset shape.
 
 ## Task breakdown and dependencies
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#661](https://github.com/mfrancza/agentic-development-workflow/issues/661) | Terraform: add `developer_bot_login` and `require_two_developer_approvals` top-level variables; wire through `terraform/main.tf` to the `agent-vars` module (which exposes them as `DEVELOPER_BOT_LOGIN` and `REQUIRE_TWO_DEVELOPER_APPROVALS` Actions variables) and to the `branch-protection` module. Extend `branch-protection` with the three new inputs (`require_two_developer_approvals`, `require_two_developer_approvals_check_context`, `require_two_developer_approvals_check_integration_id` — the last defaulted to 15368 per Decision 3) and the dynamic `required_status_checks` block in the ruleset. Document the admin-bypass caveat and the two-step enable/disable + backfill procedure in both module READMEs and `terraform.tfvars.example`. | — |
-| [#662](https://github.com/mfrancza/agentic-development-workflow/issues/662) | TypeScript activity + composite action: implement `.github/scripts/src/check-two-developer-approvals.ts` and `.github/actions/check-two-developer-approvals/action.yml`. Activity reads inputs `developer-bot-login`, `require-two-developer-approvals`, `pr-number`, `pr-author`, `event-head-sha`, `repo`; fetches the PR and reviews via Octokit **inside** the serialization boundary (Decision 8), verifies head-SHA agreement before publishing, groups latest-per-reviewer, counts qualifying approvals, and publishes the check conclusion via the Checks API with context `require-two-developer-approvals` (enforcing) or `require-two-developer-approvals (preview)` (opt-in off, per Decision 7). Fails loudly per Decision 7. Unit tests cover the full matrix in Decision 9 that is unit-testable (counting, self-exclusion, DISMISSED, opt-in-off → preview context only, opt-in-on + empty login → `::error::` + failure, head-SHA mismatch → no publication). | — |
-| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add `require-two-developer-approvals-publisher.yml` (caller stub, triggered by `pull_request_target` and `workflow_run`), `require-two-developer-approvals-notify.yml` (empty, zero-permission `pull_request_review` trigger), and the paired reusable with the four-step helper-checkout bootstrap. Also add `require-two-developer-approvals-backfill.yml` (`workflow_dispatch` only) that fans out across open PRs for the Decision 7 opt-in reconciliation. All stubs set the per-PR concurrency group with `cancel-in-progress: false` per Decision 8. Publisher stubs read `vars.DEVELOPER_BOT_LOGIN` and `vars.REQUIRE_TWO_DEVELOPER_APPROVALS` and pass them to the reusable, which invokes the composite action from Issue #662. Publisher stubs select the trusted `helpers-ref` per Decision 5. | Issue #662 |
-| [#664](https://github.com/mfrancza/agentic-development-workflow/issues/664) | Documentation: update `AGENTS.md` (new workflows in the Repository Layout note, new Actions variables in the doc-update checklist, branch-protection-immutability bullet, admin-bypass caveat cross-reference) and `docs/adopting.md` (section for external adopters covering `developer_bot_login`, `require_two_developer_approvals_check_integration_id` override, and the enable/disable + backfill procedure). | Issue #661, Issue #663 |
-| [#665](https://github.com/mfrancza/agentic-development-workflow/issues/665) | End-to-end validation: execute every acceptance test in Decision 9 against a scratch repository configured per the Decision 10 docs, including the fork-PR publication case, the trust-anchor "PR modifies the gate" case, the integration_id binding case, the out-of-order publication case, and the OFF→ON / ON→OFF transitions on existing open PRs. Also exercise the misconfiguration path (opt-in on + empty login). | Issues #661, #662, #663, #664 |
+| [#661](https://github.com/mfrancza/agentic-development-workflow/issues/661) | Terraform: add `developer_bot_login`, `require_two_developer_approvals`, and `require_two_developer_approvals_check_generation` top-level variables; wire through `terraform/main.tf` to the `agent-vars` module (which exposes them as `DEVELOPER_BOT_LOGIN`, `REQUIRE_TWO_DEVELOPER_APPROVALS`, and `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION` Actions variables) and to the `branch-protection` module. Extend `branch-protection` with the four new inputs (`require_two_developer_approvals`, `require_two_developer_approvals_check_context` defaulting to `null` and composed via the locals in Decision 3, `require_two_developer_approvals_check_integration_id` defaulted to 15368, and `require_two_developer_approvals_check_generation` defaulted to 1) and the dynamic `required_status_checks` block in the ruleset. Document the admin-bypass caveat, the generation-counter semantics, the shared-SHA cross-PR note, the modified-notifier residual risk, and the two-step enable/disable + backfill procedure in both module READMEs and `terraform.tfvars.example`. | — |
+| [#662](https://github.com/mfrancza/agentic-development-workflow/issues/662) | TypeScript activity + composite action: implement `.github/scripts/src/check-two-developer-approvals.ts` and `.github/actions/check-two-developer-approvals/action.yml`. Activity reads inputs `developer-bot-login`, `require-two-developer-approvals`, `check-generation`, `pr-number`, `pr-author`, `event-head-sha`, `repo`; fetches the PR and reviews via Octokit **inside** the serialization boundary (Decision 8), resolves all open PRs that share `liveHeadSha` and applies the strictest-wins intersection from Decision 8a, groups latest-per-reviewer per PR, counts qualifying approvals, and publishes the check conclusion via the Checks API against `liveHeadSha` under context `require-two-developer-approvals-g${generation}` (enforcing) or `require-two-developer-approvals-g${generation} (preview)` (opt-in off, per Decision 7). Always publishes against `liveHeadSha` even when it disagrees with the event SHA (Decision 8). Fails loudly per Decision 7. Unit tests cover the full matrix in Decision 9 that is unit-testable (counting, self-exclusion, DISMISSED, opt-in-off → preview context only, opt-in-on + empty login → `::error::` + failure, event-SHA ≠ live-SHA → publishes against live SHA, two-PR same-SHA strictest-wins intersection). | — |
+| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add `require-two-developer-approvals-publisher.yml` (caller stub, triggered by `pull_request_target` and `workflow_run`), `require-two-developer-approvals-notify.yml` (empty, zero-permission `pull_request_review` trigger), and the paired reusable with the four-step helper-checkout bootstrap. Also add `require-two-developer-approvals-backfill.yml` (`workflow_dispatch` only) that fans out across open PRs for the Decision 7 opt-in reconciliation. All stubs set the per-PR concurrency group with `cancel-in-progress: false` per Decision 8, and the publisher additionally takes a secondary per-head-SHA concurrency group per Decision 8a. Publisher stubs read `vars.DEVELOPER_BOT_LOGIN`, `vars.REQUIRE_TWO_DEVELOPER_APPROVALS`, and `vars.REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION` and pass them to the reusable, which invokes the composite action from Issue #662. Publisher stubs select the trusted `helpers-ref: ${{ github.sha }}` per Decision 5 on both legs (base-branch HEAD under both `pull_request_target` and `workflow_run`). | Issue #662 |
+| [#664](https://github.com/mfrancza/agentic-development-workflow/issues/664) | Documentation: update `AGENTS.md` (new workflows in the Repository Layout note, new Actions variables in the doc-update checklist, branch-protection-immutability bullet, admin-bypass caveat cross-reference) and `docs/adopting.md` (section for external adopters covering `developer_bot_login`, `require_two_developer_approvals_check_integration_id` override, the generation-counter bump requirement on re-enable, the shared-SHA cross-PR note, the modified-notifier residual-risk discussion, and the enable/disable + backfill procedure). | Issue #661, Issue #663 |
+| [#665](https://github.com/mfrancza/agentic-development-workflow/issues/665) | End-to-end validation: execute every acceptance test in Decision 9 against a scratch repository configured per the Decision 10 docs, including the fork-PR publication case, the extended trust-anchor "PR modifies the gate" case (publisher + reusable + composite action + activity + notifier + spoof-publisher workflow all in one PR), the integration_id binding case, the stale-event replacement (three-run interleaving) case, the OFF → ON → OFF → ON cycle with dismissal while OFF, and the three same-SHA cross-PR cases. Also exercise the misconfiguration path (opt-in on + empty login). | Issues #661, #662, #663, #664 |
 
 Issues #661 and #662 are independent and can proceed in parallel — the
-contract (variable names `DEVELOPER_BOT_LOGIN` and `REQUIRE_TWO_DEVELOPER_APPROVALS`;
-enforcing check-context name `require-two-developer-approvals`;
-preview context name `require-two-developer-approvals (preview)`;
-`integration_id = 15368`; activity input names) is established by this
-document. Issue #663 depends on Issue #662 because the reusable invokes
-the composite action from #662. Issue #664 can be drafted in parallel
-but should land with #661 and #663 so docs and code ship together per
-AGENTS.md § "Keeping Documentation Current". Issue #665 depends on
-everything.
+contract (variable names `DEVELOPER_BOT_LOGIN`,
+`REQUIRE_TWO_DEVELOPER_APPROVALS`, and
+`REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`; enforcing
+check-context name composed as
+`require-two-developer-approvals-g${generation}`; preview context
+name `require-two-developer-approvals-g${generation} (preview)`;
+`integration_id = 15368`; activity input names) is established by
+this document. Issue #663 depends on Issue #662 because the reusable
+invokes the composite action from #662. Issue #664 can be drafted in
+parallel but should land with #661 and #663 so docs and code ship
+together per AGENTS.md § "Keeping Documentation Current". Issue #665
+depends on everything.
 
 Dependencies are recorded natively as GitHub blocked-by relationships on
 the sub-issues.
