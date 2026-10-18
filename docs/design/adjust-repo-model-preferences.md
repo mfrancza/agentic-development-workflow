@@ -8,7 +8,7 @@ Issue #669 asks to change this repository's model policy in three ways:
 
 1. use the current OpenAI sonnet-tier model as the repo-wide default;
 2. use an opus-tier model for the design agent; and
-3. run corresponding OpenAI and xAI reviewers in parallel.
+3. run current Sonnet and xAI reviewers in parallel.
 
 The grooming comments identify `gpt-5.6-terra` as the current OpenAI
 sonnet-tier default and ask whether the reviewer request means a parallel
@@ -22,10 +22,11 @@ guidance and existing configuration:
   [`docs/model-guidance.md`](../model-guidance.md) names it as the normal
   OpenAI model for plans and design, while `gpt-6-astra` is an escalation
   candidate rather than an automatic default.
-- `reviewer_models` becomes `["gpt-5.6-terra", "grok-4.6"]`. This is a
+- `reviewer_models` becomes `["sonnet", "grok-4.6"]`. This is a
   two-reviewer set, consistent with grooming's interpretation and the
-  existing `REVIEWER_MODELS` matrix fan-out. The same guidance names
-  `gpt-5.6-terra` and `grok-4.6` for standard multi-file code review.
+  existing `REVIEWER_MODELS` matrix fan-out. The `sonnet` alias resolves to
+  the current Anthropic Sonnet snapshot, while the same guidance names
+  `grok-4.6` for standard multi-file code review.
 
 The first and third settings already have Terraform inputs. The design-agent
 preference does not: `agent-design.yml` currently passes `vars.DEFAULT_MODEL`
@@ -93,11 +94,11 @@ about repository variables would couple reusable logic to one caller's policy.
 ### 3. Configure reviewers through `reviewer_models`, not labels or pairing
 
 Set the existing repo-specific `reviewer_models` value to
-`["gpt-5.6-terra", "grok-4.6"]`. The established reviewer-set waterfall gives
+`["sonnet", "grok-4.6"]`. The established reviewer-set waterfall gives
 `model:review:*` PR labels higher precedence and otherwise fans out every entry
 in `REVIEWER_MODELS` in parallel. Both entrypoints and the run-agent action
-already route `gpt-*` to OpenAI and the provisioned `grok-4.6` identifier to
-xAI, forwarding only the matching provider key.
+already route `sonnet` to Anthropic and the provisioned `grok-4.6` identifier
+to xAI, forwarding only the matching provider key.
 
 No new labels, resolver behavior, workflow topology, or provider routing are
 needed. `review_model_pairing` remains disabled: it selects a single reviewer
