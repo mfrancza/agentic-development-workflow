@@ -6,7 +6,7 @@
 
 ## Status
 
-**Static / unit-test layer: complete** (all seven acceptance scenarios covered below).
+**Static / unit-test layer: mostly complete** — all seven acceptance scenarios have unit-test coverage, but a warning-behavior gap was identified in Scenario 5: `pickDifferentVendorSameClass` does not emit `core.warning()` when a single preferred vendor's key is absent but an alternative vendor is available. See Scenario 5 for details; a follow-up issue will be filed per #476.
 
 **Live-run layer: pending** — live workflow runs require:
 1. Enabling `REVIEW_MODEL_PAIRING` in `terraform.tfvars` and running `terraform apply`.
@@ -59,7 +59,7 @@ Both PRs were opened by `mfrancza-developer-agent[bot]` with `AGENT_MODEL=sonnet
 - `"different-vendor-same-class"` picks the canonical OpenAI model for an Anthropic-authored sonnet PR (expected: first OpenAI entry in `sonnet` class).
 - Canonical opus pick: for an Anthropic `opus`-authored PR with `preferred_vendors = ["openai", "xai", "anthropic"]`, picks `gpt-5.6-sol` (first entry of `classes.opus.openai`).
 - Honours `preferred_vendors` order: `["xai", "openai", "anthropic"]` picks the xAI canonical opus pick (`grok-4.20-0309-reasoning`).
-- Skips a vendor whose API key is unavailable (emits a `core.warning()`).
+- Skips a vendor whose API key is unavailable; silently falls back to the next preferred vendor when an alternative is available (no warning is emitted for a single missing key — see Scenario 5 gap note).
 - Falls through the fallback chain when no cross-vendor entry exists.
 
 **Class-table consistency** (`test/model-classes.test.ts`, 27 tests covering Checks 1–4):
@@ -97,18 +97,20 @@ Both cases verified by the `"honours preferred_vendors order"` test in `model-pa
 
 ### Scenario 5 — API-key fallback with `core.warning()` (Design Decision 5)
 
-**Verification method:** unit tests.
+**Verification method:** unit tests (partial — see gap below).
 
 **`selectReviewerModel` unit tests:**
-- Skips vendors without an available key; emits a `core.warning()` warning string.
 - Falls through to `default-model` fallback when no cross-vendor key is available at all.
-- Warning text confirmed by the `"emits a warning when the primary pick fails"` test.
+- Emits a `core.warning()` only in the exhaustion case (all preferred cross-vendor vendors unavailable); the warning text is confirmed by the `"emits a warning when the primary pick fails"` test.
+- When a single vendor's key is missing but another preferred vendor's key is available, `pickDifferentVendorSameClass` silently falls back to that next vendor — **no warning is emitted**.
 
 **`available-providers` computation** in `agent-review-reusable.yml` (resolve job): derives the JSON array from `secrets.ANTHROPIC_API_KEY != ''` / `secrets.OPENAI_API_KEY != ''` / `secrets.XAI_API_KEY != ''`; passes it to `resolve-reviewer-set` as `available-providers`. Reviewed in static analysis of the workflow YAML.
 
 **Pairing-tier error routing:** `resolve-reviewer-set.test.ts` includes the test `"calls core.error() (not core.warning()) when DEFAULT_MODEL equals the authoring model after fallback"`, verifying the `ERROR:` prefix on the warning string is mapped to `core.error()` by the entry point.
 
-**Pending live-run:** step 5 of the acceptance checklist (requires temporarily excluding a provider from the available set in a workflow-dispatch run).
+**Known gap — silent single-provider skip:** Direct invocation of `selectReviewerModel` with author `opus`, `preferred_vendors: ["openai", "xai", "anthropic"]`, and `available_providers: ["anthropic", "xai"]` (OpenAI key absent) returns `{model: "grok-4.20-0309-reasoning", source: "primary", warnings: []}`. The OpenAI skip is silent; `core.warning()` is not emitted because `pickDifferentVendorSameClass` falls through to xAI without exhausting all options. This diverges from the live-run checklist step 5's expectation of a `core.warning()` on unset OpenAI key. A follow-up issue will be filed per #476 to decide whether silent fallback is the desired behaviour or whether the implementation should be updated to warn on each skipped vendor.
+
+**Pending live-run:** step 5 of the acceptance checklist — see gap note above; the observable behaviour will be a silent xAI pick unless all cross-vendor keys are removed.
 
 ### Scenario 6 — Marker absence fallback (Design Decision 4, 5)
 
@@ -144,8 +146,10 @@ The seven acceptance steps from the issue body require live GitHub Actions runs 
 | 1 | Marker injection: open test issue with `model:developer:opus`, confirm PR body has `<!-- authored-by-model: opus -->` | Confirmed via PR #644 and #654 (sonnet marker); opus variant pending |
 | 2 | Primary pairing pick (`different-vendor-same-class`, `preferred_vendors: ["openai",…]`): confirm reviewer runs on `gpt-5.6-sol` | Pending live run |
 | 3 | Label override: add `model:review:sonnet`, confirm review runs on `sonnet` (pairing tier skipped) | Pending live run |
-| 4 | Vendor tie-break: change `preferred_vendors` to `["xai",…]`, confirm reviewer runs on `grok-4.20-0309-reasoning` | Pending live run |
-| 5 | API-key fallback: unset OpenAI key, confirm resolver falls through to xAI model with `core.warning()` | Pending live run |
+| — | **Reset:** remove the `model:review:sonnet` label before step 4 (Tier 1 label from step 3 would otherwise shadow the pairing tier) | — |
+| 4 | Vendor tie-break: change `preferred_vendors` to `["xai",…]` (no `model:review:*` label present), confirm reviewer runs on `grok-4.20-0309-reasoning` | Pending live run |
+| — | **Reset:** restore `preferred_vendors: ["openai", "xai", "anthropic"]` before step 5 (step 4's xAI-first ordering means removing the OpenAI key would still pick xAI as *primary*, not as fallback) | — |
+| 5 | API-key fallback: unset OpenAI key (`preferred_vendors: ["openai",…]`), confirm resolver falls through to xAI pick (note: silent fallback, no `core.warning()` expected — see Scenario 5 gap) | Pending live run |
 | 6 | Marker absence: confirm reviewer falls through to `DEFAULT_MODEL` with loud warning | Pending live run |
 | 7 | `same-model` policy: confirm review runs on author's model | Pending live run |
 
@@ -165,7 +169,9 @@ To unblock steps 2–7, an operator must:
 2. Run `terraform apply`.
 3. Open a test issue, apply `model:developer:opus` + `agent:developer`, wait for the PR, then apply `agent:review` and observe the resolve job's "Resolved reviewer set" output.
 4. Record the workflow-run URLs, resolved model, and warning output as a comment on issue #476.
-5. Repeat steps 2–7 of the acceptance checklist, adjusting Terraform config as specified.
+5. Repeat steps 2–7 of the acceptance checklist, following the explicit **Reset** rows in the table between scenarios:
+   - **Before step 4:** remove any `model:review:*` label applied in step 3 (`gh pr edit --remove-label "model:review:sonnet"`). Confirm no per-review model override remains before triggering.
+   - **Before step 5:** restore `preferred_vendors: ["openai", "xai", "anthropic"]` in Terraform and re-apply, so that the OpenAI vendor is the *intended primary* and xAI is the fallback. Without this reset, step 4's xAI-first ordering makes xAI the primary pick regardless of the missing OpenAI key, defeating the fallback scenario.
 
 Per the issue scope: if observed behaviour diverges from the design, open a follow-up issue rather than patching here.
 
