@@ -192,17 +192,24 @@ is being replaced.
 `.github/workflows/agent-fix-checks-poll.yml` that fires on a
 `schedule:` cron (default every 15 min, overridable) and
 `workflow_dispatch:` for manual triggering. The polling job lists every
-**open PR authored by `mfrancza-developer-agent[bot]`**, calls
+**open PR authored by `mfrancza-developer-agent[bot]`** that does **not**
+carry the `human-required` label (via `gh pr list --author
+"mfrancza-developer-agent[bot]" --search "-label:human-required"`), calls
 `gh pr checks --json name,bucket,state` for each, applies
 `FIX_CHECKS_IGNORE` to the result, and — for every PR where at least one
 non-ignored check is in a failing conclusion (`failure`, `timed_out`,
-`action_required`) and no non-ignored check is still *pending* — invokes
-the same reusable workflow (`agent-fix-checks-reusable.yml`) that the
-event-driven caller uses, with the resolved PR number and HEAD SHA. The
-per-PR concurrency group from Decision 4a (`agent-fix-checks-pr-<N>`)
-and the entrypoint freshness guard from Decision 4c handle deduplication
-between the polling backstop and any event-driven run against the same
-PR; the backstop is **not** a parallel code path for the fix itself.
+`action_required`) — invokes the same reusable workflow
+(`agent-fix-checks-reusable.yml`) that the event-driven caller uses,
+with the resolved PR number and the PR's current HEAD SHA passed as
+`head-sha-at-trigger` so Decision 4c's guard sees HEAD-unchanged and
+applies the "unrelated pending → don't wait, proceed to fix"
+classification. The polling backstop does **not** veto on pending
+checks; delegating pending classification to Decision 4c is required to
+avoid the pending-veto bug described below. The per-PR concurrency group
+from Decision 4a (`agent-fix-checks-pr-<N>`) and the entrypoint freshness
+guard from Decision 4c handle deduplication between the polling backstop
+and any event-driven run against the same PR; the backstop is **not** a
+parallel code path for the fix itself.
 
 **Why a backstop at all.** As Decision 1 makes explicit, the design does
 not have architectural certainty that `check_run.completed` fires for
@@ -232,15 +239,51 @@ and then short-circuited by the guard. Steady-state cost is therefore
 one `gh pr list` + `gh pr checks` per open agent PR per polling
 interval, with no agent invocations when nothing is failing.
 
-**Why the pending-check gate inside the poll.** The entrypoint freshness
-guard (Decision 4c) already distinguishes *stale replacement* from
-*unrelated* pending checks using the HEAD SHA at trigger. The polling
-backstop does not have a trigger-time HEAD SHA (it is not responding to
-a single check), so it uses the simpler rule "do not invoke the agent
-when any non-ignored check is still pending" and lets the next polling
-tick re-evaluate once the pending check reports. This cannot create the
-lost-wakeup bug Decision 4c addresses because the next polling tick will
-re-observe the same failure.
+**Why the backstop must not veto on pending checks (pending-veto bug).**
+An earlier version of this decision had the backstop skip any PR with a
+non-ignored pending check, on the premise that the next polling tick
+would re-observe the same failure once the pending check reported. That
+is wrong when the pending check never completes on its own — the typical
+case being a third-party approval, deployment-gate, or manual-review
+check that waits for human action and may remain pending indefinitely.
+Under the earlier rule, a failing check A alongside an indefinitely
+pending check B would veto every polling tick forever: A is never
+dispatched because of B, and for the exact origins this backstop exists
+to cover (where `check_run` delivery is suppressed), **the backstop is
+the only automatic path to a fix**. Decision 4c's HEAD-based
+classification already resolves this correctly for the HEAD-unchanged
+case ("unrelated pending → don't wait, proceed to fix now"), so the
+backstop delegates to it by passing `head-sha-at-trigger = current
+HEAD`. The event-driven path works the same way: an event-driven run
+whose HEAD matches trigger time also treats pending checks as unrelated
+and proceeds. The polling-backstop pending-replacement case — where a
+previous polling tick's fix push left stale replacement checks pending —
+is still handled correctly: a later polling tick will see a different
+HEAD than the one the in-flight run captured as `head-sha-at-trigger`,
+and Decision 4c's bounded wait kicks in. Native per-PR concurrency
+prevents the second poll's dispatch from starting the agent concurrently
+with the first.
+
+**Why the `human-required` label filter.**
+`respond-to-checks.md` explicitly allows the agent to escalate an
+unfixable failure (one it cannot resolve on its own) by applying the
+`human-required` label, assigning a human, and posting a comment
+explaining what input is needed, **without** producing a fix. In that
+supported outcome the failing check stays terminal and HEAD does not
+advance, so without an escalation-aware stop the backstop would
+re-dispatch the agent every polling interval and the agent would
+re-escalate every time (adding another assignment and another comment
+each pass). The `human-required` label is the explicit signal "a human
+is handling this"; both the polling backstop (via `gh pr list --search
+"-label:human-required"`) and Decision 4c's entrypoint guard respect it
+and skip the PR until the label is removed. The operator re-enables the
+automatic fix pipeline by removing the label after the human has
+unblocked whatever the agent escalated for; the next event-driven
+`check_run.completed` / `workflow_run.completed` or the next polling
+tick picks the failure back up. This also addresses the event-driven
+analogue of the same bug: Decision 4c's guard applies the same label
+check for event-triggered runs, so a human-required-labelled PR cannot
+trigger a re-escalation via a late check-completion event either.
 
 **Why repo-wide polling instead of per-event enqueue.** The backstop
 exists specifically because events may not fire. Any mechanism that
@@ -490,6 +533,21 @@ env var via the new `head-sha-at-trigger` reusable-workflow input), and
 distinguishes two classes of pending check so a pending-check completion
 cannot permanently discard the failure that triggered the run:
 
+- **`human-required` label short-circuit (first).** Call
+  `gh pr view "$GITHUB_PR_NUMBER" --json labels --jq
+  '.labels[].name'` and exit 0 without invoking the agent (and without
+  entering the pending-check wait) if `human-required` is present. The
+  `respond-to-checks.md` prompt explicitly permits the agent to escalate
+  an unfixable failure by applying that label, assigning a human, and
+  posting a comment without producing a fix. Without this
+  short-circuit, every subsequent trigger (polling tick or late
+  check-completion event) would spend another full agent pass
+  re-escalating the same failure. Operators re-enable the fix pipeline
+  for the PR by removing the `human-required` label after the human has
+  unblocked whatever the agent escalated for; the next event-driven
+  trigger or polling tick picks the failure back up. This check runs
+  before the pending-check classification so an escalated PR with
+  pending checks does not enter the bounded wait.
 - **Snapshot.** Enumerate current PR checks via `gh pr checks
   "$GITHUB_PR_NUMBER" --json name,state,bucket --jq ...`. Apply the
   ignore list throughout: a check whose name appears in
@@ -565,6 +623,9 @@ regress silently.
 | `cancel-in-progress: true` | Cancels an in-flight fix pass when a second check fails, risking a partial write to the branch. The agent's work is cheap to re-run but non-trivial to abort cleanly; preferring queued runs over cancelled runs is strictly safer. |
 | Rely on concurrency alone (prior draft) | Does not address the already-fixed-failures or pending-replacement-check races — the queued run still invokes the agent against stale or absent failures and may push against the same HEAD twice. |
 | Exit 0 on **any** pending check (earlier guard draft) | Creates the lost-wakeup bug described above: an unrelated pending check that later reports `success` is rejected by the Decision 3 `if:`, stranding the real failure. The HEAD-based classification above distinguishes stale replacement (wait) from unrelated pending (don't wait). |
+| Treat the agent's own `human-required` label as "already attempted; keep retrying" (ignore the label) | `respond-to-checks.md` lets the agent escalate an unfixable failure by applying `human-required`, assigning a human, and posting a comment without producing a fix. Ignoring the label would cause every polling tick and every late check-completion event to re-dispatch the agent against the same terminal failure and re-escalate — adding another assignment and another comment each pass — rather than yielding to the human the agent explicitly handed the problem to. The label-based short-circuit mirrors the convention in `AGENTS.md` (the label is the explicit "agent cannot proceed on its own" signal). |
+| Store a per-PR "already attempted" ledger (git note / artifact / PR body marker) | Introduces stateful cross-run persistence for a signal GitHub already stores on the PR itself. The `human-required` label is observable via `gh pr view --json labels` with no extra storage, and the operator re-enable gesture (remove the label) is the same gesture that already closes any other agent escalation. |
+| Bounded N-attempts retry counter | Still re-dispatches the agent at least N times for a failure that is known to require human input; the first attempt already applied `human-required`, so attempts 2…N just duplicate the escalation. Picking N adds a parameter with no principled default; the label-based short-circuit is a clean 0-or-1 contract instead. |
 | A persistent "we already queued a run" ledger | Stateful cross-run persistence in a stateless workflow; the in-container guard already short-circuits duplicate work without a datastore. |
 | Debounce window (e.g. "wait 60s before firing") | Adds latency to the user-visible feedback loop and would still miss checks that complete after the debounce; the guard addresses the root cause instead. |
 
@@ -609,9 +670,19 @@ permission grants.
   prompt is unchanged. The freshness/duplicate-work guard added in
   Decision 4c lives in `action_fix_checks()` (entrypoint shell), runs
   *before* the agent is invoked, and short-circuits when there is
-  nothing non-ignored to fix on the current HEAD or when replacement
-  checks are still pending. The agent itself still fixes whatever
-  `gh pr checks` reports when it is invoked.
+  nothing non-ignored to fix on the current HEAD, when replacement
+  checks are still pending, or when the PR already carries the
+  `human-required` label the agent itself may have applied on a prior
+  pass. The agent itself still fixes whatever `gh pr checks` reports
+  when it is invoked.
+- **Automatic removal of the `human-required` label.** Decision 4c's
+  guard and the Decision 1a backstop both treat the label as a stop
+  condition and never clear it on their own. Removing it is an explicit
+  operator gesture that signals the human has unblocked whatever the
+  agent escalated for; the next trigger (polling tick or
+  check-completion event) picks the failure back up. Automating removal
+  would re-create the re-escalation loop the stop condition exists to
+  prevent.
 - **Reacting to failing checks on human PRs.** The agent-authored trust
   gate is preserved (`filter-agent-pr`). Expanding to human PRs is a
   larger policy question outside this issue.
@@ -647,9 +718,9 @@ permission grants.
 | [#656](https://github.com/mfrancza/agentic-development-workflow/issues/656) | Terraform: add `fix_checks_ignore` variable (`list(string)`, default `[]`), expose as `FIX_CHECKS_IGNORE` Actions variable via `github_actions_variable` in `terraform/modules/agent-vars/`, update `terraform.tfvars.example` with a documented example entry, extend `AGENTS.md`'s Terraform Actions-variable list to reference the new var | — |
 | [#657](https://github.com/mfrancza/agentic-development-workflow/issues/657) | `resolve-check-pr` TypeScript activity + composite action: `.github/scripts/src/resolve-check-pr.ts` accepts `event_name` and branches between `check_run` and `workflow_run` payload shapes (both resolve via `pull_requests[0]` first, then `listPullRequestsAssociatedWithCommit(head_sha)`); outputs `pr_number`, `head_sha`, and `proceed`; `.github/actions/resolve-check-pr/action.yml` thin wrapper; vitest tests under `.github/scripts/test/` covering both event types and the fallback paths; follows the composite-action portability pattern (`${{ github.action_path }}/../../scripts`, Resolve-scripts-directory step) | — |
 | [#658](https://github.com/mfrancza/agentic-development-workflow/issues/658) | Caller stub + reusable workflow rewiring using a **hybrid** trigger: `.github/workflows/agent-fix-checks.yml` subscribes to **both** `workflow_run: [completed]` (preserving the existing same-repo Actions path — `workflows:` still enumerates the covered same-repo workflows) and `check_run: [completed]` (for cross-repo and third-party checks that the `check_run` recursion guard does not block); split the stub into a **resolve-pr job** that calls `resolve-check-pr` and publishes `pr_number`/`head_sha`/`proceed` as job outputs, plus a dependent **fix-checks job** that calls the reusable with `needs: resolve-pr`, is gated on `needs.resolve-pr.outputs.proceed == 'true'`, and whose `concurrency.group` reads `needs.resolve-pr.outputs.pr_number` (no `check_run.id` fallback needed — events the resolver cannot map are skipped at the `if:`); add the conclusion-whitelist + `FIX_CHECKS_IGNORE` filter on the resolver job's `if:` with the conclusion comparisons parenthesised as a group before the `&&` with the ignore-list check (see Decision 3); extend the reusable workflow to accept `head-sha-at-trigger` and plumb `FIX_CHECKS_IGNORE` through to the container as an env var; the resolver job's `checkout` step uses the repo-standard pinned SHA (`actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0`) with `persist-credentials: false` (per `AGENTS.md`'s security defaults); update `AGENTS.md` MVP Workflow step 4 and `README.md` as needed to describe the hybrid trigger and the ignore-list variable | Issue #656, Issue #657 |
-| [#667](https://github.com/mfrancza/agentic-development-workflow/issues/667) | Entrypoint freshness / duplicate-work guard in `action_fix_checks()` (`docker/scripts/entrypoint.sh`): after `gh pr checkout` and before `run_agent`, enumerate PR checks via `gh pr checks --json name,state,bucket` (ignore-list applied throughout); classify non-ignored *pending* checks by comparing the container's HEAD SHA to `GITHUB_HEAD_SHA_AT_TRIGGER` — if HEAD **changed** since trigger, treat pending as *stale replacement* and bounded-wait (default 15 min, overridable via `FIX_CHECKS_WAIT_SECONDS`) for them to become terminal; if HEAD **unchanged**, treat pending as *unrelated* and do **not** wait (their own completion events are valid re-triggers). After the wait (or immediately on the HEAD-unchanged branch), if any non-ignored check is still failing (`failure`/`timed_out`/`action_required`), fall through to `run_agent`; otherwise exit 0. Stale-HEAD escape hatch: if HEAD changed and the initial snapshot already shows no non-ignored failing or pending checks, exit 0 without entering the wait. Read `FIX_CHECKS_IGNORE` and `GITHUB_HEAD_SHA_AT_TRIGGER` from env (plumbed in by Issue #658). Extract the guard into a helper function (e.g. `fix_checks_should_run`) and cover with bats-style/shellcheck-tested units. | Issue #658 |
-| [#668](https://github.com/mfrancza/agentic-development-workflow/issues/668) | Scheduled polling backstop workflow `.github/workflows/agent-fix-checks-poll.yml`: `schedule:` (default 15 min) + `workflow_dispatch:`; enumerate open PRs authored by `mfrancza-developer-agent[bot]`, apply `FIX_CHECKS_IGNORE`, and for each PR with at least one non-ignored failing check and no non-ignored pending check, call `agent-fix-checks-reusable.yml` with the PR number and current HEAD SHA (as `head-sha-at-trigger` so Decision 4c sees HEAD-unchanged); use the pinned `actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0` with `persist-credentials: false`; `max-parallel: 1` on the dispatch matrix so the backstop fans in to the per-PR concurrency group one PR at a time. Dedup with event-driven runs is provided by the shared `agent-fix-checks-pr-<N>` concurrency group (Decision 4a) and the entrypoint freshness guard (Decision 4c). Update `AGENTS.md` and `README.md` to document the backstop and its operator knobs. | Issue #656, Issue #658, Issue #667 |
-| [#659](https://github.com/mfrancza/agentic-development-workflow/issues/659) | End-to-end validation on a disposable agent-authored PR, with **each origin and each guard behaviour exercised independently** (per the review feedback): (1) a failing same-repo workflow job *other than* a job in `CI` starts fix-checks via the `workflow_run` branch of the trigger; (2) a failing check reported by a workflow defined in another repository (e.g. a test organization ruleset) starts fix-checks via the `check_run` branch **if** `check_run` events are delivered for that origin — **and** if events are not delivered, the Decision 1a polling backstop (Issue #668) picks it up within one interval; (3) a synthesized third-party check (posted via the Checks API from a GitHub App that is **not** GitHub Actions) starts fix-checks via the `check_run` branch — exercised as its own case, not substituted for case (2) — with the same backstop-coverage check as case (2); (4)/(5)/(6) adding each check's name to `FIX_CHECKS_IGNORE` suppresses the next run (both event-driven and polled), with explicit cases for `failure`, `timed_out`, and `action_required` conclusions on the ignored name (to catch regressions of the Decision 3 `if:` grouping); (7) with two different non-ignored checks failing on the same PR in close succession, only one agent pass runs — the queued run exercises the Decision 4c freshness guard and exits 0 without invoking the agent; (8) **pending-check-succeeds regression** — with HEAD unchanged, a failing check A + an unrelated pending check B must still fix A immediately (the guard does not wait); with HEAD changed by the in-flight fix push, a pending replacement check A' must trigger the bounded wait and the original failure must not be stranded even when A' later reports `success`; (9) **polling-backstop dedup regression** — a polled dispatch arriving while an event-driven run is in flight is queued and short-circuited by the freshness guard without a second agent pass; (10) a failing check on a human-authored PR does *not* start fix-checks (neither event-driven nor polled); (11) record which `check_run` delivery classes empirically fire for this subscription (same-repo, cross-repo-Actions, third-party on Actions-associated SHA, third-party on non-Actions SHA) so the design doc's uncertainty around Decision 1 is replaced with observed evidence. | Issue #658, Issue #667, Issue #668 |
+| [#667](https://github.com/mfrancza/agentic-development-workflow/issues/667) | Entrypoint freshness / duplicate-work guard in `action_fix_checks()` (`docker/scripts/entrypoint.sh`): after `gh pr checkout` and before `run_agent`, (a) check whether the PR carries the `human-required` label via `gh pr view --json labels` and exit 0 if present (the agent escalated an unfixable failure via `respond-to-checks.md`; wait for a human to remove the label before re-attempting); (b) enumerate PR checks via `gh pr checks --json name,state,bucket` (ignore-list applied throughout); (c) classify non-ignored *pending* checks by comparing the container's HEAD SHA to `GITHUB_HEAD_SHA_AT_TRIGGER` — if HEAD **changed** since trigger, treat pending as *stale replacement* and bounded-wait (default 15 min, overridable via `FIX_CHECKS_WAIT_SECONDS`) for them to become terminal; if HEAD **unchanged**, treat pending as *unrelated* and do **not** wait (their own completion events are valid re-triggers). After the wait (or immediately on the HEAD-unchanged branch), if any non-ignored check is still failing (`failure`/`timed_out`/`action_required`), fall through to `run_agent`; otherwise exit 0. Stale-HEAD escape hatch: if HEAD changed and the initial snapshot already shows no non-ignored failing or pending checks, exit 0 without entering the wait. Read `FIX_CHECKS_IGNORE` and `GITHUB_HEAD_SHA_AT_TRIGGER` from env (plumbed in by Issue #658). Extract the guard into a helper function (e.g. `fix_checks_should_run`) and cover with bats-style/shellcheck-tested units — including a case where the `human-required` label is present and the agent must not be invoked. | Issue #658 |
+| [#668](https://github.com/mfrancza/agentic-development-workflow/issues/668) | Scheduled polling backstop workflow `.github/workflows/agent-fix-checks-poll.yml`: `schedule:` (default 15 min) + `workflow_dispatch:`; enumerate open PRs authored by `mfrancza-developer-agent[bot]` that do **not** carry the `human-required` label (`gh pr list --author "mfrancza-developer-agent[bot]" --search "-label:human-required"`), apply `FIX_CHECKS_IGNORE`, and for each PR with at least one non-ignored failing check — **regardless of whether any non-ignored checks are also pending** — call `agent-fix-checks-reusable.yml` with the PR number and current HEAD SHA (as `head-sha-at-trigger` so Decision 4c sees HEAD-unchanged and classifies any pending checks as "unrelated → don't wait, proceed to fix"); use the pinned `actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0` with `persist-credentials: false`; `max-parallel: 1` on the dispatch matrix so the backstop fans in to the per-PR concurrency group one PR at a time. Dedup with event-driven runs is provided by the shared `agent-fix-checks-pr-<N>` concurrency group (Decision 4a) and the entrypoint freshness guard (Decision 4c), including the guard's `human-required` label short-circuit for any late event that reaches a PR after the backstop has already begun. Update `AGENTS.md` and `README.md` to document the backstop, its operator knobs, and the "remove the `human-required` label to resume the automatic fix pipeline" operator gesture. | Issue #656, Issue #658, Issue #667 |
+| [#659](https://github.com/mfrancza/agentic-development-workflow/issues/659) | End-to-end validation on a disposable agent-authored PR, with **each origin and each guard behaviour exercised independently** (per the review feedback): (1) a failing same-repo workflow job *other than* a job in `CI` starts fix-checks via the `workflow_run` branch of the trigger; (2) a failing check reported by a workflow defined in another repository (e.g. a test organization ruleset) starts fix-checks via the `check_run` branch **if** `check_run` events are delivered for that origin — **and** if events are not delivered, the Decision 1a polling backstop (Issue #668) picks it up within one interval; (3) a synthesized third-party check (posted via the Checks API from a GitHub App that is **not** GitHub Actions) starts fix-checks via the `check_run` branch — exercised as its own case, not substituted for case (2) — with the same backstop-coverage check as case (2); (4)/(5)/(6) adding each check's name to `FIX_CHECKS_IGNORE` suppresses the next run (both event-driven and polled), with explicit cases for `failure`, `timed_out`, and `action_required` conclusions on the ignored name (to catch regressions of the Decision 3 `if:` grouping); (7) with two different non-ignored checks failing on the same PR in close succession, only one agent pass runs — the queued run exercises the Decision 4c freshness guard and exits 0 without invoking the agent; (8) **pending-check-succeeds regression** — with HEAD unchanged, a failing check A + an unrelated pending check B must still fix A immediately (the guard does not wait); with HEAD changed by the in-flight fix push, a pending replacement check A' must trigger the bounded wait and the original failure must not be stranded even when A' later reports `success`; (9) **polling-backstop dedup regression** — a polled dispatch arriving while an event-driven run is in flight is queued and short-circuited by the freshness guard without a second agent pass; (10) a failing check on a human-authored PR does *not* start fix-checks (neither event-driven nor polled); (11) record which `check_run` delivery classes empirically fire for this subscription (same-repo, cross-repo-Actions, third-party on Actions-associated SHA, third-party on non-Actions SHA) so the design doc's uncertainty around Decision 1 is replaced with observed evidence; (12) **polling-backstop pending-veto regression (new)** — on a *suppressed-origin* PR, non-ignored check A fails while non-ignored check B stays pending across at least two polling intervals; the backstop must dispatch A on the first interval (not wait for B) and the agent must fix A, verifying that an indefinitely-pending unrelated check cannot block the backstop; (13) **escalation stop regression (new)** — the agent is driven to a failure it cannot fix (e.g. a check whose root cause is outside the diff) so it applies the `human-required` label, assigns a human, and posts a comment without producing a fix; the subsequent polling tick and a subsequent `check_run.completed` / `workflow_run.completed` event on the same PR must **not** re-invoke the agent (the guard and the backstop filter both short-circuit on the label); removing the `human-required` label must re-enable the automatic fix pipeline so the next trigger picks the failure back up. | Issue #658, Issue #667, Issue #668 |
 
 Issues #656 and #657 are independent of each other — one defines the
 Actions variable contract (`FIX_CHECKS_IGNORE`, JSON array, default `[]`);
