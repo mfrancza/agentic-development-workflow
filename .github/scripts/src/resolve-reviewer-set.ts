@@ -1,6 +1,7 @@
 import * as core from "@actions/core";
 import { getOctokit } from "./lib/octokit.js";
-import { resolveModel } from "./lib/resolve-model.js";
+import { resolveModel, type PairingOptions } from "./lib/resolve-model.js";
+import { type PairingConfig } from "./lib/model-pair.js";
 
 export interface ReviewerSetEntry {
   model: string;
@@ -17,7 +18,8 @@ export interface ReviewerSetEntry {
  * 3. **Single-reviewer fallback** — resolve one model via the existing
  *    two-tier waterfall on the PR (generic `model:*` label →
  *    `defaultModel`) and return a single-element set. Reuses `resolveModel()`
- *    to avoid forking the fallback logic.
+ *    to avoid forking the fallback logic. When `pairingOptions` is supplied,
+ *    the pairing tier (Tier 3 inside `resolveModel`) is also active.
  *
  * @param octokit        Pre-authenticated Octokit client.
  * @param prNumber       Pull request number.
@@ -25,6 +27,8 @@ export interface ReviewerSetEntry {
  * @param repo           Repository name (without owner).
  * @param reviewerModels Parsed REVIEWER_MODELS variable (may be empty).
  * @param defaultModel   Fallback model when no label or list is present.
+ * @param pairingOptions Optional pairing configuration; only consulted in
+ *                       the Tier 3 fallback path via `resolveModel`.
  * @returns              Non-empty array of reviewer-set entries; throws on
  *                       unrecoverable resolution failure.
  */
@@ -35,6 +39,7 @@ export async function resolveReviewerSet(
   repo: string,
   reviewerModels: string[],
   defaultModel: string,
+  pairingOptions?: PairingOptions,
 ): Promise<ReviewerSetEntry[]> {
   // Fetch PR labels once for the Tier 1 check.
   const { data: pr } = await octokit.rest.pulls.get({
@@ -64,9 +69,10 @@ export async function resolveReviewerSet(
     return reviewerModels.map((model) => ({ model }));
   }
 
-  // Tier 3: Single-reviewer fallback via the existing two-tier waterfall.
+  // Tier 3: Single-reviewer fallback via the existing waterfall in resolveModel.
   // resolveModel with agentType="review" applies:
-  //   model:review:* (none, verified above) → generic model:* → defaultModel.
+  //   model:review:* (none, verified above) → generic model:* → pairing tier
+  //   (when pairingOptions is supplied) → defaultModel.
   // Reusing resolveModel avoids forking the fallback logic.
   const model = await resolveModel(
     octokit,
@@ -76,6 +82,17 @@ export async function resolveReviewerSet(
     repo,
     defaultModel,
     "review",
+    pairingOptions,
+    (msg: string) => {
+      // Messages prefixed with "ERROR:" must be surfaced as core.error(); all
+      // others are core.warning().  This fulfils Decision 5 of the design which
+      // requires core.error() when DEFAULT_MODEL == authoring model.
+      if (msg.startsWith("ERROR:")) {
+        core.error(msg.slice("ERROR:".length).trim());
+      } else {
+        core.warning(msg);
+      }
+    },
   );
   return [{ model }];
 }
@@ -96,7 +113,12 @@ async function run(): Promise<void> {
     required: false,
   });
   const defaultModel = core.getInput("default_model", { required: true });
-  // pair_policy: reserved for the future pair-policy tier; not consumed yet.
+
+  // Pairing tier inputs (optional; only used when neither Tier 1 nor Tier 2
+  // yielded a reviewer set).
+  const pairingPolicyRaw = core.getInput("pair_policy", { required: false }).trim();
+  const authoringModel = core.getInput("authoring_model", { required: false }).trim();
+  const availableProvidersRaw = core.getInput("available_providers", { required: false }).trim();
 
   const prNumber = parseInt(prNumberStr, 10);
   if (isNaN(prNumber) || prNumber <= 0) {
@@ -132,6 +154,49 @@ async function run(): Promise<void> {
     reviewerModels = parsed as string[];
   }
 
+  // Build pairing options if the pair-policy input is supplied.
+  let pairingOptions: PairingOptions | undefined = undefined;
+  if (pairingPolicyRaw) {
+    let pairingConfig: PairingConfig;
+    try {
+      pairingConfig = JSON.parse(pairingPolicyRaw) as PairingConfig;
+    } catch (err) {
+      core.warning(
+        `Pairing tier skipped: failed to parse pair-policy JSON: ${err instanceof Error ? err.message : String(err)}. ` +
+          `Falling through to DEFAULT_MODEL.`,
+      );
+      pairingConfig = { policy: "off", enabled: false };
+    }
+
+    // Parse available-providers: supports JSON array or comma-separated string.
+    let availableProviders: string[] = [];
+    if (availableProvidersRaw) {
+      const providersTrimmed = availableProvidersRaw.trim();
+      if (providersTrimmed.startsWith("[")) {
+        try {
+          availableProviders = JSON.parse(providersTrimmed) as string[];
+        } catch {
+          availableProviders = providersTrimmed
+            .replace(/[\[\]"]/g, "")
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+      } else {
+        availableProviders = providersTrimmed
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+      }
+    }
+
+    pairingOptions = {
+      pairingConfig,
+      authoringModel,
+      availableProviders,
+    };
+  }
+
   const octokit = getOctokit(token);
 
   const reviewerSet = await resolveReviewerSet(
@@ -141,6 +206,7 @@ async function run(): Promise<void> {
     repoName,
     reviewerModels,
     defaultModel,
+    pairingOptions,
   );
 
   // Decision 5 soft cost warning: flag when the resolved set is large.

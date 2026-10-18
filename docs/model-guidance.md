@@ -94,6 +94,8 @@ The CLI default and the vendor's recommended model are not necessarily the same.
 
 > This section mirrors `.github/scripts/data/model-classes.json`; edit the JSON and refresh this section in the same PR.
 
+**Consumed by:** the `resolve-model` composite action (`.github/actions/resolve-model/action.yml`) when the `REVIEW_MODEL_PAIRING` Actions variable has `enabled: true`. The data file (`.github/scripts/data/model-classes.json`) and the loader (`.github/scripts/src/lib/model-classes.ts`) are the authoritative runtime sources; this section is a human-readable mirror. See [`docs/design/configurable-model-pair-preferences.md`](design/configurable-model-pair-preferences.md) Decision 3 for the design rationale.
+
 The table below maps each capability class to its canonical and alternative model IDs per vendor.
 The **first model listed** in each vendor cell is the **canonical pick** — the model the pairing
 resolver selects by default when it needs one representative for a `(class, vendor)` combination.

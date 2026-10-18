@@ -163,6 +163,39 @@ jobs:
           fi
           echo "Helper checkout HEAD verified: ${actual_sha}"
 
+      - name: Read authoring model from PR body
+        # Reads the <!-- authored-by-model: … --> marker injected by the
+        # developer/design entrypoint. Output authoring_model is an empty string
+        # when the marker is absent; the pairing tier is silently skipped in that
+        # case (no error — the marker lands only on PRs opened after the feature
+        # was deployed).
+        id: author
+        uses: ./_agentic-workflow/.github/actions/find-authored-by-model
+        with:
+          token: ${{ github.token }}
+          repository: ${{ inputs.repo }}
+          pr-number: ${{ inputs.pr-number }}
+
+      - name: Compute available providers
+        # Derives a JSON array of provider names whose corresponding API key is
+        # non-empty in the calling workflow's secret context. The pairing resolver
+        # uses this list to avoid picking a model whose key is unset.
+        # Values written to GITHUB_OUTPUT are hardcoded provider-name strings
+        # ("anthropic", "openai", "xai"), not user-controlled data, so no
+        # CR/LF stripping is required.
+        id: providers
+        env:
+          HAS_ANTHROPIC: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+          HAS_OPENAI: ${{ secrets.OPENAI_API_KEY != '' }}
+          HAS_XAI: ${{ secrets.XAI_API_KEY != '' }}
+        run: |
+          set -euo pipefail
+          list=""
+          [[ "${HAS_ANTHROPIC}" == "true" ]] && list="${list:+${list},}\"anthropic\""
+          [[ "${HAS_OPENAI}" == "true" ]] && list="${list:+${list},}\"openai\""
+          [[ "${HAS_XAI}" == "true" ]] && list="${list:+${list},}\"xai\""
+          echo "list=[${list}]" >> "$GITHUB_OUTPUT"
+
       - name: Resolve reviewer set
         id: resolve-set
         uses: ./_agentic-workflow/.github/actions/resolve-reviewer-set
@@ -172,6 +205,9 @@ jobs:
           repo: ${{ inputs.repo }}
           reviewer-models: ${{ inputs.reviewer-models }}
           default-model: ${{ inputs.default-model }}
+          pair-policy: ${{ vars.REVIEW_MODEL_PAIRING }}
+          authoring-model: ${{ steps.author.outputs.authoring_model }}
+          available-providers: ${{ steps.providers.outputs.list }}
 
       - name: Fail loudly if reviewer set is empty
         env:

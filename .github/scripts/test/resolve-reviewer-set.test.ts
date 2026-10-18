@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as core from "@actions/core";
 import { resolveReviewerSet } from "../src/resolve-reviewer-set.js";
 
 // Suppress @actions/core logging so test output stays clean.
@@ -366,5 +367,60 @@ describe("resolveReviewerSet — edge cases", () => {
     mockPullGet.mockResolvedValue(prResponse([]));
     const tier3 = await resolveReviewerSet(octokit, 3, "owner", "repo", [], "sonnet");
     expect(tier3.every((e) => typeof e.model === "string")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pairing tier: error severity routing (Decision 5)
+// ---------------------------------------------------------------------------
+
+describe("resolveReviewerSet — pairing tier error severity routing", () => {
+  beforeEach(() => {
+    vi.mocked(core.error).mockClear();
+    vi.mocked(core.warning).mockClear();
+  });
+
+  it("calls core.error() (not core.warning()) when DEFAULT_MODEL equals the authoring model after fallback", async () => {
+    // Scenario: policy=different-vendor-same-class, only anthropic available,
+    // authoringModel=sonnet, defaultModel=sonnet.
+    // The pairing tier cannot find a cross-vendor reviewer and falls through to
+    // DEFAULT_MODEL ("sonnet"), which equals the authoring model.
+    // Decision 5 requires core.error() for this case — not just core.warning().
+    mockPullGet.mockResolvedValue(prResponse([]));
+
+    const pairingOptions = {
+      pairingConfig: {
+        policy: "different-vendor-same-class" as const,
+        enabled: true as const,
+      },
+      authoringModel: "sonnet",
+      availableProviders: ["anthropic"],
+    };
+
+    const result = await resolveReviewerSet(
+      octokit,
+      42,
+      "owner",
+      "repo",
+      [],
+      "sonnet",
+      pairingOptions,
+    );
+
+    // The resolver must fall through to DEFAULT_MODEL ("sonnet").
+    expect(result).toEqual([{ model: "sonnet" }]);
+
+    // core.error() must have been called for the ERROR:-prefixed diagnostic
+    // ("DEFAULT_MODEL equals authoring model; reviewer will share the author's
+    // blind spots").  This is the Decision 5 requirement.
+    expect(vi.mocked(core.error)).toHaveBeenCalledWith(
+      expect.stringContaining("DEFAULT_MODEL equals authoring model"),
+    );
+
+    // The raw ERROR:-prefixed string must NOT have been passed to core.warning().
+    const warningArgs = vi.mocked(core.warning).mock.calls.map(
+      (c) => c[0] as string,
+    );
+    expect(warningArgs.every((msg) => !msg.startsWith("ERROR:"))).toBe(true);
   });
 });
