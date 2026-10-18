@@ -285,7 +285,7 @@ all allowlist checks.
 | Store the resolved list in a committed repo file (e.g. `.github/data/agent_allowlist_resolved.json`) and have workflows read it. | Workflow `if:` expressions can only access `vars.*`, `github.*`, `env.*`, and a handful of other contexts — they cannot read repo files without a step. Combined with the gate-redesign direction, this is strictly worse than running the gate as a step. |
 | Terraform-time resolution via `data "github_team_members"`. | Explicitly ruled out by the issue "Constraints" bullet 2 and grooming note Q2: changes would only take effect on the next `terraform apply`. |
 
-### Decision 2: Gate step uses a human-approved org `Members: Read` App identity (human-required), scoped to a single supported organization
+### Decision 2: Gate step uses a dedicated `allowlist-resolver` GitHub App with org `Members: Read`, scoped to a single supported organization
 
 **Decision.** The in-reusable gate step and the groom-container
 `ADMIN_ASSIGNEES` expansion (Decision 3) both call `GET
@@ -326,36 +326,53 @@ the gate mints a separate installation token per referenced org and routes
 out of scope (see the Out-of-scope section) and left as future work.
 
 Because this is a change to the identity that authenticates allowlist
-decisions, it is explicitly escalated to a human. The implementation sub-issue
+decisions, the identity choice was escalated to a human. The maintainer
+has selected **option (a)**: a new, dedicated `allowlist-resolver` GitHub
+App installed on the supported organization with only
+`Organization permissions → Members: Read` and
+`Repository permissions → Metadata: Read`. The implementation sub-issue
 ([#648](https://github.com/mfrancza/agentic-development-workflow/issues/648))
-is created with the `human-required` label and does not proceed until a
-maintainer has picked an identity and provisioned it. The human reviewer
-chooses between:
+retains the `human-required` label because provisioning the App
+(creating it, installing it, generating the private key, writing the
+secrets) is still a human action that happens outside the code repo; the
+code tasks (#649 gate step, #650 groom entrypoint, #651 docs) depend on
+it so no code is written against an unprovisioned identity.
 
-- **(a) New `allowlist-resolver` GitHub App installed on the supported
-  organization (the one that owns the repository running the workflow)
-  with only `Organization permissions → Members: Read` and
-  `Repository permissions → Metadata: Read`.** This is the design's
-  recommended default: least-privilege, dedicated identity, auditable in org
-  audit log as a distinct actor, and reusable by the groom-container
-  `ADMIN_ASSIGNEES` expansion.
-- **(b) Extend the existing `developer-agent` App to add
-  `Organization → Members: Read`.** Simpler because the App is already
-  installed, but widens the blast radius of a developer-agent key compromise
-  from code/issue operations to also reading org membership. Discouraged
-  unless (a) is operationally blocked.
-- **(c) Fine-grained PAT with `read:org`, stored as an organization-level
-  secret.** Easiest to provision for a single org, but PATs are
-  user-impersonating and expire; not recommended for a durable control.
+Rationale for picking (a):
 
-Whichever identity the human picks, its credential is wired into the gate
-step as `GH_TOKEN` / `token:` on the `github-script` action (or equivalent)
-and documented in the operator setup section of README.md and in the
-`agent-vars` module README. The reusable workflow declares a new
+- **Least privilege.** Only the two permissions above — no code,
+  issue, PR, or admin access. A leaked key reads org membership and
+  nothing else.
+- **Distinct actor in the audit log.** Allowlist checks and
+  `ADMIN_ASSIGNEES` expansions show up under a dedicated App name in
+  the organization audit log, separately from developer-agent code and
+  issue operations.
+- **Blast-radius isolation from the developer-agent App.** The
+  developer-agent App already carries contents/issues/PRs; adding
+  org Members read to it (option (b)) would mean a developer-agent
+  key compromise also leaks org membership. A separate App keeps the
+  two concerns independent.
+- **Durable control.** Unlike a fine-grained PAT (option (c)), a GitHub
+  App installation token is machine-identity-bound and does not expire
+  on a user's cadence.
+
+The App's credentials are wired into the gate step as `GH_TOKEN` /
+`token:` on the `github-script` action (or equivalent), via a token
+minted at step-run time from the App's client ID + private key — the
+same pattern the repo already uses for the `developer-agent` App token
+(see `agent-groom-reusable.yml:132-137` for the existing mint step
+shape). The reusable workflow declares two new secrets,
 `secrets.ALLOWLIST_RESOLVER_APP_ID` and
-`secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` (option (a)) or a single
-`secrets.ALLOWLIST_RESOLVER_TOKEN` (option (c)); callers pass them through
-alongside the existing developer-agent App secrets.
+`secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY`, under
+`on.workflow_call.secrets`; callers pass them through from
+organization-level or repository-level secrets alongside the existing
+developer-agent App secrets. Operator setup is documented in the
+README.md operator-setup section and in the `agent-vars` module README
+as part of #651.
+
+Options (b) and (c) are retained in the "Alternatives considered" table
+below with their rejection rationale so future readers can see why the
+new-App path was chosen.
 
 **No access without the identity when team references are in use.** If
 `AGENT_ALLOWLIST` contains at least one entry matching `^[^/]+/[^/]+$` and
@@ -387,8 +404,16 @@ unless and until a team reference is added to the list.
 `AGENT_ALLOWLIST` is the fleet's primary access-control gate. Shipping a
 design that lets the implementation agent pick the identity based on an
 empirical check is the pattern the project's AGENTS.md § "Escalating to a
-human" exists to prevent. The decision is deferred to a human by design,
-not by probing.
+human" exists to prevent. The decision was deferred to a human by design,
+not by probing; the maintainer selected option (a) above.
+
+**Alternatives considered.**
+
+| Alternative | Reason rejected |
+|-------------|-----------------|
+| **(b) Extend the existing `developer-agent` App to add `Organization → Members: Read`.** | Simpler because the App is already installed, but widens the blast radius of a developer-agent key compromise from code/issue operations to also reading org membership. The two concerns stay independent under (a). |
+| **(c) Fine-grained PAT with `read:org`, stored as an organization-level secret.** | Easiest to provision for a single org, but PATs are user-impersonating and expire; not a durable control. GitHub Apps are the project's standard machine identity (the developer-agent App already follows this pattern). |
+| Allow the implementation agent to pick based on a runtime smoke test (whether the default `GITHUB_TOKEN` happens to have the permission). | `AGENT_ALLOWLIST` is the primary access-control gate; identity selection is not an empirical choice. Explicitly escalated to a human per AGENTS.md § "Escalating to a human". |
 
 ### Decision 3: Entrypoint expands `ADMIN_ASSIGNEES` team references before invoking Claude
 
@@ -434,32 +459,33 @@ the token has to flow through the `secrets:` passthrough into
 reusable's actual `run-agent` step.
 
 1. **Caller stub `.github/workflows/agent-groom.yml`** passes the
-   organization-level secret through the existing `secrets:` block of
-   its `uses: ./.github/workflows/agent-groom-reusable.yml` call —
-   `ALLOWLIST_RESOLVER_TOKEN: ${{ secrets.ALLOWLIST_RESOLVER_TOKEN }}`
-   for Decision 2 option (c), or `ALLOWLIST_RESOLVER_APP_ID` plus
-   `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` for option (a). The caller stub
-   has no `steps:` and no job `env:` (both unsupported alongside `uses:`
-   at job level), so the secret must flow via `secrets:` into the
+   `allowlist-resolver` App's two secrets through the existing
+   `secrets:` block of its `uses:
+   ./.github/workflows/agent-groom-reusable.yml` call —
+   `ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}`
+   and `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{
+   secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}`. The caller stub has
+   no `steps:` and no job `env:` (both unsupported alongside `uses:` at
+   job level), so the secrets must flow via `secrets:` into the
    reusable; a job-level `env:` next to `uses:` would not even be a
    valid workflow file.
 2. **Reusable workflow `.github/workflows/agent-groom-reusable.yml`**
-   declares the new secret(s) under `on.workflow_call.secrets` (adding
-   `ALLOWLIST_RESOLVER_TOKEN` for option (c), or
-   `ALLOWLIST_RESOLVER_APP_ID` + `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY`
-   for option (a)). For option (a) the reusable adds a second
-   `agent-token` step that mints an installation token from those two
-   secrets (parallel to the existing developer-agent mint step at
-   `agent-groom-reusable.yml:132-137`) and exposes it as a step output;
-   for option (c) the reusable uses `secrets.ALLOWLIST_RESOLVER_TOKEN`
-   directly. The reusable then sets
-   `env: ALLOWLIST_RESOLVER_TOKEN: <minted-token-or-secret>` on the
-   existing "Run grooming agent" step (the `uses:
+   declares both new secrets under `on.workflow_call.secrets`
+   (`ALLOWLIST_RESOLVER_APP_ID` and
+   `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY`) and adds a second `agent-token`
+   step that mints an installation token from them (parallel to the
+   existing developer-agent mint step at
+   `agent-groom-reusable.yml:132-137`), exposing the minted token as a
+   step output. The reusable then sets
+   `env: ALLOWLIST_RESOLVER_TOKEN: <minted-token>` on the existing "Run
+   grooming agent" step (the `uses:
    ./_agentic-workflow/.github/actions/run-agent` step at
    `agent-groom-reusable.yml:156-170`), alongside the existing
    `ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }}` env entry — this is
    the first point in the chain where the token exists as a step env
-   var the composite can forward.
+   var the composite can forward. `ALLOWLIST_RESOLVER_TOKEN` is a
+   per-run name local to the reusable's step env and the container —
+   it is not a secret the operator provisions.
 3. **Composite action `.github/actions/run-agent/action.yml`**
    enumerates the environment forwarded to `docker run` (see the
    `_opt_env` block near lines 191–230, which already uses conditional
@@ -792,9 +818,9 @@ state, not a Terraform state.
 | Issue [#645](https://github.com/mfrancza/agentic-development-workflow/issues/645) | **Terraform `agent-vars`:** update descriptions on `agent_allowlist`, `admin_assignees`, and `code_reviewers` to document the mixed `user \| org/team-slug` format; add optional validation blocks that reject empty strings and entries containing more than one `/`. Update the module README. (No companion `AGENT_ALLOWLIST_RESOLVED` variable — the runtime gate makes it unnecessary.) | — |
 | Issue [#646](https://github.com/mfrancza/agentic-development-workflow/issues/646) | **Shared TypeScript expander:** add `.github/scripts/src/lib/expand-team-refs.ts` with the pure `expandTeamRefs()` function per Decision 5 (signature `(entries, octokit, { supportedOrg })`), plus `.github/scripts/test/lib/expand-team-refs.test.ts` covering login pass-through, pagination, dedupe, empty-team, 404/403, malformed, bot-identity, nested-team (inherited), and the **single-org constraint** (an entry whose org does not match `supportedOrg` returns a `cross-org` resolution error without calling `teams.listMembersInOrg`). | — |
 | Issue [#647](https://github.com/mfrancza/agentic-development-workflow/issues/647) | **`CODE_REVIEWERS` team pass-through with per-entry failure isolation:** (1) run a smoke-test confirming `gh pr edit --add-reviewer "org/team-slug"` succeeds in the developer image's `gh` version. If it does not, label `human-required` and escalate per Decision 4. (2) Rewrite the `CODE_REVIEWERS` block in `docker/scripts/prompts/implement.md` so it issues **one `gh pr edit --add-reviewer <entry>` call per entry** rather than one combined call with multiple `--add-reviewer` flags — the underlying `POST /requested_reviewers` endpoint validates reviewers atomically and returns 422 for the whole request if any one is invalid, which would block valid entries and violate requirement 5's "explicit logins in the same list are still assigned or requested" promise. Each per-entry call that returns non-zero logs a warning and the loop proceeds. (3) Add an isolation test on a disposable PR with `CODE_REVIEWERS=["alice","org/does-not-exist","bob"]`: assert `alice` and `bob` are requested and only `org/does-not-exist` is warned-and-skipped. (4) Add a sentence to the prompt noting that entries may be either a user login or an `org/team-slug` reference and both forms are passed to `gh pr edit --add-reviewer` as-is. | — |
-| Issue [#648](https://github.com/mfrancza/agentic-development-workflow/issues/648) | **Allowlist gate identity (human-required):** created with the `human-required` label per Decision 2. A maintainer picks an identity (new `allowlist-resolver` App vs. extending the developer-agent App vs. a PAT), provisions the installation on **the single supported organization** (the one that owns the repository running the workflow — multi-org routing is out of scope per Decision 2), and documents the credential wiring. No code change happens on this issue; the deliverables are the installation decision, the secret in the relevant org/repo, and a short note in the README operator setup. | — |
+| Issue [#648](https://github.com/mfrancza/agentic-development-workflow/issues/648) | **Allowlist gate identity (human-required) — provision the chosen `allowlist-resolver` App:** retains the `human-required` label per Decision 2 because provisioning a GitHub App (creating it, installing it, generating the private key, writing the secrets) is a human action outside the code repo. The identity choice has been made: a new, dedicated `allowlist-resolver` App installed on **the single supported organization** (the one that owns the repository running the workflow — multi-org routing is out of scope per Decision 2) with only `Organization permissions → Members: Read` and `Repository permissions → Metadata: Read`. Deliverables: the App exists and is installed; `ALLOWLIST_RESOLVER_APP_ID` and `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` secrets are set at the organization or repository level; a short note in README operator setup confirms the chosen option and the single-organization scope limit (coordinated with #651). | — |
 | Issue [#649](https://github.com/mfrancza/agentic-development-workflow/issues/649) | **In-reusable allowlist gate step and caller cleanup:** add `.github/scripts/src/check-agent-allowlist.ts` that reads `vars.AGENT_ALLOWLIST`, accepts a `principal` login and an optional `additional-trusted-logins` JSON array, allows the principal immediately **only** if it matches any trusted login (no API call — the known-identity exception documented in Decision 1); otherwise calls `expandTeamRefs()` with the Decision 2 identity **once, over all team references in the list** (do not short-circuit on first match: a resolution error later in the list must fail the gate regardless of whether an earlier team already matched the principal), and allows if `errors` is empty AND the principal matches any explicit login or any resolved team member. `core.setFailed`s otherwise (fail-closed on error per requirement 5). **Explicit logins in `AGENT_ALLOWLIST` do NOT bypass team resolution** — only the per-caller `additional-trusted-logins` input (bot identities) can short-circuit before API calls. This is critical: with `AGENT_ALLOWLIST=["alice","org/broken"]`, principal `alice`, and `org/broken` returning 403, the gate must deny (fail-closed on the team error) rather than allowing via an explicit-login shortcut. Also accept a `skip-gate: 'true'` input so the caller can opt out of the gate for the specific event types documented in Decision 1 (`agent-review` synchronize, `agent-auto-trigger` auto-review). Wire the step into the reusable workflows per the Decision 1 event-specific policy table — principal and trusted-login values vary per caller and per event. Remove the matching `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` clauses from the caller workflows (keep event / label / concurrency / trust-model / known-identity clauses). Update AGENTS.md § "Repo-specific security defaults" to document the step-based gate and the required org identity. Acceptance tests must cover: (a) `agent-respond-review` with a review authored by `Copilot` (not in `AGENT_ALLOWLIST`) is still allowed through the trusted-logins exception; (b) `agent-review` `synchronize` event triggered by a pusher who is not in `AGENT_ALLOWLIST` but on an already-labeled same-repo PR is still allowed; (c) `agent-review` `labeled` event triggered by a non-allowlisted sender is denied; (d) `agent-groom`/`agent-design`/`agent-implement` events by a non-allowlisted sender are denied; (e) `auto-review` continues to authorize based on branch prefix / author with no sender gate; (f) **order-independence** of the gate's error policy: with a principal in `org/good` and `org/broken` returning 403, both `["org/good","org/broken"]` and `["org/broken","org/good"]` deny the request; (g) **explicit-login does not bypass team error**: with `AGENT_ALLOWLIST=["alice","org/broken"]`, principal `alice`, and `org/broken` returning 403, the gate denies (not allowed via explicit-login shortcut) — the only pre-resolution bypass is `additional-trusted-logins`; (h) `additional-trusted-logins` **does** bypass team error: with `AGENT_ALLOWLIST=["org/broken"]`, principal `Copilot`, trusted-logins `["Copilot"]`, and `org/broken` returning 403, the gate allows (the trusted-login fast path is taken before any API call); (i) **single-org constraint**: an entry such as `other-org/team` where `other-org != github.repository_owner` is rejected by the expander as a `cross-org` resolution error, which per fail-closed semantics denies the gate; `teams.listMembersInOrg` must **not** be called for that entry (assert via mock) — this surfaces the Decision 2 scope limit at validation time rather than as an opaque 404 at runtime. Pass `supportedOrg = github.repository_owner` into the expander; (j) **login-only, no credential**: with `AGENT_ALLOWLIST=["alice","developer[bot]"]` (no team references at all) and the Decision 2 identity **not** provisioned, principal `alice` is allowed and principal `mallory` is denied — the gate must not fail-closed on a missing credential when no entry requires a membership lookup; `teams.listMembersInOrg` must **not** be called (assert via mock); (k) **login-only path matches pre-move caller `if:`**: for a login-only list, the gate's allow/deny outcome must be identical to the equivalent pre-move `contains(fromJSON(vars.AGENT_ALLOWLIST), <sender>)` for every tested principal. | Issues #646, #648 |
-| Issue [#650](https://github.com/mfrancza/agentic-development-workflow/issues/650) | **Groom entrypoint expansion of `ADMIN_ASSIGNEES`** (single supported org — Decision 2 scope — any entry whose org component does not match the supported org is warned-and-skipped as a `cross-org` resolution error, no API call for that entry): add a shell (or small Node) helper in `docker/scripts/` that expands team references in `ADMIN_ASSIGNEES` before Claude is invoked, logs per-entry warnings for empty/failed/cross-org teams, and re-exports the deduped flat list under the same env var name. Wire the Decision 2 identity through all four boundaries end-to-end: (i) in `.github/workflows/agent-groom.yml` add the secret(s) to the existing `secrets:` passthrough block of the `uses: ./.github/workflows/agent-groom-reusable.yml` call — `agent-groom.yml` is a job-level `uses:` caller with no `steps:` and no job `env:` (both unsupported alongside `uses:` at job level), so the token must flow via `secrets:` into the reusable; (ii) in `.github/workflows/agent-groom-reusable.yml` declare the new secret(s) under `on.workflow_call.secrets`, mint a token from them if Decision 2 picked option (a) (new `agent-token` step with the resolver App's client-id / private-key, parallel to the existing developer-agent mint at `agent-groom-reusable.yml:132-137`), and set `env: ALLOWLIST_RESOLVER_TOKEN: <minted-token-or-secret>` on the existing "Run grooming agent" step at `agent-groom-reusable.yml:156-170`; (iii) in `.github/actions/run-agent/action.yml` add a conditional name-only `-e ALLOWLIST_RESOLVER_TOKEN` to the existing `_opt_env` block so the token reaches the container (groom-only in effect because other callers leave it unset); (iv) in `docker/scripts/entrypoint.sh` have the helper call `gh api` with that token (`GH_TOKEN=$ALLOWLIST_RESOLVER_TOKEN gh api …`) without exporting it globally, and (iv.a) have the helper derive `supportedOrg` from the already-forwarded `GITHUB_REPO` env var (format `owner/name`) as `supportedOrg="${GITHUB_REPO%%/*}"` and reject any entry whose org component does not match before issuing an API call for it. **Do not** read `$GITHUB_REPOSITORY_OWNER` inside the container: the `run-agent` composite's `docker run` line forwards `GITHUB_REPO` but **not** `GITHUB_REPOSITORY_OWNER` (see `.github/actions/run-agent/action.yml` lines 222–229), so `$GITHUB_REPOSITORY_OWNER` is empty under the entrypoint's `set -u`. Add a fifth redaction block for `ALLOWLIST_RESOLVER_TOKEN` in the `_log_capture_exit` trap and a scrubber test case. Include an **ordinary workflow/container handoff test** that does not manually inject `supportedOrg` or `GITHUB_REPOSITORY_OWNER` — the helper must correctly derive the supported org from the composite's existing forwarded env, so running the groom container through the normal `run-agent` composite path with no extra env wiring must still produce correct same-org acceptance and cross-org warn-and-skip behaviour; a test that pre-sets `GITHUB_REPOSITORY_OWNER` on the host would mask a regression where the helper reverted to that unforwarded variable. Include a test that verifies the token actually reaches the container through the **full caller→reusable→composite→entrypoint handoff** (a composite-only test that starts with the token already on the runner cannot catch a missing `secrets:` passthrough or a missing `on.workflow_call.secrets` declaration): either a full e2e workflow run with a sentinel token, or a layered static-plus-runtime test asserting (a) caller `secrets:` names the new secret, (b) reusable's `on.workflow_call.secrets` declares it and binds it to the `run-agent` step's `env:`, (c) composite forwards the env var, (d) container sees the value. No prompt change required beyond a one-sentence note. | Issues #646, #648 |
+| Issue [#650](https://github.com/mfrancza/agentic-development-workflow/issues/650) | **Groom entrypoint expansion of `ADMIN_ASSIGNEES`** (single supported org — Decision 2 scope — any entry whose org component does not match the supported org is warned-and-skipped as a `cross-org` resolution error, no API call for that entry): add a shell (or small Node) helper in `docker/scripts/` that expands team references in `ADMIN_ASSIGNEES` before Claude is invoked, logs per-entry warnings for empty/failed/cross-org teams, and re-exports the deduped flat list under the same env var name. Wire the Decision 2 identity through all four boundaries end-to-end: (i) in `.github/workflows/agent-groom.yml` add the secret(s) to the existing `secrets:` passthrough block of the `uses: ./.github/workflows/agent-groom-reusable.yml` call — `agent-groom.yml` is a job-level `uses:` caller with no `steps:` and no job `env:` (both unsupported alongside `uses:` at job level), so the token must flow via `secrets:` into the reusable; (ii) in `.github/workflows/agent-groom-reusable.yml` declare the two new secrets `ALLOWLIST_RESOLVER_APP_ID` + `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` under `on.workflow_call.secrets`, add a second `agent-token` step that mints an installation token from them (parallel to the existing developer-agent mint at `agent-groom-reusable.yml:132-137`), and set `env: ALLOWLIST_RESOLVER_TOKEN: <minted-token>` on the existing "Run grooming agent" step at `agent-groom-reusable.yml:156-170`; (iii) in `.github/actions/run-agent/action.yml` add a conditional name-only `-e ALLOWLIST_RESOLVER_TOKEN` to the existing `_opt_env` block so the token reaches the container (groom-only in effect because other callers leave it unset); (iv) in `docker/scripts/entrypoint.sh` have the helper call `gh api` with that token (`GH_TOKEN=$ALLOWLIST_RESOLVER_TOKEN gh api …`) without exporting it globally, and (iv.a) have the helper derive `supportedOrg` from the already-forwarded `GITHUB_REPO` env var (format `owner/name`) as `supportedOrg="${GITHUB_REPO%%/*}"` and reject any entry whose org component does not match before issuing an API call for it. **Do not** read `$GITHUB_REPOSITORY_OWNER` inside the container: the `run-agent` composite's `docker run` line forwards `GITHUB_REPO` but **not** `GITHUB_REPOSITORY_OWNER` (see `.github/actions/run-agent/action.yml` lines 222–229), so `$GITHUB_REPOSITORY_OWNER` is empty under the entrypoint's `set -u`. Add a fifth redaction block for `ALLOWLIST_RESOLVER_TOKEN` in the `_log_capture_exit` trap and a scrubber test case. Include an **ordinary workflow/container handoff test** that does not manually inject `supportedOrg` or `GITHUB_REPOSITORY_OWNER` — the helper must correctly derive the supported org from the composite's existing forwarded env, so running the groom container through the normal `run-agent` composite path with no extra env wiring must still produce correct same-org acceptance and cross-org warn-and-skip behaviour; a test that pre-sets `GITHUB_REPOSITORY_OWNER` on the host would mask a regression where the helper reverted to that unforwarded variable. Include a test that verifies the token actually reaches the container through the **full caller→reusable→composite→entrypoint handoff** (a composite-only test that starts with the token already on the runner cannot catch a missing `secrets:` passthrough or a missing `on.workflow_call.secrets` declaration): either a full e2e workflow run with a sentinel token, or a layered static-plus-runtime test asserting (a) caller `secrets:` names the new secret, (b) reusable's `on.workflow_call.secrets` declares it and binds it to the `run-agent` step's `env:`, (c) composite forwards the env var, (d) container sees the value. No prompt change required beyond a one-sentence note. | Issues #646, #648 |
 | Issue [#651](https://github.com/mfrancza/agentic-development-workflow/issues/651) | **Documentation:** update AGENTS.md § "Repo-specific security defaults" (in-reusable gate and the org `Members: Read` identity), § "Optional env vars" references for `ADMIN_ASSIGNEES` / `CODE_REVIEWERS` to document the mixed format, and README.md § operator setup to add a short "GitHub team references in `AGENT_ALLOWLIST`, `ADMIN_ASSIGNEES`, `CODE_REVIEWERS`" subsection that includes the Decision 2 credential setup. | Issues #645, #648 |
 | Issue [#652](https://github.com/mfrancza/agentic-development-workflow/issues/652) | **End-to-end validation:** on a test deployment with a real org team, verify (a) a user added to the team can trigger `agent:groom` on the very next event, no cache wait required; (b) a user removed from the team cannot trigger on the next event (revocation case — must be verified); (c) a team that is emptied of all members contributes zero grants on the next event (revocation case — the former last member cannot trigger unless they appear as an explicit login or in a different team); (d) a referenced team that is temporarily deleted / 404s / 403s causes the gate step to fail the job (fail-closed, no cached grant survives); (e) a `human-required` issue with `ADMIN_ASSIGNEES` containing an `org/team` is assigned to every current team member; (f) a PR with `CODE_REVIEWERS` containing an `org/team` carries a team-level review request on GitHub; (g) all three lists continue to work with a mix of individual logins (including a bot login) and team references; (h) a nested-team member (member of a child of the referenced team) is correctly treated as covered; (i) a `pull_request_review.submitted` event authored by `Copilot` (a known-trusted login not in `AGENT_ALLOWLIST`) still triggers `agent-respond-review` — the trusted-logins exception works end-to-end; (j) a `pull_request_target.synchronize` event on a PR already carrying `agent:review`, triggered by a same-repo non-allowlisted collaborator, still triggers `agent-review` — the label-only authorization on `synchronize` is preserved; (k) **order-independence**: with `AGENT_ALLOWLIST` set to `["org/good","org/broken"]` where the principal is a member of `org/good` and `org/broken` returns 403, the gate denies; and with the entries reversed (`["org/broken","org/good"]`), the gate also denies — the outcome does not depend on list order; (l) `ALLOWLIST_RESOLVER_TOKEN` appears in a redacted form in the groom container's `/home/agent/logs/container.log` after a run that intentionally echoes the token, confirming the scrubber covers the new credential; (m) **explicit-login-plus-failing-team**: with `AGENT_ALLOWLIST=["alice","org/broken"]`, principal `alice`, and `org/broken` returning 403 at trigger time, the gate denies — the explicit-login match does not bypass the team-resolution error (sibling of (k) order-independence, verifying Decision 1's rule that only `additional-trusted-logins` short-circuits before API calls); (n) **token-handoff end-to-end**: with `ALLOWLIST_RESOLVER_TOKEN` provisioned as a secret and a stubbed `expand_team_refs` that writes a hash of the received token to the agent log, trigger `agent-groom` through the caller stub and confirm the sentinel's hash appears in the container log — verifies the full caller→reusable→composite→entrypoint handoff, not just the composite boundary; (o) **single-org constraint, end-to-end**: with `AGENT_ALLOWLIST=["other-org/some-team"]` (an org other than the repository's owner), the gate step denies and the Actions log shows a `cross-org` error naming both the supported org and the rejected org; `ADMIN_ASSIGNEES` with the same cross-org entry warn-and-skips and grooming proceeds with the explicit-login portion only; (p) **CODE_REVIEWERS per-entry isolation**: with `CODE_REVIEWERS=["alice","org/does-not-exist","bob"]` on a disposable PR, `alice` and `bob` are requested as reviewers and only `org/does-not-exist` is warned-and-skipped — the invalid entry does not block the valid ones (verifies Decision 4's per-entry `gh pr edit` loop against GitHub's atomic 422-on-any-invalid-reviewer behaviour); (q) **login-only deployment, no resolver credential**: on a test deployment with `AGENT_ALLOWLIST=["alice","developer[bot]"]` and the Decision 2 identity **not** provisioned, trigger `agent:groom` as `alice` and confirm the gate step passes with no `teams.listMembersInOrg` call and no credential error; trigger again as `mallory` and confirm the gate denies — the personal-repo path and any login-only org deployment must work without a credential; (r) **container supportedOrg handoff**: on the same test deployment, run the groom container through the standard `run-agent` composite path (no manual `GITHUB_REPOSITORY_OWNER` injection) with `ADMIN_ASSIGNEES=["<same-org>/some-team","other-org/some-team"]` and confirm the same-org entry expands successfully while the cross-org entry warn-and-skips — verifies the helper derives `supportedOrg` from the already-forwarded `GITHUB_REPO`, not from an unforwarded `GITHUB_REPOSITORY_OWNER`. | Issues #645, #646, #647, #648, #649, #650, #651 |
 
