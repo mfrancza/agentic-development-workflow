@@ -11,7 +11,8 @@ agent_allowlist = [
   "mfrancza-developer-agent[bot]",
 ]
 
-default_model = "sonnet"
+default_model        = "gpt-5.6-terra"
+design_default_model = "gpt-5.6-sol"
 
 # Humans to assign to issues and PRs when the agent applies the human-required
 # label (e.g. escalations requiring security, billing, or permission decisions).
@@ -38,6 +39,6 @@ auto_trigger_agents = {
   review    = true
 }
 
-# Multi-reviewer model pair: one Anthropic Sonnet and one OpenAI GPT equivalent,
+# Multi-reviewer model pair: one Anthropic Sonnet and one xAI Grok,
 # so each PR gets a perspective from two different providers.
-reviewer_models = ["claude-sonnet-4-5", "gpt-6-astra"]
+reviewer_models = ["sonnet", "grok-4.6"]
