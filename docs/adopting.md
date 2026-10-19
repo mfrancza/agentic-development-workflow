@@ -1016,7 +1016,7 @@ jobs:
 > `<reviewer-agent-slug>[bot]` with your actual App slugs. The review-author
 > gate prevents outside actors from driving prompt injection against the
 > developer agent on public repos. Keep the `review.user.login !=
-pull_request.user.login` line and the `review-author` / `pr-author` inputs
+> pull_request.user.login` line and the `review-author` / `pr-author` inputs
 > exactly as shown: together they are the two layers of the self-trigger
 > guard, and the reusable rejects the call if either input is absent.
 
