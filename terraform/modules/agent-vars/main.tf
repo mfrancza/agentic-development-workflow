@@ -46,6 +46,22 @@ resource "github_actions_variable" "code_reviewers" {
   value         = jsonencode(var.code_reviewers)
 }
 
+# Expose the developer-agent bot login so workflows can distinguish
+# developer-authored PRs from other contributions.
+resource "github_actions_variable" "developer_bot_login" {
+  repository    = var.repository
+  variable_name = "DEVELOPER_BOT_LOGIN"
+  value         = var.developer_bot_login
+}
+
+# Expose the opt-in two-developer-approvals gate as a string Actions variable.
+# GitHub Actions variables are strings; workflows compare this value to "true".
+resource "github_actions_variable" "require_two_developer_approvals" {
+  repository    = var.repository
+  variable_name = "REQUIRE_TWO_DEVELOPER_APPROVALS"
+  value         = tostring(var.require_two_developer_approvals)
+}
+
 # Expose the auto-trigger gates as a JSON-encoded repository Actions variable
 # so agent-auto-trigger.yml can gate each job on
 # fromJSON(vars.AUTO_TRIGGER_AGENTS).<key> == true. All keys default to false

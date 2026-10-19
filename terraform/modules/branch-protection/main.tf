@@ -46,5 +46,15 @@ resource "github_repository_ruleset" "main" {
       require_last_push_approval        = false
       required_review_thread_resolution = false
     }
+
+    dynamic "required_status_checks" {
+      for_each = var.require_two_developer_approvals ? [var.require_two_developer_approvals_check_context] : []
+
+      content {
+        required_check {
+          context = required_status_checks.value
+        }
+      }
+    }
   }
 }

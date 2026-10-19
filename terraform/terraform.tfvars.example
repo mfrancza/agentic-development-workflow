@@ -33,6 +33,12 @@ code_reviewers = [
   "your-github-username",
 ]
 
+# Opt-in gate for developer-authored PRs. Leave disabled (the default) until
+# the corresponding workflow and activity are configured. When enabled, set
+# developer_bot_login to the developer-agent App's <slug>[bot] login.
+# developer_bot_login              = "<developer-agent-app-slug>[bot]"
+# require_two_developer_approvals = true
+
 # Auto-trigger configuration. Set a key to true to automatically apply the
 # corresponding agent:* label at the natural upstream signal, advancing the
 # SDLC pipeline without manual labeling. All keys default to false (opt-in).

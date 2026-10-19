@@ -67,21 +67,24 @@ module "security" {
 }
 
 module "agent_vars" {
-  source               = "./modules/agent-vars"
-  repository           = github_repository.this.name
-  agent_allowlist      = var.agent_allowlist
-  default_model        = var.default_model
-  design_default_model = var.design_default_model
-  admin_assignees      = var.admin_assignees
-  code_reviewers       = var.code_reviewers
-  auto_trigger_agents  = var.auto_trigger_agents
-  reviewer_models      = var.reviewer_models
-  review_model_pairing = var.review_model_pairing
+  source                          = "./modules/agent-vars"
+  repository                      = github_repository.this.name
+  agent_allowlist                 = var.agent_allowlist
+  default_model                   = var.default_model
+  design_default_model            = var.design_default_model
+  admin_assignees                 = var.admin_assignees
+  code_reviewers                  = var.code_reviewers
+  developer_bot_login             = var.developer_bot_login
+  require_two_developer_approvals = var.require_two_developer_approvals
+  auto_trigger_agents             = var.auto_trigger_agents
+  reviewer_models                 = var.reviewer_models
+  review_model_pairing            = var.review_model_pairing
 }
 
 module "branch_protection" {
-  source     = "./modules/branch-protection"
-  repository = github_repository.this.name
+  source                          = "./modules/branch-protection"
+  repository                      = github_repository.this.name
+  require_two_developer_approvals = var.require_two_developer_approvals
 }
 
 module "labels" {

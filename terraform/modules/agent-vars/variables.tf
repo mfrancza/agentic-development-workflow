@@ -26,6 +26,18 @@ variable "code_reviewers" {
   default     = []
 }
 
+variable "developer_bot_login" {
+  description = "Login of the developer-agent GitHub App bot (for example, `<developer-agent-app-slug>[bot]`). Stored as the DEVELOPER_BOT_LOGIN Actions variable for workflows that need to identify developer-authored PRs."
+  type        = string
+  default     = ""
+}
+
+variable "require_two_developer_approvals" {
+  description = "Whether workflows should enforce two approvals for developer-authored PRs. Stored as the REQUIRE_TWO_DEVELOPER_APPROVALS Actions variable. Defaults to false so the feature is opt-in."
+  type        = bool
+  default     = false
+}
+
 variable "auto_trigger_agents" {
   description = "Per-agent:*-label switches that auto-advance the SDLC pipeline. Set a key to true to have agent-auto-trigger.yml automatically apply that stage's agent:* label at the natural upstream signal (issue opened → agent:groom, plan labeled → agent:design, do labeled / draft removed → agent:developer, agent-branch PR opened → agent:review). Every switch defaults to false so existing manual behavior is preserved; flipping a switch opts the whole repo into auto-triggering for that stage. Stored as a JSON-encoded repository Actions variable AUTO_TRIGGER_AGENTS."
   type = object({

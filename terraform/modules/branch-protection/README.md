@@ -8,6 +8,7 @@ Manages the `main-protection` repository ruleset that enforces required PR revie
 - Linear history required (no merge commits).
 - Deletion of the default branch is blocked.
 - Stale-review dismissal on push is enabled.
+- The optional two-developer-approvals status check is disabled by default. Enabling it adds `require-two-developer-approvals / check` to the required status checks without changing the normal required-review count.
 
 ## Usage
 
@@ -15,8 +16,9 @@ Manages the `main-protection` repository ruleset that enforces required PR revie
 
 ```hcl
 module "branch_protection" {
-  source     = "./modules/branch-protection"
-  repository = github_repository.this.name
+  source                          = "./modules/branch-protection"
+  repository                      = github_repository.this.name
+  # require_two_developer_approvals = true # opt-in; defaults to false
 }
 ```
 
@@ -24,8 +26,9 @@ module "branch_protection" {
 
 ```hcl
 module "branch_protection" {
-  source     = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/branch-protection?ref=<tag>"
-  repository = "<your-repo-name>"
+  source                          = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/branch-protection?ref=<tag>"
+  repository                      = "<your-repo-name>"
+  # require_two_developer_approvals = true # opt-in; defaults to false
 }
 ```
 
@@ -53,6 +56,8 @@ provider "github" {
 |------|------|----------|---------|-------------|
 | `repository` | `string` | yes | — | Name of the GitHub repository to protect. |
 | `required_approving_review_count` | `number` | no | `1` | Number of required approving reviews before a PR can be merged. |
+| `require_two_developer_approvals` | `bool` | no | `false` | When enabled, requires the configured two-developer-approvals status check before merging. Does not change `required_approving_review_count`. |
+| `require_two_developer_approvals_check_context` | `string` | no | `"require-two-developer-approvals / check"` | Required status-check context used when the opt-in gate is enabled. |
 
 ## Outputs
 
@@ -66,3 +71,5 @@ provider "github" {
 This ruleset uses the modern `github_repository_ruleset` resource (not the legacy `github_branch_protection` resource). The `bypass_actors` block grants Repository Admins (role ID 5) `pull_request` bypass mode — meaning they can merge their own PRs without an independent review, but they cannot push directly to the protected branch. This design is intentional: it prevents agents from bypassing review while allowing maintainers to resolve impasses without removing protection entirely.
 
 Reviews must flag any PR that weakens this ruleset (lowers `required_approving_review_count` below 1, adds a force-push bypass, or changes the admin bypass from `pull_request` to `always`).
+
+When `require_two_developer_approvals` is `true`, the ruleset also requires the `require-two-developer-approvals / check` status check. This opt-in check supplements, rather than changes, the normal `required_approving_review_count` of `1`.

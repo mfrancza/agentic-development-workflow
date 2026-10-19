@@ -18,6 +18,16 @@ output "code_reviewers_variable_name" {
   value       = github_actions_variable.code_reviewers.variable_name
 }
 
+output "developer_bot_login_variable_name" {
+  description = "Name of the DEVELOPER_BOT_LOGIN Actions variable."
+  value       = github_actions_variable.developer_bot_login.variable_name
+}
+
+output "require_two_developer_approvals_variable_name" {
+  description = "Name of the REQUIRE_TWO_DEVELOPER_APPROVALS Actions variable."
+  value       = github_actions_variable.require_two_developer_approvals.variable_name
+}
+
 output "auto_trigger_agents_variable_name" {
   description = "Name of the AUTO_TRIGGER_AGENTS Actions variable."
   value       = github_actions_variable.auto_trigger_agents.variable_name
