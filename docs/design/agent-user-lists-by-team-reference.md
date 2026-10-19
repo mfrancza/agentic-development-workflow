@@ -187,7 +187,19 @@ and the caller's `concurrency:` block is removed:
   nonfatal resolver mint (per Decision 3), and the gate step. Carries
   **no `concurrency:` block**, so every triggering event — authorized
   or not — reaches it. Unauthorized events exit here via
-  `core.setFailed(...)`; authorized events proceed to the work job.
+  `core.setFailed(...)`; authorized events proceed to the work job. Before
+  detect/mint/gate, it runs the same four-step helpers-ref bootstrap used by
+  other jobs that consume local composites: validate `inputs.helpers-ref`,
+  resolve it to a SHA, check out that SHA into `_agentic-workflow` without
+  persisted credentials, and verify the checked-out HEAD equals the resolved
+  SHA. The bootstrap is required in every `authorize` job: neither that
+  checkout nor a minted token crosses a job boundary, and both `agent-token`
+  and `check-agent-allowlist` are local composites that must resolve from
+  this repository for external callers. Each authorize job needs
+  `contents: read` for this checkout. The five non-review reusables inherit
+  it from their workflow-level permissions; `agent-review-reusable.yml`
+  instead sets `permissions: {}`, so its authorize job must declare
+  `permissions: contents: read` explicitly.
 - **`work` job** — carries `needs: authorize` and the **concurrency
   group that used to live on the caller** (`cancel-in-progress: false`,
   group key identical to the pre-move caller block — e.g.
@@ -279,9 +291,13 @@ entering it, `agent-review-reusable.yml` is restructured into
 pattern:
 
 - **`authorize` job** — same as the general two-job layout: no
-  `concurrency:` block, runs the detect-team-refs + conditional/
-  nonfatal resolver mint + gate step. Unauthorized events exit via
-  `core.setFailed(...)` here and never reach the concurrency group.
+  `concurrency:` block, runs the four-step helpers-ref bootstrap before the
+  detect-team-refs + conditional/nonfatal resolver mint + gate step.
+  Unauthorized events exit via `core.setFailed(...)` here and never reach
+  the concurrency group. Because this reusable's workflow-level
+  `permissions: {}` is deny-all, this job explicitly declares
+  `permissions: contents: read`; otherwise its bootstrap checkout fails
+  before the gate can run.
 - **`review` wrapper job** — `needs: authorize`, carries the
   **`agent-review-pr-${{ inputs.pr-number }}` concurrency group that
   used to live on the caller** (`cancel-in-progress: false`,
@@ -308,7 +324,10 @@ pattern:
     permissions:
       contents: write
       pull-requests: write
-    uses: ./.github/workflows/agent-review-worker-reusable.yml
+    # `$/` resolves against this workflow's repository and running SHA,
+    # rather than an external consumer's checkout. It deliberately has no
+    # `@ref` suffix.
+    uses: $/.github/workflows/agent-review-worker-reusable.yml
     with:
       pr-number: ${{ inputs.pr-number }}
       repo: ${{ inputs.repo }}
