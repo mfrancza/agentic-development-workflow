@@ -147,7 +147,7 @@ repository Actions variable, following the established pattern used by
 
 ```hcl
 variable "protected_pr_author_logins" {
-  description = "GitHub login list whose PRs require the custom approval threshold, encoded for the Actions variable as JSON. Exposed as PROTECTED_PR_AUTHOR_LOGINS. Must be a non-empty JSON array of unique, non-empty strings when require_two_developer_approvals is true. Defaults to the developer-agent bot login to preserve Issue #628's posture."
+  description = "GitHub login list whose PRs require the custom approval threshold, encoded for the Actions variable as JSON. Exposed as PROTECTED_PR_AUTHOR_LOGINS. Must be a non-empty JSON array of unique, non-empty strings when enable_protected_approval_gate is true. Defaults to the developer-agent bot login to preserve Issue #628's posture."
   type        = list(string)
   default     = ["mfrancza-developer-agent[bot]"]
   validation {
@@ -166,20 +166,20 @@ variable "required_approval_count" {
   }
 }
 
-variable "require_two_developer_approvals" {
+variable "enable_protected_approval_gate" {
   description = "When true, PRs authored by PROTECTED_PR_AUTHOR_LOGINS require REQUIRED_APPROVAL_COUNT qualifying approvals (excluding the PR author's own review) before they can merge. Enforced via a required status check on main-protection. Defaults to false (opt-in)."
   type        = bool
   default     = false
 }
 
-variable "require_two_developer_approvals_check_generation" {
+variable "enable_protected_approval_gate_check_generation" {
   description = "Monotonic integer generation suffix for the required check context name. The composed context is `require-two-developer-approvals-g<N>` (ruleset + publisher workflow both reference it). Bump this on every ON → OFF → ON cycle so stale check-runs from a previous ON interval cannot satisfy the newly enforcing rule on an unchanged head SHA. See Decision 7 for the ON ↔ OFF reconciliation discussion. Starts at 1."
   type        = number
   default     = 1
 }
 
-variable "require_two_developer_approvals_reconcile_minutes" {
-  description = "Minimum interval, in minutes, between sweeps of the Decision 8a pending-replacement safety-net workflow (`require-two-developer-approvals-reconcile.yml`). Exposed as the REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES Actions variable; sets the maximum staleness window for a shared-SHA block after the blocking dev-agent PR has moved on and the per-event cleanup was dropped by Actions concurrency pending-run replacement. Smaller values react faster but burn more Actions minutes. Defaults to 10, with a floor of 1 (the cron fires every minute). Implementation note: because `on.schedule.cron` is a build-time literal (GitHub Actions does not evaluate `${{ vars.X }}` inside it), the workflow commits to `cron: \"* * * * *\"` so every value of this variable from 1 upward is a real reduction in sweep latency. The activity's own early-exit guard queries this workflow's own recent completed runs via `GET /repos/{owner}/{repo}/actions/workflows/require-two-developer-approvals-reconcile.yml/runs?status=success&per_page=10`, excludes the current run by `GITHUB_RUN_ID`, and exits early when the most recent successful prior run completed less than `minutes` minutes ago. Values smaller than 1 are not useful; values up to any arbitrary ceiling are supported with no code change."
+variable "enable_protected_approval_gate_reconcile_minutes" {
+  description = "Minimum interval, in minutes, between sweeps of the Decision 8a pending-replacement safety-net workflow (`require-two-developer-approvals-reconcile.yml`). Exposed as the ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES Actions variable; sets the maximum staleness window for a shared-SHA block after the blocking dev-agent PR has moved on and the per-event cleanup was dropped by Actions concurrency pending-run replacement. Smaller values react faster but burn more Actions minutes. Defaults to 10, with a floor of 1 (the cron fires every minute). Implementation note: because `on.schedule.cron` is a build-time literal (GitHub Actions does not evaluate `${{ vars.X }}` inside it), the workflow commits to `cron: \"* * * * *\"` so every value of this variable from 1 upward is a real reduction in sweep latency. The activity's own early-exit guard queries this workflow's own recent completed runs via `GET /repos/{owner}/{repo}/actions/workflows/require-two-developer-approvals-reconcile.yml/runs?status=success&per_page=10`, excludes the current run by `GITHUB_RUN_ID`, and exits early when the most recent successful prior run completed less than `minutes` minutes ago. Values smaller than 1 are not useful; values up to any arbitrary ceiling are supported with no code change."
   type        = number
   default     = 10
 }
@@ -187,11 +187,11 @@ variable "require_two_developer_approvals_reconcile_minutes" {
 
 All five variables are wired through `terraform/main.tf` →
 `agent_vars` module → `github_actions_variable` resources named
-`PROTECTED_PR_AUTHOR_LOGINS`, `REQUIRED_APPROVAL_COUNT`, `REQUIRE_TWO_DEVELOPER_APPROVALS`,
-`REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`, and
-`REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES`. The
+`PROTECTED_PR_AUTHOR_LOGINS`, `REQUIRED_APPROVAL_COUNT`, `ENABLE_PROTECTED_APPROVAL_GATE`,
+`ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION`, and
+`ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`. The
 branch-protection module gains a new input
-`require_two_developer_approvals_check_context` (defaulted to the
+`enable_protected_approval_gate_check_context` (defaulted to the
 composed context name defined by Decision 6, which embeds the
 generation suffix) that is referenced only when the opt-in is on.
 
@@ -209,7 +209,7 @@ generation suffix) that is referenced only when the opt-in is on.
 **Decision.** Extend `terraform/modules/branch-protection/main.tf` so the
 `main-protection` ruleset conditionally includes a `required_status_checks`
 block referencing the two-approvals check context, controlled by a new
-module input `require_two_developer_approvals` (bool, default `false`).
+module input `enable_protected_approval_gate` (bool, default `false`).
 The base `required_approving_review_count` stays at the existing default
 (1) and is not touched.
 
@@ -222,22 +222,22 @@ Sketch (final syntax to be settled by the implementer against the
 
 locals {
   # Compose the generation-suffixed context name unless the caller
-  # explicitly overrode `require_two_developer_approvals_check_context`.
+  # explicitly overrode `enable_protected_approval_gate_check_context`.
   # The default-null + coalesce pattern keeps the context name derived
   # from the generation variable, so a Terraform `generation` bump
   # flows through to the ruleset without a second override.
-  require_two_developer_approvals_check_context_final = coalesce(
-    var.require_two_developer_approvals_check_context,
-    "require-two-developer-approvals-g${var.require_two_developer_approvals_check_generation}",
+  enable_protected_approval_gate_check_context_final = coalesce(
+    var.enable_protected_approval_gate_check_context,
+    "require-two-developer-approvals-g${var.enable_protected_approval_gate_check_generation}",
   )
 }
 
 dynamic "required_status_checks" {
-  for_each = var.require_two_developer_approvals ? [1] : []
+  for_each = var.enable_protected_approval_gate ? [1] : []
   content {
     strict_required_status_checks_policy = false
     required_check {
-      context        = local.require_two_developer_approvals_check_context_final
+      context        = local.enable_protected_approval_gate_check_context_final
       # integration_id MUST be set — leaving it unset does not default to
       # GitHub Actions; it leaves the required check's source unrestricted,
       # meaning any identity with status/check-publication permission on the
@@ -250,7 +250,7 @@ dynamic "required_status_checks" {
       # (See Decision 5's "Modified-notifier residual risk and defence-in-
       # depth" subsection for the residual spoofing concern this does
       # *not* defend against on its own.)
-      integration_id = var.require_two_developer_approvals_check_integration_id
+      integration_id = var.enable_protected_approval_gate_check_integration_id
     }
   }
 }
@@ -259,25 +259,25 @@ dynamic "required_status_checks" {
 New module variables:
 
 ```hcl
-variable "require_two_developer_approvals" {
+variable "enable_protected_approval_gate" {
   description = "When true, add the approvals status check as a required check on main-protection. The workflow gates only authors in PROTECTED_PR_AUTHOR_LOGINS until they meet REQUIRED_APPROVAL_COUNT. Defaults to false."
   type        = bool
   default     = false
 }
 
-variable "require_two_developer_approvals_check_context" {
-  description = "Status-check context name produced by the two-approvals workflow. Only used when require_two_developer_approvals is true. Defaults to the generation-suffixed context published by this repo's require-two-developer-approvals-publisher.yml via the Checks API (see Decision 6 and Decision 7). Composed from the generation input: `require-two-developer-approvals-g<generation>`. Operators should normally let this default track the generation rather than override it."
+variable "enable_protected_approval_gate_check_context" {
+  description = "Status-check context name produced by the two-approvals workflow. Only used when enable_protected_approval_gate is true. Defaults to the generation-suffixed context published by this repo's require-two-developer-approvals-publisher.yml via the Checks API (see Decision 6 and Decision 7). Composed from the generation input: `require-two-developer-approvals-g<generation>`. Operators should normally let this default track the generation rather than override it."
   type        = string
   default     = null  # Composed from the generation variable; see locals in main.tf
 }
 
-variable "require_two_developer_approvals_check_generation" {
+variable "enable_protected_approval_gate_check_generation" {
   description = "Numeric generation suffix for the check context name (mirrors the top-level variable of the same name; see Decision 7). Starts at 1 and increments on every ON → OFF → ON cycle to invalidate stale check-runs from the previous ON interval."
   type        = number
   default     = 1
 }
 
-variable "require_two_developer_approvals_check_integration_id" {
+variable "enable_protected_approval_gate_check_integration_id" {
   description = "Numeric App integration ID of the publisher that is allowed to satisfy the required check. Defaults to 15368 (the GitHub Actions App), matching the publisher workflow shipped with this repo. External adopters who publish from a different App (e.g. a self-hosted integration) must override this with their own App ID so the required-context binding stays tight; leaving it mismatched would silently prevent merges."
   type        = number
   default     = 15368
@@ -295,7 +295,7 @@ executed PR-controlled code and posted `conclusion = success` under the
 expected integration_id would still satisfy the gate; the two layers
 are complementary, not redundant.
 
-`terraform/main.tf` passes the top-level `var.require_two_developer_approvals`
+`terraform/main.tf` passes the top-level `var.enable_protected_approval_gate`
 through to the module. External adopters that use the published
 `branch-protection` module can set it the same way.
 
@@ -636,7 +636,7 @@ recompute sibling check-runs; a `synchronize` or `ready_for_review`
 event always runs even on a draft because of the draft-handling
 contract above), the
 `PROTECTED_PR_AUTHOR_LOGINS` / `REQUIRED_APPROVAL_COUNT` /
-`REQUIRE_TWO_DEVELOPER_APPROVALS` variable reads,
+`ENABLE_PROTECTED_APPROVAL_GATE` variable reads,
 and the trusted-ref selection for `helpers-ref`. The reusable holds the
 composite-action invocation and the four-step helper-checkout bootstrap
 (AGENTS.md § "Reusable workflows: self-checkout for helper actions").
@@ -687,7 +687,7 @@ single reference implementation to follow.
 **Decision.** The activity publishes the check conclusion using the
 Checks API (`POST /repos/{owner}/{repo}/check-runs`) with a `name`
 composed from the generation suffix:
-`require-two-developer-approvals-g${REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION}`.
+`require-two-developer-approvals-g${ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION}`.
 When the opt-in is OFF, the preview context is
 `require-two-developer-approvals-g${generation} (preview)` (see
 Decision 7 for why the enforcing context is not published in OFF
@@ -736,7 +736,7 @@ etc.) could POST a `conclusion: success` under the gate's context name
 and bypass the workflow entirely. Pinning to 15368 binds the required
 context to the publisher we actually execute. An external adopter whose
 publisher runs under a different App must override
-`require_two_developer_approvals_check_integration_id` to that App's ID.
+`enable_protected_approval_gate_check_integration_id` to that App's ID.
 Decision 9 includes an acceptance test that posts the context from a
 non-matching App and confirms the required check is **not** satisfied.
 
@@ -777,7 +777,7 @@ handles each with a specific publication posture:
    than silently letting protected PRs through.
 
 **Activation reconciliation across the full ON ↔ OFF cycle.**
-Flipping `require_two_developer_approvals` from `false` to `true` in
+Flipping `enable_protected_approval_gate` from `false` to `true` in
 Terraform (and the matching Actions-variable change) does not by itself
 fire any of Decision 5's events on existing open PRs — the ruleset
 change and the `vars.*` change are not PR events. Without extra
@@ -808,11 +808,11 @@ and `docs/adopting.md`.
 **Generation counter.** The context name published and required is
 not a bare `require-two-developer-approvals` — it carries a numeric
 generation suffix sourced from a new Terraform variable
-`require_two_developer_approvals_check_generation` (integer, default
+`enable_protected_approval_gate_check_generation` (integer, default
 `1`). The composed context name is
 `require-two-developer-approvals-g${generation}` (e.g.
 `require-two-developer-approvals-g1`). The same variable is exposed
-as the `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION` Actions
+as the `ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION` Actions
 variable that the publisher reads at run time, so Terraform and the
 workflow stay in sync via a single source of truth.
 
@@ -830,13 +830,13 @@ ignored and the gate is fail-closed until the backfill repopulates
 **Enable procedure (OFF → ON).**
 
 1. In Terraform, bump
-   `require_two_developer_approvals_check_generation` to a value
+   `enable_protected_approval_gate_check_generation` to a value
    never previously used, set
-   `require_two_developer_approvals = true`, and `terraform apply`.
+   `enable_protected_approval_gate = true`, and `terraform apply`.
    The ruleset now requires a fresh generation's context that no PR
    currently has, so merges are blocked across all PRs
    fail-closed by construction.
-2. Set `REQUIRE_TWO_DEVELOPER_APPROVALS = true` in the Actions-variable
+2. Set `ENABLE_PROTECTED_APPROVAL_GATE = true` in the Actions-variable
    layer (either in the same `terraform apply` if the Actions variable
    is Terraform-managed via `agent-vars`, which it is in this repo; or
    as a follow-on step for adopters who manage the variable manually)
@@ -850,7 +850,7 @@ ignored and the gate is fail-closed until the backfill repopulates
    everywhere.
 
 **Disable procedure (ON → OFF).** Set
-`require_two_developer_approvals = false` and `terraform apply`. The
+`enable_protected_approval_gate = false` and `terraform apply`. The
 required-check entry is removed from the ruleset, so stale
 enforcing-context check-runs on open PRs stop being evaluated and
 cannot block merges. The publisher stops posting the enforcing
@@ -1178,7 +1178,7 @@ the design adds a **periodic reconciliation sweep workflow**
   `${{ vars.X }}`), **and** by `workflow_dispatch` for operator-
   initiated reconciliation. The sweep's effective interval is
   tunable via a Terraform-managed Actions variable
-  `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES` (default
+  `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` (default
   10 minutes) consumed by the activity's own early-exit guard:
   before doing any work, the activity calls
   `GET /repos/{owner}/{repo}/actions/workflows/require-two-developer-approvals-reconcile.yml/runs?status=success&per_page=10`,
@@ -1225,7 +1225,7 @@ non-replaced `synchronize` and `closed` event and provides sub-minute
 reconciliation in the common case. The sweep's role is purely to
 upper-bound reconciliation latency at the sweep interval when the
 inline path was dropped. The effective sweep interval
-(`REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES`, floor 1,
+(`ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`, floor 1,
 default 10) therefore directly sets the maximum staleness window
 for a shared-SHA block after the blocking dev-agent PR has moved
 on; adopters can lower it (at the cost of more Actions minutes
@@ -1518,14 +1518,14 @@ The following must be updated in the same PR as the implementation (per
 AGENTS.md § "Keeping Documentation Current"):
 
 - `AGENTS.md`:
-  - Add `PROTECTED_PR_AUTHOR_LOGINS`, `REQUIRED_APPROVAL_COUNT`, `REQUIRE_TWO_DEVELOPER_APPROVALS`,
-    `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`, and
-    `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES` to the
+  - Add `PROTECTED_PR_AUTHOR_LOGINS`, `REQUIRED_APPROVAL_COUNT`, `ENABLE_PROTECTED_APPROVAL_GATE`,
+    `ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION`, and
+    `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` to the
     "Terraform-managed … Actions variables" list in the documentation-update
     checklist.
   - Add a short bullet under § "Code Review Standards" → "Repo-specific
     security defaults" / "Branch-protection immutability" cross-referencing
-    the new design doc and noting that lowering `require_two_developer_approvals`
+    the new design doc and noting that lowering `enable_protected_approval_gate`
     from `true` to `false` must be justified in the PR body (same pattern as
     "lowers `required_approving_review_count` below 1").
   - List the four new workflows
@@ -1535,10 +1535,10 @@ AGENTS.md § "Keeping Documentation Current"):
     `require-two-developer-approvals-reconcile.yml`) in the Repository
     Layout section.
 - `terraform/modules/branch-protection/README.md`: document the four
-  new module variables (`require_two_developer_approvals`,
-  `require_two_developer_approvals_check_context`,
-  `require_two_developer_approvals_check_integration_id`,
-  `require_two_developer_approvals_check_generation`), the dynamic
+  new module variables (`enable_protected_approval_gate`,
+  `enable_protected_approval_gate_check_context`,
+  `enable_protected_approval_gate_check_integration_id`,
+  `enable_protected_approval_gate_check_generation`), the dynamic
   `required_status_checks` block, the generation-counter semantics
   from Decision 7 (bump on every ON → OFF → ON cycle), **and** the
   admin-bypass caveat described in the Interactions section (admins
@@ -1549,7 +1549,7 @@ AGENTS.md § "Keeping Documentation Current"):
   workflow, the periodic
   `require-two-developer-approvals-reconcile.yml` sweep workflow
   (committed `cron: "* * * * *"` + activity-side early-exit guard
-  reading `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES`;
+  reading `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`;
   default 10 minutes, floor 1) and the fact
   that the sweep is a safety net for pending-run replacement rather
   than the primary mechanism — i.e. the maximum staleness window
@@ -1571,19 +1571,19 @@ AGENTS.md § "Keeping Documentation Current"):
   pending-run replacement).
 - `terraform/modules/agent-vars/README.md`: document the five new
   Actions variables (`PROTECTED_PR_AUTHOR_LOGINS`, `REQUIRED_APPROVAL_COUNT`,
-  `REQUIRE_TWO_DEVELOPER_APPROVALS`,
-  `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`, and
-  `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES`) and the usage
+  `ENABLE_PROTECTED_APPROVAL_GATE`,
+  `ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION`, and
+  `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`) and the usage
   example.
 - `terraform/terraform.tfvars.example`: show commented-out example values
-  for `protected_pr_author_logins`, `required_approval_count`, `require_two_developer_approvals`, and
-  `require_two_developer_approvals_check_generation`.
+  for `protected_pr_author_logins`, `required_approval_count`, `enable_protected_approval_gate`, and
+  `enable_protected_approval_gate_check_generation`.
 - `docs/adopting.md`: add a section for external adopters explaining
   the policy-configuration contract (set `protected_pr_author_logins` and
   `required_approval_count`), the enable/disable + backfill
   procedure, the generation-counter bump requirement on re-enable,
   the override path for
-  `require_two_developer_approvals_check_integration_id` when they
+  `enable_protected_approval_gate_check_integration_id` when they
   publish from a GitHub App other than GitHub Actions, the cross-PR
   shared-SHA note from Decision 8a (so adopters understand a
   human PR can be blocked by a shared commit with an under-approved
@@ -1672,16 +1672,16 @@ AGENTS.md § "Keeping Documentation Current"):
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#661](https://github.com/mfrancza/agentic-development-workflow/issues/661) | Terraform: add `protected_pr_author_logins` (non-empty unique list), `required_approval_count` (positive integer), `require_two_developer_approvals`, generation, and reconcile-interval variables; expose the first two as JSON `PROTECTED_PR_AUTHOR_LOGINS` and numeric `REQUIRED_APPROVAL_COUNT` Actions variables. Wire all values to the publisher, branch-protection module, examples, and operator documentation. | — |
+| [#661](https://github.com/mfrancza/agentic-development-workflow/issues/661) | Terraform: add `protected_pr_author_logins` (non-empty unique list), `required_approval_count` (positive integer), `enable_protected_approval_gate`, generation, and reconcile-interval variables; expose the first two as JSON `PROTECTED_PR_AUTHOR_LOGINS` and numeric `REQUIRED_APPROVAL_COUNT` Actions variables. Wire all values to the publisher, branch-protection module, examples, and operator documentation. | — |
 | [#662](https://github.com/mfrancza/agentic-development-workflow/issues/662) | TypeScript activity + composite action: implement the approval check. Read `protected-pr-author-logins` and `required-approval-count` inputs, validate the JSON list and positive integer before making any author decision, and fail every PR visibly when invalid. For each protected PR, exclude its own author from latest-per-reviewer `APPROVED` reviews and compare against the configured threshold; non-protected PRs pass immediately. Resolve every shared-SHA candidate by paginating the authoritative open-PR listing (never the lag-prone commit→PR index); on a listing error publish failure when possible and fail loudly, never success from a partial set. Preserve the Decision 8/8a serialization, shared-SHA, departed-SHA, draft, and generation contracts. Unit tests cover two protected identities, custom thresholds, invalid JSON/list/count, API-error fail-closed behavior, and author-specific self-exclusion in addition to Decision 9. | — |
-| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add the publisher, zero-permission named notifier, backfill, reconcile workflow, and paired reusable defined in Decisions 5, 7, 8, and 8a. Publisher stubs pass `vars.PROTECTED_PR_AUTHOR_LOGINS`, `vars.REQUIRED_APPROVAL_COUNT`, `vars.REQUIRE_TWO_DEVELOPER_APPROVALS`, and generation to the reusable. Preserve the documented trusted-ref, `workflow_run` null guard/fallback, per-PR/per-SHA concurrency, departed-SHA, and per-minute sweep contracts. The reconcile workflow MUST grant `actions: read`, `pull-requests: read`, and `checks: write`; an Actions-runs lookup failure logs and continues a full sweep rather than early-exiting. | Issue #662 |
+| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add the publisher, zero-permission named notifier, backfill, reconcile workflow, and paired reusable defined in Decisions 5, 7, 8, and 8a. Publisher stubs pass `vars.PROTECTED_PR_AUTHOR_LOGINS`, `vars.REQUIRED_APPROVAL_COUNT`, `vars.ENABLE_PROTECTED_APPROVAL_GATE`, and generation to the reusable. Preserve the documented trusted-ref, `workflow_run` null guard/fallback, per-PR/per-SHA concurrency, departed-SHA, and per-minute sweep contracts. The reconcile workflow MUST grant `actions: read`, `pull-requests: read`, and `checks: write`; an Actions-runs lookup failure logs and continues a full sweep rather than early-exiting. | Issue #662 |
 | [#664](https://github.com/mfrancza/agentic-development-workflow/issues/664) | Documentation: update `AGENTS.md`, module READMEs, examples, and `docs/adopting.md` for `protected_pr_author_logins` / `PROTECTED_PR_AUTHOR_LOGINS` and `required_approval_count` / `REQUIRED_APPROVAL_COUNT`, including JSON format, threshold validation, and the existing activation, shared-SHA, bypass, and residual-risk contracts. | Issue #661, Issue #663 |
 | [#665](https://github.com/mfrancza/agentic-development-workflow/issues/665) | End-to-end validation: execute Decision 9, including multiple protected authors, a non-default threshold, author-specific self-exclusion, and every invalid configuration path, alongside the fork, spoofing, concurrency, activation, shared-SHA, draft, and departed-SHA cases. | Issues #661, #662, #663, #664 |
 
 Issues #661 and #662 are independent and can proceed in parallel — the
 contract (variable names `PROTECTED_PR_AUTHOR_LOGINS`,
-`REQUIRED_APPROVAL_COUNT`, `REQUIRE_TWO_DEVELOPER_APPROVALS`, and
-`REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`; enforcing
+`REQUIRED_APPROVAL_COUNT`, `ENABLE_PROTECTED_APPROVAL_GATE`, and
+`ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION`; enforcing
 check-context name composed as
 `require-two-developer-approvals-g${generation}`; preview context
 name `require-two-developer-approvals-g${generation} (preview)`;
