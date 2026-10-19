@@ -371,7 +371,9 @@ the resolver job (see Decision 4 for the two-job structure):
 ```yaml
 if: >
   (github.event_name == 'workflow_run' &&
-   github.event.workflow_run.conclusion == 'failure') ||
+   (github.event.workflow_run.conclusion == 'failure' ||
+    github.event.workflow_run.conclusion == 'timed_out' ||
+    github.event.workflow_run.conclusion == 'action_required')) ||
   (github.event_name == 'check_run' &&
    (github.event.check_run.conclusion == 'failure' ||
     github.event.check_run.conclusion == 'timed_out' ||
@@ -396,6 +398,11 @@ when Terraform has not yet provisioned the variable. An absent or empty
 variable is deliberately **disabled**, not fail-open: no `check_run` or
 polled check can start the agent until an operator adds its exact display
 name to the JSON array.
+
+The `workflow_run` branch deliberately uses the same three-conclusion
+actionable set. This keeps same-repo Actions event delivery immediate for
+`timed_out` and `action_required` rather than making those outcomes wait
+for the polling backstop.
 
 **Why repo-wide (not per-PR).** The allowlist expresses operator policy
 ("this check is safe and useful for the agent to handle in this repo"),
@@ -719,7 +726,7 @@ permission grants.
 | [#658](https://github.com/mfrancza/agentic-development-workflow/issues/658) | Caller stub + reusable workflow rewiring using a **hybrid** trigger: `.github/workflows/agent-fix-checks.yml` subscribes to both explicit same-repo `workflow_run.workflows` and `check_run: [completed]`; split the stub into resolver + dependent reusable-call jobs keyed by `needs.resolve-pr.outputs.pr_number`; add the conclusion-whitelist + `FIX_CHECKS_ALLOW` opt-in filter on the resolver `if:` (including an empty/missing-variable fail-closed guard); extend the reusable workflow to accept `head-sha-at-trigger` and plumb `FIX_CHECKS_ALLOW` through to the container; use the pinned checkout SHA with `persist-credentials: false`; update operator documentation for the opt-in policy | Issue #656, Issue #657 |
 | [#667](https://github.com/mfrancza/agentic-development-workflow/issues/667) | Entrypoint freshness / duplicate-work guard in `action_fix_checks()` (`docker/scripts/entrypoint.sh`): after `gh pr checkout` and before `run_agent`, short-circuit `human-required`, enumerate checks with the `FIX_CHECKS_ALLOW` allowlist applied throughout, classify allowed pending checks by `GITHUB_HEAD_SHA_AT_TRIGGER`, bounded-wait only stale replacements, and invoke the agent only when an allowed check remains failing. Read `FIX_CHECKS_ALLOW` and `GITHUB_HEAD_SHA_AT_TRIGGER` from env and cover the guard with shell tests. | Issue #658 |
 | [#668](https://github.com/mfrancza/agentic-development-workflow/issues/668) | Scheduled polling backstop workflow `.github/workflows/agent-fix-checks-poll.yml`: schedule + manual dispatch; enumerate open agent PRs without `human-required`, apply `FIX_CHECKS_ALLOW`, and dispatch only PRs with an allowed failing check (even if allowed checks are pending). Use the shared concurrency group and freshness guard for dedup; document the opt-in operator knobs and the human-required re-enable gesture. | Issue #656, Issue #658, Issue #667 |
-| [#659](https://github.com/mfrancza/agentic-development-workflow/issues/659) | End-to-end validation: prove an unlisted cross-repo/third-party check never dispatches (event-driven or polled); prove adding its exact display name to `FIX_CHECKS_ALLOW` enables each origin independently; prove selected same-repo workflows still require their `workflow_run.workflows` subscription; cover all three actionable conclusions, burst dedup, pending-check safety, polling dedup, human-PR exclusion, escalation stop/re-enable, and empirical `check_run` delivery coverage. | Issue #658, Issue #667, Issue #668 |
+| [#659](https://github.com/mfrancza/agentic-development-workflow/issues/659) | End-to-end validation: prove an unlisted cross-repo/third-party check never dispatches (event-driven or polled); prove adding its exact display name to `FIX_CHECKS_ALLOW` enables each origin independently; prove selected same-repo workflows still require their `workflow_run.workflows` subscription and deliver each actionable conclusion (`failure`, `timed_out`, `action_required`) immediately; cover all three actionable conclusions, burst dedup, pending-check safety, polling dedup, human-PR exclusion, escalation stop/re-enable, and empirical `check_run` delivery coverage. | Issue #658, Issue #667, Issue #668 |
 
 Issues #656 and #657 are independent of each other — one defines the
 Actions variable contract (`FIX_CHECKS_ALLOW`, JSON array, default `[]`,
