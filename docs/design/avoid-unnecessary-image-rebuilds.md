@@ -99,8 +99,10 @@ them (see `AGENTS.md`):
 - Any new third-party action requires a coordinated allowlist entry in
   `terraform/main.tf`'s `patterns_allowed` (see "Repo-specific security
   defaults" → "Pinned action SHAs"). This design avoids that cost by using
-  `docker buildx build` with the default BuildKit driver (pre-installed on
-  `ubuntu-24.04`) rather than adding `docker/setup-buildx-action`.
+  the preinstalled `docker` CLI with plain `docker build --cache-from`
+  (which works on the default overlay2 docker driver shipped with
+  `ubuntu-24.04` runners) rather than adding `docker/setup-buildx-action`
+  or provisioning a `docker-container` buildx builder on every run.
 - Variables added to Terraform follow the existing pattern in
   [`terraform/modules/agent-vars/main.tf`](../../terraform/modules/agent-vars/main.tf)
   (one `github_actions_variable` per operator-settable value, matching
@@ -114,9 +116,15 @@ them (see `AGENTS.md`):
 
 ### Terraform-managed image references
 
-Add two variables to `terraform/variables.tf` and expose them as the
-`DEVELOPER_IMAGE` / `REVIEWER_IMAGE` Actions variables that the caller stubs
-already read:
+Two files are touched (standard pattern in this repo — see e.g.
+`reviewer_models` / `review_model_pairing`): the user-facing `variable`
+block is declared at the root (`terraform/variables.tf`), and the actual
+`github_actions_variable` resource that pushes the value into GitHub lives
+in `terraform/modules/agent-vars/main.tf`, with the root `main.tf`
+forwarding the variable into the module. Sub-issue #684 implements both
+sides; the HCL below shows the root declaration and the required
+`github_actions_variable` shape so the implementer does not have to
+re-derive it:
 
 ```hcl
 variable "developer_image" {
@@ -232,11 +240,26 @@ jobs:
       - name: Build and push :main images
         env:
           _REPO: ${{ github.repository }}
+          # BuildKit is enabled by default on ubuntu-24.04 runners; set
+          # explicitly so the inline-cache flag is honored regardless of a
+          # future image refresh that flips the default back to the classic
+          # builder.
+          DOCKER_BUILDKIT: "1"
         run: |
           set -euo pipefail
           BASE="ghcr.io/${_REPO}"
-          docker build ./docker          -t "${BASE}/developer:main"
-          docker build ./docker/reviewer -t "${BASE}/reviewer:main"
+          # BUILDKIT_INLINE_CACHE=1 embeds a layer-cache manifest in the
+          # pushed image. Without this flag the published :main image can
+          # still be pulled, but `docker build --cache-from "${CACHE_REF}"`
+          # on the feedback-path side has no cache metadata to match
+          # against and every layer rebuilds — defeating the entire
+          # feedback-path optimisation.
+          docker build \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            ./docker          -t "${BASE}/developer:main"
+          docker build \
+            --build-arg BUILDKIT_INLINE_CACHE=1 \
+            ./docker/reviewer -t "${BASE}/reviewer:main"
           docker push "${BASE}/developer:main"
           docker push "${BASE}/reviewer:main"
 ```
@@ -245,6 +268,12 @@ The two image builds run sequentially inside `publish-main` (same pattern
 as the existing release job) because the GHCR login step is shared and the
 push is seconds. Freshness guarantee: workflows that pull `:main` are at
 most one post-merge push behind HEAD.
+
+The existing `release-images` tag-publish job should receive the same
+`BUILDKIT_INLINE_CACHE=1` treatment in the same sub-issue, so operators
+who choose to pin `developer_image` / `reviewer_image` to a `:v<N>` tag
+still get a cache-source they can `--cache-from` against if they later
+run their own build-mode workflows.
 
 **Alternatives considered for the path gate.** (a) `dorny/paths-filter` —
 rejected because it is a non-GitHub-owned action and would require an
@@ -265,56 +294,83 @@ name — rejected because `:latest` is semantically ambiguous (OCI convention
 treats it as the default pull tag, which invites accidental use); `:main`
 is explicit about which branch the image reflects.
 
-### `run-agent` composite action: BuildKit registry cache for build mode
+### `run-agent` composite action: inline-cache reuse for build mode
 
 The pull-mode branch of `run-agent` is unchanged (`docker pull "${_IMAGE}"`).
-The build-mode branch switches from `docker build` to `docker buildx build`
-with a registry-backed cache source:
+The build-mode branch pulls the published `:main` image (best-effort) and
+then builds with `--cache-from` pointing at the pulled reference, so
+unchanged layers are reused from the local image store:
 
 ```bash
-docker buildx build \
-  --cache-from "type=registry,ref=${CACHE_REF}" \
+# Best-effort pre-pull of the cache source. Non-fatal: if :main is not
+# reachable (anonymous pull on a private fork, image never published, GHCR
+# outage) we fall through to a cacheless build — the pre-change behavior.
+docker pull "${CACHE_REF}" || true
+
+docker build \
+  --cache-from "${CACHE_REF}" \
   -t "${_IMAGE_TAG}" \
-  --load \
   "${ctx}"
 ```
 
 where `CACHE_REF` resolves to
-`ghcr.io/<owner>/<repo>/developer:main` or `.../reviewer:main` based on which
-`build-context` is in use (the composite action already knows this via
-`inputs.build-context` — `docker/reviewer` → reviewer; otherwise →
-developer). `--load` ensures the built image is loaded into the local
-image store so the subsequent `docker run` finds it (buildx's default
-output is OCI format, not loaded).
+`ghcr.io/<owner>/<repo>/developer:main` for the default context and
+`.../reviewer:main` when `build-context` ends in `/reviewer`. The suffix
+match (not an exact-string match on `docker/reviewer`) is required because
+after the issue #498 self-checkout migration the reviewer reusable passes
+`_agentic-workflow/docker/reviewer`, not `docker/reviewer`, and a future
+reusable migration could shift the prefix again; keying on the trailing
+component keeps the resolver stable.
 
-**Cache behavior.** BuildKit fetches the cache manifest from the registry
-(single HTTP request to GHCR), then selectively pulls only the cached
-layer blobs it needs. Unchanged layers (base image, apt install, npm
-install) deserialise in seconds. Changed layers (modified `COPY scripts/`
-after an edit to a prompt or entrypoint) rebuild as today. If the registry
-is unreachable or `:main` has not yet been published, BuildKit logs a
-warning and falls back to a cacheless build — the same behavior as today,
-only slower on the first run after this change ships.
+**Why the plain `docker build --cache-from` pattern and not `docker buildx
+build --cache-from type=registry`.** BuildKit's `type=registry` cache
+backend is only usable on the `docker` driver when the containerd image
+store is enabled. GitHub-hosted `ubuntu-24.04` runners ship Docker Engine
+28.x with the overlay2 storage driver (the containerd snapshotter is
+opt-in and off by default), so a `type=registry` cache importer either
+fails the build with an unsupported-cache-backend error or silently
+degrades. The alternative — provisioning a `docker-container` buildx
+builder on every run via `docker buildx create --driver docker-container
+--use --bootstrap` — adds 10–20 s of per-run bootstrap overhead and
+reintroduces the `--load` requirement, both of which eat into the
+sub-30-second feedback-path target. Plain `docker build --cache-from` is
+driver-agnostic and needs no bootstrap: Docker Engine already supports
+image-manifest-based cache reuse out of the box when the referenced image
+embeds inline cache metadata (see the `publish-main` section below).
 
-**Why `type=registry` and not `type=gha` cache.** `type=gha` requires
-`docker/setup-buildx-action` to export `ACTIONS_CACHE_URL` and
-`ACTIONS_RUNTIME_TOKEN`, which pulls in a non-GitHub-owned action and
-forces an actions-policy allowlist update (per `AGENTS.md` → "Pinned
-action SHAs"). `type=registry` uses the registry we already publish to,
-with no new actions and no permission changes (pull is anonymous on a
-public repo; the composite action never writes cache, only reads). This
-also keeps the cache usable by external callers who adopt our reusables
-without having to set up GHA cache themselves.
+**Cache behavior.** `docker pull` fetches the cached layer blobs, Docker
+Engine looks up their inline cache manifests, and the subsequent `docker
+build --cache-from` reuses any layer whose input hash matches. Unchanged
+layers (base image, apt install, npm install — the 60–120 s portion)
+deserialise locally in seconds. Changed layers (modified `COPY scripts/`
+after an edit to a prompt or entrypoint) rebuild as today. If `docker
+pull` fails (private fork without GHCR access, `:main` not yet published,
+network issue), the `|| true` keeps the build going and it degrades to a
+cacheless build — the same behavior as today, only slower on the first
+run after this change ships.
+
+**Why `--cache-from` on a pulled image and not `type=gha` cache.**
+`type=gha` requires `docker/setup-buildx-action` to export
+`ACTIONS_CACHE_URL` and `ACTIONS_RUNTIME_TOKEN`, which pulls in a
+non-GitHub-owned action and forces an actions-policy allowlist update
+(per `AGENTS.md` → "Pinned action SHAs"). The `docker pull` + inline-cache
+pattern uses the registry we already publish to, with no new actions and
+no permission changes (pull is anonymous on a public repo; the composite
+action never writes cache, only reads). This also keeps the cache usable
+by external callers who adopt our reusables without having to set up GHA
+cache themselves.
 
 **Why not `--cache-to`.** Writing cache from every workflow run would
 require `packages: write` on every job that invokes `run-agent` in build
 mode (today only `release-images.yml` has that scope). The published
-`:main` image already contains the layer metadata BuildKit needs as a
-cache source, so there is no gain to writing an additional cache artifact.
+`:main` image already carries the inline cache metadata needed as a cache
+source (see the `BUILDKIT_INLINE_CACHE=1` flag on `publish-main` below),
+so there is no gain to writing an additional cache artifact.
 
-**No change to the `docker run` step** that follows the build: the loaded
-image tag is identical, and `--load` guarantees it is addressable through
-the normal docker image store.
+**No change to the `docker run` step** that follows the build: the local
+image tag (`_IMAGE_TAG`) is identical to what today's `docker build -t`
+produces, so the existing `docker run "${_EFFECTIVE_IMAGE}"` call picks
+it up with no further changes.
 
 ### No change to the four feedback-path caller stubs
 
@@ -388,19 +444,22 @@ changes needed there.
 |-------|------|-----------|
 | [#684](https://github.com/mfrancza/agentic-development-workflow/issues/684) | Terraform: add `developer_image` + `reviewer_image` variables and `DEVELOPER_IMAGE` / `REVIEWER_IMAGE` Actions variables (modules/agent-vars + root variables); update tfvars.example and README | — |
 | [#685](https://github.com/mfrancza/agentic-development-workflow/issues/685) | `release-images.yml`: add `publish-main` job that republishes `ghcr.io/<owner>/<repo>/{developer,reviewer}:main` on push to main when `docker/**` changes | — |
-| [#686](https://github.com/mfrancza/agentic-development-workflow/issues/686) | `run-agent` composite action: switch build mode to `docker buildx build --cache-from=type=registry,ref=…:main --load`; resolve the cache ref from `build-context`; add a smoke test covering the ref-resolution logic | — |
+| [#686](https://github.com/mfrancza/agentic-development-workflow/issues/686) | `run-agent` composite action: switch build mode to best-effort `docker pull "${CACHE_REF}" \|\| true` followed by `docker build --cache-from "${CACHE_REF}" …`; resolve `CACHE_REF` from `build-context` by `/reviewer` suffix match (not exact `docker/reviewer`); add a smoke test covering the ref-resolution logic (`docker/reviewer`, `_agentic-workflow/docker/reviewer`, and the empty default). This path is driver-agnostic and does not require `docker/setup-buildx-action` or a `docker-container` buildx builder, so it works on the preinstalled Docker Engine on `ubuntu-24.04`. | #685 (cache source must publish with `BUILDKIT_INLINE_CACHE=1` to be matchable) |
 | [#687](https://github.com/mfrancza/agentic-development-workflow/issues/687) | This repo's `terraform.tfvars`: set `developer_image` / `reviewer_image` to the `:main` tags so the main-path workflows switch to pull mode by default | #684, #685 |
 | [#688](https://github.com/mfrancza/agentic-development-workflow/issues/688) | End-to-end validation: measure image-prep baseline across all eight agent-container workflows (last 10 runs each), re-measure after #685/#686/#687 land, post the comparison as a comment on this design PR and on issue #643; confirm cache fall-through by landing a small `docker/` change on `main` and observing that the next workflow_run / push-to-main / deployment_status feedback-path trigger (whose `helpers-ref` is the just-updated default-branch commit) rebuilds the affected layer against the updated `:main` cache source. Do **not** try to validate cache-miss by opening a PR that edits `docker/` and inspecting `agent-fix-checks` — feedback reusables build the `helpers-ref` tree, not the PR head, so a PR-only `docker/` change is invisible to that workflow until it merges. | #685, #686, #687 |
 
-Issue #684, Issue #685, and Issue #686 are independent and can land in
-any order:
+Issue #684 and Issue #685 are independent and can land in either order:
 
 - Issue #684 defaults the new variables to empty strings, so it is a
   no-op until Issue #687 flips the tfvars.
-- Issue #685 publishes a `:main` image whether or not anything consumes
-  it.
-- Issue #686 uses `type=registry` cache which silently no-ops if `:main`
-  is unpublished, so it is safe to land before Issue #685.
+- Issue #685 publishes a `:main` image (with inline cache metadata)
+  whether or not anything consumes it.
+
+Issue #686 depends on Issue #685: its `docker build --cache-from` call is
+harmless when the pre-pull of `${CACHE_REF}` fails (the build degrades to
+a cacheless build), but the feedback-path speedup only materialises once
+`:main` is being published with `BUILDKIT_INLINE_CACHE=1`. Landing #686
+before #685 is safe but delivers no measurable win until #685 is in.
 
 Issue #687 flips this repo into pull mode and depends on both the
 variable plumbing (Issue #684) and the published image (Issue #685).
