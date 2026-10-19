@@ -20,11 +20,16 @@ gh pr edit    "<pr-number>"          --repo "$GITHUB_REPO" --add-label "human-re
 
 ## Requesting code review
 
-`CODE_REVIEWERS` is provided in the prompt context as a JSON array of GitHub usernames (e.g. `["alice", "bob"]`). When the PR requires human code review — because the changes are security-sensitive, involve complex architectural decisions, or you are applying the `human-required` label — request reviews from every username in the list:
+`CODE_REVIEWERS` is provided in the prompt context as a JSON array. Each entry may be either a GitHub user login (e.g. `alice`) or an `org/team-slug` reference (e.g. `octo-org/maintainers`). Pass both forms to `gh pr edit --add-reviewer` as-is; GitHub owns team-review semantics and membership routing. When the PR requires human code review — because the changes are security-sensitive, involve complex architectural decisions, or you are applying the `human-required` label — request every entry in the list:
 
-- If the array is non-empty, run one `--add-reviewer` flag per username:
+- If the array is non-empty, make one `gh pr edit --add-reviewer` call per entry. A bad entry must only warn and be skipped: do not let it prevent requests for other entries.
   ```bash
-  gh pr edit "<pr-number>" --repo "$GITHUB_REPO" --add-reviewer "<username1>" --add-reviewer "<username2>"
+  set -o pipefail
+  for entry in $(jq -r '.[]' <<< "$CODE_REVIEWERS"); do
+    if ! gh pr edit "<pr-number>" --repo "$GITHUB_REPO" --add-reviewer "$entry" 2>&1 | tee /dev/stderr; then
+      echo "WARNING: failed to add CODE_REVIEWERS entry '$entry' — skipping (other entries unaffected)" >&2
+    fi
+  done
   ```
 - If the array is empty (`[]` or blank), skip the reviewer request and post a comment warning that no code reviewers are configured:
   ```bash
