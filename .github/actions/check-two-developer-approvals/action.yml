@@ -1,0 +1,56 @@
+name: 'Check two developer approvals'
+description: 'Publishes a check run requiring two non-self approvals for developer-bot pull requests.'
+
+inputs:
+  developer-bot-login:
+    description: 'Login of the developer bot whose pull requests require two approvals'
+    required: true
+  require-two-developer-approvals:
+    description: 'Whether the approval requirement is enabled (true or false)'
+    required: true
+  pr-number:
+    description: 'Pull request number'
+    required: true
+  pr-author:
+    description: 'Login of the pull request author'
+    required: true
+  head-sha:
+    description: 'Current pull request head SHA'
+    required: true
+  repo:
+    description: 'Repository in owner/name format'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve scripts directory
+      id: scripts-dir
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        echo "dir=$(cd "$ACTION_PATH/../../scripts" && pwd)" >> "$GITHUB_OUTPUT"
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ steps.scripts-dir.outputs.dir }}/package-lock.json
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      run: npm ci
+    - name: Publish approval check
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        INPUT_DEVELOPER_BOT_LOGIN: ${{ inputs.developer-bot-login }}
+        INPUT_REQUIRE_TWO_DEVELOPER_APPROVALS: ${{ inputs.require-two-developer-approvals }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        INPUT_PR_AUTHOR: ${{ inputs.pr-author }}
+        INPUT_HEAD_SHA: ${{ inputs.head-sha }}
+        INPUT_REPO: ${{ inputs.repo }}
+      run: npx --no-install tsx src/check-two-developer-approvals.ts
