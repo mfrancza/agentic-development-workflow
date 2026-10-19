@@ -46,6 +46,15 @@ resource "github_actions_variable" "code_reviewers" {
   value         = jsonencode(var.code_reviewers)
 }
 
+# Expose the opted-in failing check names as a JSON-encoded repository Actions
+# variable. The fix-checks workflows match these against raw Checks API
+# check_runs[].name values; an empty list disables all fix-checks delivery.
+resource "github_actions_variable" "fix_checks_allow" {
+  repository    = var.repository
+  variable_name = "FIX_CHECKS_ALLOW"
+  value         = jsonencode(var.fix_checks_allow)
+}
+
 # Expose protected PR authors as JSON so workflows can scope the gate without
 # hardcoding identities.
 resource "github_actions_variable" "protected_pr_author_logins" {

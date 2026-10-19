@@ -18,6 +18,11 @@ output "code_reviewers_variable_name" {
   value       = github_actions_variable.code_reviewers.variable_name
 }
 
+output "fix_checks_allow_variable_name" {
+  description = "Name of the FIX_CHECKS_ALLOW Actions variable."
+  value       = github_actions_variable.fix_checks_allow.variable_name
+}
+
 output "protected_pr_author_logins_variable_name" {
   description = "Name of the PROTECTED_PR_AUTHOR_LOGINS Actions variable."
   value       = github_actions_variable.protected_pr_author_logins.variable_name

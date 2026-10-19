@@ -9,6 +9,7 @@ Manages the GitHub Actions repository variables that configure agentic workflow 
 | `DESIGN_DEFAULT_MODEL` | string | Design-agent default model. When non-empty, `agent-design` workflows prefer this value over `DEFAULT_MODEL`. Empty string (the default) means "not configured — fall through to `DEFAULT_MODEL`"; the caller stub uses `vars.DESIGN_DEFAULT_MODEL \|\| vars.DEFAULT_MODEL` so the fallback is transparent. |
 | `ADMIN_ASSIGNEES` | JSON array | Individual GitHub logins assigned to issues/PRs when the agent applies `human-required` and needs a human in the loop. |
 | `CODE_REVIEWERS` | JSON array | Individual GitHub logins requested as PR reviewers when the agent opens a PR and wants human sign-off. |
+| `FIX_CHECKS_ALLOW` | JSON array | Raw Checks API `check_runs[].name` values allowed to trigger the fix-checks agent. Empty (`[]`) disables all fix-checks delivery. |
 | `PROTECTED_PR_AUTHOR_LOGINS` | JSON array | PR author logins subject to the protected approval threshold. Defaults to `["mfrancza-developer-agent[bot]"]`. |
 | `REQUIRED_APPROVAL_COUNT` | string integer | Required non-self approvals for protected PRs. Defaults to `"2"`. |
 | `ENABLE_PROTECTED_APPROVAL_GATE` | string (`"true"` / `"false"`) | Enables the opt-in protected-approval gate. Defaults to `"false"`. |
@@ -31,6 +32,7 @@ module "agent_vars" {
   # design_default_model = "opus"  # omit or leave "" to fall back to default_model
   admin_assignees     = ["your-github-username"]
   code_reviewers      = ["your-github-username"]
+  # fix_checks_allow = ["ci / Typecheck and test"] # raw Checks API check_runs[].name values; [] disables fix-checks
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
   # required_approval_count                          = 2
   # enable_protected_approval_gate                   = true
@@ -64,6 +66,7 @@ module "agent_vars" {
   # design_default_model = "opus"  # omit or leave "" to fall back to default_model
   admin_assignees     = ["your-github-username"]
   code_reviewers      = ["your-github-username"]
+  # fix_checks_allow = ["ci / Typecheck and test"] # raw Checks API check_runs[].name values; [] disables fix-checks
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
   # required_approval_count                          = 2
   # enable_protected_approval_gate                   = true
@@ -114,6 +117,7 @@ provider "github" {
 | `design_default_model` | `string` | no | `""` | Design-agent default model. When non-empty, `agent-design` uses this instead of `default_model`. Empty (the default) falls through to `default_model`. |
 | `admin_assignees` | `list(string)` | no | `[]` | Individual GitHub logins to assign to escalation issues/PRs. |
 | `code_reviewers` | `list(string)` | no | `[]` | Individual GitHub logins to request as PR reviewers. |
+| `fix_checks_allow` | `list(string)` | no | `[]` | Raw Checks API `check_runs[].name` values allowed to trigger fix-checks. Empty disables all fix-checks delivery. |
 | `protected_pr_author_logins` | `list(string)` | no | developer-agent bot | Protected PR-author logins, encoded as JSON. |
 | `required_approval_count` | `number` | no | `2` | Non-self approvals required for a protected PR. |
 | `enable_protected_approval_gate` | `bool` | no | `false` | Enables the protected-approval gate. |
@@ -132,6 +136,7 @@ provider "github" {
 | `design_default_model_variable_name` | `string` | Name of the `DESIGN_DEFAULT_MODEL` Actions variable (`"DESIGN_DEFAULT_MODEL"`). |
 | `admin_assignees_variable_name` | `string` | Name of the `ADMIN_ASSIGNEES` Actions variable (`"ADMIN_ASSIGNEES"`). |
 | `code_reviewers_variable_name` | `string` | Name of the `CODE_REVIEWERS` Actions variable (`"CODE_REVIEWERS"`). |
+| `fix_checks_allow_variable_name` | `string` | Name of the `FIX_CHECKS_ALLOW` Actions variable (`"FIX_CHECKS_ALLOW"`). |
 | `protected_pr_author_logins_variable_name` | `string` | Name of `PROTECTED_PR_AUTHOR_LOGINS`. |
 | `required_approval_count_variable_name` | `string` | Name of `REQUIRED_APPROVAL_COUNT`. |
 | `enable_protected_approval_gate_variable_name` | `string` | Name of `ENABLE_PROTECTED_APPROVAL_GATE`. |
@@ -146,6 +151,7 @@ provider "github" {
 - `DESIGN_DEFAULT_MODEL` defaults to `""` (empty string). The caller stub expresses the fallback as `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL` — when empty, GitHub Actions evaluates the empty string as falsy and falls through to `DEFAULT_MODEL`, preserving existing behavior for repos that have not set this variable. Set it to any model identifier accepted by the agent `--model` flag to give the design stage its own model tier.
 - `AUTO_TRIGGER_AGENTS` must never be absent from the repository — the workflow guard `vars.AUTO_TRIGGER_AGENTS != ''` prevents `fromJSON('')` from throwing a runtime error. All gates default to `false` so behavior is unchanged unless you opt in.
 - `REVIEWER_MODELS` defaults to `[]` (JSON-encoded empty array). Workflows guard with `vars.REVIEWER_MODELS != ''` before calling `fromJSON` — an absent variable evaluates to `''` and `fromJSON('')` would throw a runtime error; the guard fails closed (multi-reviewer disabled) instead. An empty list (`[]`) is the canonical signal that multi-reviewer is disabled.
+- `FIX_CHECKS_ALLOW` defaults to `[]` (JSON-encoded empty array), which disables all fix-checks delivery. Its entries are raw Checks API `check_runs[].name` values — not workflow names or potentially decorated labels in the Checks tab. Discover names with `gh api repos/$OWNER/$REPO/commits/$SHA/check-runs --jq '.check_runs[].name'`.
 - `agent_allowlist`, `admin_assignees`, and `code_reviewers` contain individual GitHub logins. Entries must be non-empty and must not contain `/`; team references (`org/team-slug`) are not supported.
 - Include the developer-agent and reviewer-agent bot identities (e.g. `mfrancza-developer-agent[bot]`) as explicit `agent_allowlist` entries so that agents can apply `agent:*` labels to route work to one another.
 - The protected-approval variables preserve existing behavior because `ENABLE_PROTECTED_APPROVAL_GATE` defaults to `"false"`. `PROTECTED_PR_AUTHOR_LOGINS` must be non-empty with unique, non-empty logins; both the approval count and reconciliation interval must be positive integers.

@@ -33,6 +33,13 @@ code_reviewers = [
   "your-github-username",
 ]
 
+# Raw Checks API check-run names that may trigger the fix-checks agent. These
+# are check_runs[].name values, not workflow names or possibly decorated labels
+# from the Checks tab. Set [] (the default) to disable all fix-checks delivery.
+# Discover canonical names with:
+# gh api repos/$OWNER/$REPO/commits/$SHA/check-runs --jq '.check_runs[].name'
+fix_checks_allow = []
+
 # Opt-in protected-approval gate. The default protects the developer-agent bot
 # and requires two non-self approvals. Bump the generation on every OFF → ON
 # cycle so an old successful check cannot satisfy the newly enabled rule.
