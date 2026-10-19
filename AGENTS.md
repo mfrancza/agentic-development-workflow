@@ -462,6 +462,8 @@ The substitution runs inside the container; the token values never appear in a w
 
 **Whenever you make a change that affects how agents are configured, triggered, or run, update the docs in the same PR.** Documentation drift makes onboarding painful and makes agent runs unpredictable.
 
+When writing configuration examples, use placeholders or identities owned by this repository; do not use another organization as an example.
+
 At minimum, before opening a PR, check whether your change alters any of the following. If it does, update `AGENTS.md`, and update `README.md` too when the change is user-visible for someone setting up the repo:
 
 - The set of `AGENT_ACTION` values, their env vars, or their trigger events.

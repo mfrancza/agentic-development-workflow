@@ -8,8 +8,8 @@ variable "agent_allowlist" {
   type        = list(string)
 
   validation {
-    condition     = alltrue([for entry in var.agent_allowlist : entry != "" && length(regexall("/", entry)) <= 1])
-    error_message = "Each agent_allowlist entry must be non-empty and contain at most one '/'."
+    condition     = alltrue([for entry in var.agent_allowlist : entry != "" && length(regexall("/", entry)) == 0])
+    error_message = "Each agent_allowlist entry must be a non-empty individual GitHub login and must not contain '/'. Team references (org/team-slug) are not supported."
   }
 }
 
@@ -25,8 +25,8 @@ variable "admin_assignees" {
   default     = []
 
   validation {
-    condition     = alltrue([for entry in var.admin_assignees : entry != "" && length(regexall("/", entry)) <= 1])
-    error_message = "Each admin_assignees entry must be non-empty and contain at most one '/'."
+    condition     = alltrue([for entry in var.admin_assignees : entry != "" && length(regexall("/", entry)) == 0])
+    error_message = "Each admin_assignees entry must be a non-empty individual GitHub login and must not contain '/'. Team references (org/team-slug) are not supported."
   }
 }
 
@@ -36,8 +36,8 @@ variable "code_reviewers" {
   default     = []
 
   validation {
-    condition     = alltrue([for entry in var.code_reviewers : entry != "" && length(regexall("/", entry)) <= 1])
-    error_message = "Each code_reviewers entry must be non-empty and contain at most one '/'."
+    condition     = alltrue([for entry in var.code_reviewers : entry != "" && length(regexall("/", entry)) == 0])
+    error_message = "Each code_reviewers entry must be a non-empty individual GitHub login and must not contain '/'. Team references (org/team-slug) are not supported."
   }
 }
 
