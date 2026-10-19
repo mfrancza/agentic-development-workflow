@@ -140,8 +140,8 @@ export async function resolveCheckPr(
 async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
   const repository = core.getInput("repository", { required: true });
-  const eventName = core.getInput("event-name", { required: true });
-  const allowedChecks = core.getInput("allowed-checks", { required: true });
+  const eventName = core.getInput("event_name", { required: true });
+  const allowedChecks = core.getInput("allowed_checks", { required: true });
   const separatorIndex = repository.indexOf("/");
   if (separatorIndex === -1) {
     core.setFailed(`Invalid repository format: ${repository}`);
