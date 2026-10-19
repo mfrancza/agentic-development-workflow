@@ -1,4 +1,4 @@
-# Design: Fix-checks on any failing PR check, with a configurable ignore list
+# Design: Fix-checks on opted-in failing PR checks
 
 **Issue:** [#627](https://github.com/mfrancza/agentic-development-workflow/issues/627)
 
@@ -11,8 +11,8 @@ same-repo workflow operators enumerate) **and** `check_run.completed`
 third-party checks), backed by a **scheduled polling backstop**
 (`agent-fix-checks-poll.yml`) that guarantees coverage for any origin
 where `check_run` events are suppressed by GitHub's recursion guard, so
-the developer agent reacts to **any** failing check reported against an
-agent-authored PR. Both event triggers are required because the
+the developer agent reacts to every explicitly selected failing check
+reported against an agent-authored PR. Both event triggers are required because the
 `check_run` recursion guard prevents `check_run` events from firing for
 check suites created by GitHub Actions in the same repository — a
 `check_run`-only trigger would silently lose the existing same-repo CI
@@ -21,11 +21,13 @@ guard's cross-repository and head-SHA clauses are not explicitly
 exempted in the docs: cross-repo (org-ruleset) Actions origins and
 third-party checks on an Actions-associated SHA may also be suppressed,
 and a time-based backstop is the only delivery-independent fallback.
-Introduce a repo-wide `FIX_CHECKS_IGNORE` Actions variable (JSON array
+Introduce a repo-wide `FIX_CHECKS_ALLOW` Actions variable (JSON array
 of check names, default `[]`) that the caller stub consults on the
 `check_run` branch of the trigger (and the polling backstop consults on
-every PR) to suppress specific noisy or non-actionable checks. Preserve
-the existing agent-authored trust gate; dedupe per PR via (a) a two-job
+every PR). An empty list disables fix handling until an operator
+explicitly opts a displayed check name in; the `workflow_run.workflows`
+list remains the separate delivery subscription for same-repository Actions.
+Preserve the existing agent-authored trust gate; dedupe per PR via (a) a two-job
 stub whose reusable-call job uses `needs.resolve-pr.outputs.pr_number`
 as the concurrency key — the same group used by the polling backstop so
 event-driven and polled invocations do not run in parallel — plus (b) an
@@ -47,15 +49,17 @@ workflows defined in another repository via an organization ruleset, or
 
 Restated requirements, in the design's own words:
 
-1. **Trigger covers every failing check on an agent-authored PR.** Same-repo
+1. **Trigger covers every opted-in failing check on an agent-authored PR.** Same-repo
    workflow jobs, cross-repo (org ruleset) workflow checks, and third-party
-   checks must all start the agent — unless the check name appears in the
-   caller-configured ignore list. The agent-authored trust gate is
+   checks must all start the agent only when their displayed check names
+   appear in the caller-configured allowlist; same-repo workflows must
+   additionally appear in `workflow_run.workflows` to provide their delivery
+   path. The agent-authored trust gate is
    preserved: a failing check on a human PR must not start the agent.
-2. **Caller-configured ignore list by check name.** The ignore list is
+2. **Caller-configured allowlist by check name.** The allowlist is
    names of **checks** (e.g. `"CodeQL"`, `"Lint"`), not workflow file
    names, because third-party checks have no workflow file at all. An empty
-   list ignores nothing. The default is empty. Callers set the list via a
+   list allows no `check_run` or polled checks. The default is empty. Callers set the list via a
    repository Actions variable without editing the reusable workflow —
    matching the `AUTO_TRIGGER_AGENTS` / `AGENT_ALLOWLIST` pattern already
    used in this repo.
@@ -64,9 +68,9 @@ Restated requirements, in the design's own words:
    agent runs at most once concurrently for that PR, and the agent (which
    already fetches the full `gh pr checks` state inside the container)
    addresses every failing check in a single pass.
-4. **Ignored checks and still-pending checks do not start a run.** A later
-   failure of a non-ignored, non-pending check does start one.
-5. **The caller stub documents how to set the ignore list.** External
+4. **Unlisted checks do not start a run.** A later failure of an allowed
+   check does start one; pending checks are classified by the post-lock guard.
+5. **The caller stub documents how to set the allowlist.** External
    consumers who reference the reusable workflow write their own thin
    caller stubs; the stub comments and the design doc are the single
    authoritative references for the variable name, format, and defaults.
@@ -76,7 +80,7 @@ Restated requirements, in the design's own words:
    `action_fix_checks()` in `docker/scripts/entrypoint.sh`) and the
    agent fixes whatever it finds. Decision 4c adds a short preamble to
    `action_fix_checks()` that exits 0 without invoking the agent when no
-   non-ignored checks are failing on the current HEAD or when
+   allowed checks are failing on the current HEAD or when
    replacement checks are still pending; this is required to make
    requirement 3 ("one run per PR") hold against the race where a
    queued run inherits a stale HEAD or empty-but-already-fixed state.
@@ -94,16 +98,15 @@ Restated requirements, in the design's own words:
   these are the conclusions GitHub treats as blocking a required-check
   policy. `cancelled`, `skipped`, `stale`, and `neutral` are not failures
   and must not start the agent.
-- **Which check names does the ignore list match against?** The
+- **Which check names does the allowlist match against?** The
   `check_run` event payload's `check_run.name` field. For a (cross-repo
   or third-party) GitHub Actions-authored job this is the job name as
   displayed in the PR check list (not the workflow file name, and not
   the workflow `name:` key). Document this explicitly in the stub
   comment so operators look at the PR's "Checks" tab rather than at
-  `.github/workflows/*.yml` to find the right string. The ignore list
-  does not apply to the `workflow_run` branch of the hybrid trigger (see
-  Decision 1) — operators suppress a same-repo workflow by removing it
-  from the stub's `workflows:` list.
+  `.github/workflows/*.yml` to find the right string. The allowlist is
+  applied again by the post-lock guard to every delivery path; same-repo
+  Actions also need their workflow in the stub's `workflows:` list.
 
 ## Design
 
@@ -155,16 +158,16 @@ which way the empirical answer breaks.
 reliably fires for same-repo GitHub Actions failures. `workflows:` must
 enumerate the covered workflow names (the schema requires a non-empty
 list); the stub comment documents that operators must add new same-repo
-workflows here as they are introduced. The ignore list does not apply
-to the `workflow_run` branch of the trigger because `workflow_run` keys
-on workflow name, not check name — operators who want to suppress a
-same-repo workflow remove it from the `workflows:` list instead.
+workflows here as they are introduced. The allowlist applies throughout
+the fix path, including the freshness guard and poller; `workflows:` is
+the additional delivery subscription for same-repo Actions, not a
+substitute for explicitly allowing their displayed check names.
 
 **Why `check_run` for the other origins.** The `check_run.completed`
 event fires for every check whose check suite was **not** created by
 GitHub Actions, which covers third-party check providers and
 cross-repository workflow checks delivered via org rulesets. The payload
-includes `check_run.name` (needed for the ignore-list filter),
+includes `check_run.name` (needed for the allowlist filter),
 `check_run.conclusion`, `check_run.head_sha`, and — when the check
 originates from a workflow attached to a PR — `check_run.pull_requests[]`.
 
@@ -174,7 +177,7 @@ originates from a workflow attached to a PR — `check_run.pull_requests[]`.
 |-------------|-----------------|
 | `check_run` only, replacing `workflow_run` | Would silently drop same-repo Actions failures — GitHub's documented recursion guard prevents `check_run` activity whose check suite was created by GitHub Actions from triggering workflows. This was the design's prior position; the review correctly identified it as a regression against the existing passing path. |
 | Keep `workflow_run` and extend `workflows:` with more names | Covers only same-repo workflows. Fundamentally cannot see org-ruleset or third-party checks (grooming note confirmed) — hence the hybrid. |
-| `check_suite.completed` instead of `check_run.completed` | Fires per *suite*, not per check. Suites can group multiple checks with mixed conclusions, so the name-based ignore list cannot be applied per-check at the gate — all-or-nothing per suite is a worse fit. The agent can still fix multiple failures per run, so per-check granularity at the gate is the right level. |
+| `check_suite.completed` instead of `check_run.completed` | Fires per *suite*, not per check. Suites can group multiple checks with mixed conclusions, so the name-based allowlist cannot be applied per-check at the gate — all-or-nothing per suite is a worse fit. The agent can still fix multiple failures per run, so per-check granularity at the gate is the right level. |
 | `pull_request_target` + poll for check status (as the *primary* trigger) | Adds an inherently racy polling loop and consumes workflow-minutes while waiting on every PR event. The hybrid delivery already carries the completion signal for same-repo Actions, and the scheduled polling *backstop* defined in Decision 1a is a bounded, well-defined fallback — using `pull_request_target` would collapse the event-driven and backstop paths into one lower-fidelity mechanism. |
 
 **Impact on existing passing-run history.** `AGENTS.md` § "Reverting or
@@ -196,8 +199,8 @@ is being replaced.
 carry the `human-required` label (via `gh pr list --author
 "mfrancza-developer-agent[bot]" --search "-label:human-required"`), calls
 `gh pr checks --json name,bucket,state` for each, applies
-`FIX_CHECKS_IGNORE` to the result, and — for every PR where at least one
-non-ignored check is in a failing conclusion (`failure`, `timed_out`,
+`FIX_CHECKS_ALLOW` to the result, and — for every PR where at least one
+allowed check is in a failing conclusion (`failure`, `timed_out`,
 `action_required`) — invokes the same reusable workflow
 (`agent-fix-checks-reusable.yml`) that the event-driven caller uses,
 with the resolved PR number and the PR's current HEAD SHA passed as
@@ -218,7 +221,7 @@ checks on an Actions-associated SHA. If delivery is suppressed for an
 origin, event-driven coverage silently drops that origin without any
 observable failure signal — the PR just sits red. A scheduled polling
 backstop is a bounded, well-understood fallback that guarantees every
-non-ignored failing check on an open agent PR reaches the fix pass
+allowed failing check on an open agent PR reaches the fix pass
 within one polling interval, independent of event delivery.
 
 **Why `schedule:` + `workflow_dispatch`.** `schedule:` provides the
@@ -241,7 +244,7 @@ interval, with no agent invocations when nothing is failing.
 
 **Why the backstop must not veto on pending checks (pending-veto bug).**
 An earlier version of this decision had the backstop skip any PR with a
-non-ignored pending check, on the premise that the next polling tick
+allowed pending check, on the premise that the next polling tick
 would re-observe the same failure once the pending check reported. That
 is wrong when the pending check never completes on its own — the typical
 case being a third-party approval, deployment-gate, or manual-review
@@ -355,16 +358,15 @@ never observed in practice.
 | Always query by SHA, ignore the payload field | Adds one extra API call per event even when the payload already has the answer. The branch here is cheap and the payload-first path saves API budget on the common same-repo case. |
 | Matrix fan-out across every PR returned by the SHA query | Complexity for a case not observed; the trust gate already catches the "wrong PR" variant. If multi-PR becomes a real need, add fan-out in a follow-up without changing the event wiring. |
 
-### Decision 3: Ignore list — repo Actions variable `FIX_CHECKS_IGNORE`
+### Decision 3: Opt-in allowlist — repo Actions variable `FIX_CHECKS_ALLOW`
 
-**Decision.** Add a Terraform variable `fix_checks_ignore` (`list(string)`,
+**Decision.** Add a Terraform variable `fix_checks_allow` (`list(string)`,
 default `[]`) exposed via `github_actions_variable` as
-`FIX_CHECKS_IGNORE`, mirroring `AGENT_ALLOWLIST` and `REVIEWER_MODELS`
-exactly. The caller stub consults it only on the `check_run` branch of
-the trigger (the `workflow_run` branch keys on workflow name — operators
-suppress a same-repo workflow by removing it from the `workflows:` list,
-not via the ignore variable). The `if:` on the resolver job (see
-Decision 4 for the two-job structure):
+`FIX_CHECKS_ALLOW`, mirroring `AGENT_ALLOWLIST` and `REVIEWER_MODELS`.
+The caller stub consults it only on the `check_run` branch of the trigger.
+The `workflow_run` branch is independently opt-in because its
+`workflows:` list explicitly enumerates same-repo workflows. The `if:` on
+the resolver job (see Decision 4 for the two-job structure):
 
 ```yaml
 if: >
@@ -374,35 +376,32 @@ if: >
    (github.event.check_run.conclusion == 'failure' ||
     github.event.check_run.conclusion == 'timed_out' ||
     github.event.check_run.conclusion == 'action_required') &&
-   (vars.FIX_CHECKS_IGNORE == '' ||
-    !contains(fromJSON(vars.FIX_CHECKS_IGNORE), github.event.check_run.name)))
+   vars.FIX_CHECKS_ALLOW != '' &&
+   contains(fromJSON(vars.FIX_CHECKS_ALLOW), github.event.check_run.name))
 ```
 
 **Operator-precedence note.** The three conclusion comparisons are
-parenthesised as a single group before the `&&` with the ignore-list
+parenthesised as a single group before the `&&` with the allowlist
 check. GitHub Actions expressions evaluate `&&` before `||`
 (`https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#operators`),
 so without the outer parens around the conclusion group the expression
-would read as `failure || timed_out || (action_required && not_ignored)`
-— `failure` and `timed_out` would bypass the ignore list entirely and
-every named "noisy" check would still start a run as soon as it reported
-`failure`. The validation task includes explicit cases for an ignored
-check with each supported conclusion (`failure`, `timed_out`,
-`action_required`) to catch regressions of this expression's grouping.
+would read as `failure || timed_out || (action_required && allowed)`.
+That would bypass the allowlist for `failure` and `timed_out`, defeating
+the opt-in safety boundary. The validation task includes explicit cases
+for an *unlisted* check at each supported conclusion (`failure`,
+`timed_out`, `action_required`) to catch regressions of this grouping.
 
-The leading `vars.FIX_CHECKS_IGNORE == ''` guard matches the established
-pattern (see `AUTO_TRIGGER_AGENTS` design, Decision 1 in
-`docs/design/auto-trigger-agents.md`): if the variable has not yet been
-provisioned by Terraform, `vars.FIX_CHECKS_IGNORE` evaluates to the empty
-string and `fromJSON('')` would throw. The empty guard short-circuits to
-"nothing is ignored" — the issue's stated default — rather than failing
-the workflow or silently suppressing every check.
+The leading `vars.FIX_CHECKS_ALLOW != ''` guard prevents `fromJSON('')`
+when Terraform has not yet provisioned the variable. An absent or empty
+variable is deliberately **disabled**, not fail-open: no `check_run` or
+polled check can start the agent until an operator adds its exact display
+name to the JSON array.
 
-**Why repo-wide (not per-PR).** The ignore list expresses operator policy
-("this check is noisy or non-actionable in this repo"), not per-PR
-exceptions. A per-PR override would add surface for a case the issue does
-not raise. If a per-PR exception is ever needed, a `fix-checks:ignore:*`
-label pattern is the natural extension.
+**Why repo-wide (not per-PR).** The allowlist expresses operator policy
+("this check is safe and useful for the agent to handle in this repo"),
+not per-PR exceptions. A per-PR override would add surface for a case the
+issue does not raise. If a per-PR exception is ever needed, a
+`fix-checks:allow:*` label pattern is the natural extension.
 
 **Why in the caller stub (not the reusable workflow).** The caller stub
 owns the trigger wiring and the repo-specific variable bindings; the
@@ -410,17 +409,17 @@ reusable workflow is deliberately agnostic to how the PR was selected or
 why. This matches `agent-fix-checks.yml` → `agent-fix-checks-reusable.yml`
 today (`workflow_run` filter + concurrency live in the stub). External
 consumers who adopt the reusable workflow write their own stub and bind
-their own ignore-list variable. The reusable workflow signature stays
+their own allowlist variable. The reusable workflow signature stays
 minimal — a PR number plus the existing agent/image/helpers inputs.
 
 **Alternatives considered.**
 
 | Alternative | Reason rejected |
 |-------------|-----------------|
-| Pass the ignore list as a reusable-workflow input | Pushes the variable binding into every caller's `with:` block for no reuse benefit. The filter is cheap at the stub level and keeps the reusable's input surface small. |
-| Separate boolean Actions variables per ignored check | Does not scale; adding or removing an ignore is a Terraform change plus a workflow change rather than a one-line tfvars edit. |
+| Pass the allowlist as a reusable-workflow input | Pushes the variable binding into every caller's `with:` block for no reuse benefit. The filter is cheap at the stub level and keeps the reusable's input surface small. |
+| Separate boolean Actions variables per allowed check | Does not scale; adding or removing an allow entry is a Terraform change plus a workflow change rather than a one-line tfvars edit. |
 | CSV-encoded string instead of JSON | `fromJSON` is already in use for every other list-shaped Actions variable in this repo (`AGENT_ALLOWLIST`, `REVIEWER_MODELS`, `AUTO_TRIGGER_AGENTS`). Introducing a second convention adds parsing surface and operator confusion. |
-| Workflow-name-based ignore (match `check_run.check_suite.app.slug` or workflow file name) | The issue is explicit: ignore list is check **names**. Third-party checks have no workflow file; the check name is the only identifier common to all three origin classes. |
+| Workflow-name-based allow key (match `check_run.check_suite.app.slug` or workflow file name) | Third-party checks have no workflow file; the check name is the only identifier common to all three origin classes. |
 
 ### Decision 4: Deduplication — two-job stub + per-PR concurrency + post-lock freshness guard
 
@@ -435,7 +434,7 @@ previous run has already fixed.
 ```yaml
 jobs:
   resolve-pr:
-    # Conclusion-whitelist + ignore-list filter (see Decision 3's if:).
+    # Conclusion-whitelist + allowlist filter (see Decision 3's if:).
     runs-on: ubuntu-24.04
     outputs:
       pr_number: ${{ steps.resolve.outputs.pr_number }}
@@ -525,8 +524,8 @@ sufficient** for requirement 3. Two real races remain:
    note below).
 
 **Guard.** `action_fix_checks()` grows a short preamble, run after
-`gh pr checkout` and before `run_agent`. The guard reads the ignore list
-from `FIX_CHECKS_IGNORE` (passed through to the container as an env var
+`gh pr checkout` and before `run_agent`. The guard reads the allowlist
+from `FIX_CHECKS_ALLOW` (passed through to the container as an env var
 by the reusable workflow — a one-line plumbing addition) and the
 trigger-time HEAD SHA from `GITHUB_HEAD_SHA_AT_TRIGGER` (passed as an
 env var via the new `head-sha-at-trigger` reusable-workflow input), and
@@ -550,18 +549,18 @@ cannot permanently discard the failure that triggered the run:
   pending checks does not enter the bounded wait.
 - **Snapshot.** Enumerate current PR checks via `gh pr checks
   "$GITHUB_PR_NUMBER" --json name,state,bucket --jq ...`. Apply the
-  ignore list throughout: a check whose name appears in
-  `FIX_CHECKS_IGNORE` is excluded from both the failing-set and the
+  allowlist throughout: a check whose name does not appear in
+  `FIX_CHECKS_ALLOW` is excluded from both the failing-set and the
   pending-set the guard considers.
 - **Pending-check classification by HEAD SHA.** Compare the container's
   checked-out HEAD SHA to `GITHUB_HEAD_SHA_AT_TRIGGER`:
-  - **HEAD changed since trigger** → non-ignored pending checks are
+  - **HEAD changed since trigger** → allowed pending checks are
     *stale replacement* checks for the fix the in-flight run already
     pushed. Perform a bounded wait (default 15 min, overridable via
     `FIX_CHECKS_WAIT_SECONDS`) polling `gh pr checks` until every
-    non-ignored check is terminal **or** the timeout fires, then
+    allowed check is terminal **or** the timeout fires, then
     re-evaluate.
-  - **HEAD unchanged since trigger** → non-ignored pending checks are
+  - **HEAD unchanged since trigger** → allowed pending checks are
     *unrelated* to the failure that triggered this run. Do **not** wait
     on them: their own `check_run.completed` (or
     `workflow_run.completed`) events are the valid re-triggers for a
@@ -569,8 +568,8 @@ cannot permanently discard the failure that triggered the run:
     Proceed to the final evaluation immediately so the failure that
     triggered *this* run is addressed now.
 - **Final evaluation.** Re-run `gh pr checks` (post-wait if we waited)
-  and apply the ignore list:
-  - If any non-ignored check is in a failing conclusion (`failure`,
+  and apply the allowlist:
+  - If any allowed check is in a failing conclusion (`failure`,
     `timed_out`, `action_required`), fall through to `run_agent`.
   - Otherwise, log the no-op and exit 0 without invoking the agent and
     without pushing. On the HEAD-changed branch this means the
@@ -578,7 +577,7 @@ cannot permanently discard the failure that triggered the run:
     branch this means another run already handled it between the
     trigger event and the lock acquisition.
 - **Stale-HEAD escape hatch.** If HEAD has changed since trigger and
-  the initial snapshot already shows no non-ignored failing *or*
+  the initial snapshot already shows no allowed failing *or*
   pending checks, exit 0 without entering the polling loop. The run
   was for an obsolete HEAD and the in-flight run has already pushed;
   there is nothing left to fix.
@@ -670,7 +669,7 @@ permission grants.
   prompt is unchanged. The freshness/duplicate-work guard added in
   Decision 4c lives in `action_fix_checks()` (entrypoint shell), runs
   *before* the agent is invoked, and short-circuits when there is
-  nothing non-ignored to fix on the current HEAD, when replacement
+  nothing allowed to fix on the current HEAD, when replacement
   checks are still pending, or when the PR already carries the
   `human-required` label the agent itself may have applied on a prior
   pass. The agent itself still fixes whatever `gh pr checks` reports
@@ -686,10 +685,10 @@ permission grants.
 - **Reacting to failing checks on human PRs.** The agent-authored trust
   gate is preserved (`filter-agent-pr`). Expanding to human PRs is a
   larger policy question outside this issue.
-- **Per-PR ignore overrides.** The ignore list is repo-wide. A
-  `fix-checks:ignore:<name>` label pattern could be added later if a real
+- **Per-PR allow overrides.** The allowlist is repo-wide. A
+  `fix-checks:allow:<name>` label pattern could be added later if a real
   need emerges; this issue does not request it.
-- **Workflow-name-based ignore keys.** Decision 3 picks check-name
+- **Workflow-name-based allow keys.** Decision 3 picks check-name
   matching because it is the only identifier common to all three check
   origin classes. Workflow-name matching would exclude third-party
   checks, defeating requirement 1.
@@ -715,28 +714,29 @@ permission grants.
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#656](https://github.com/mfrancza/agentic-development-workflow/issues/656) | Terraform: add `fix_checks_ignore` variable (`list(string)`, default `[]`), expose as `FIX_CHECKS_IGNORE` Actions variable via `github_actions_variable` in `terraform/modules/agent-vars/`, update `terraform.tfvars.example` with a documented example entry, extend `AGENTS.md`'s Terraform Actions-variable list to reference the new var | — |
+| [#656](https://github.com/mfrancza/agentic-development-workflow/issues/656) | Terraform: add `fix_checks_allow` variable (`list(string)`, default `[]`), expose as `FIX_CHECKS_ALLOW` Actions variable via `github_actions_variable` in `terraform/modules/agent-vars/`, update `terraform.tfvars.example` with an explicit check-name example and document that an empty list disables check-run/polling handling, extend `AGENTS.md`'s Terraform Actions-variable list to reference the new var | — |
 | [#657](https://github.com/mfrancza/agentic-development-workflow/issues/657) | `resolve-check-pr` TypeScript activity + composite action: `.github/scripts/src/resolve-check-pr.ts` accepts `event_name` and branches between `check_run` and `workflow_run` payload shapes (both resolve via `pull_requests[0]` first, then `listPullRequestsAssociatedWithCommit(head_sha)`); outputs `pr_number`, `head_sha`, and `proceed`; `.github/actions/resolve-check-pr/action.yml` thin wrapper; vitest tests under `.github/scripts/test/` covering both event types and the fallback paths; follows the composite-action portability pattern (`${{ github.action_path }}/../../scripts`, Resolve-scripts-directory step) | — |
-| [#658](https://github.com/mfrancza/agentic-development-workflow/issues/658) | Caller stub + reusable workflow rewiring using a **hybrid** trigger: `.github/workflows/agent-fix-checks.yml` subscribes to **both** `workflow_run: [completed]` (preserving the existing same-repo Actions path — `workflows:` still enumerates the covered same-repo workflows) and `check_run: [completed]` (for cross-repo and third-party checks that the `check_run` recursion guard does not block); split the stub into a **resolve-pr job** that calls `resolve-check-pr` and publishes `pr_number`/`head_sha`/`proceed` as job outputs, plus a dependent **fix-checks job** that calls the reusable with `needs: resolve-pr`, is gated on `needs.resolve-pr.outputs.proceed == 'true'`, and whose `concurrency.group` reads `needs.resolve-pr.outputs.pr_number` (no `check_run.id` fallback needed — events the resolver cannot map are skipped at the `if:`); add the conclusion-whitelist + `FIX_CHECKS_IGNORE` filter on the resolver job's `if:` with the conclusion comparisons parenthesised as a group before the `&&` with the ignore-list check (see Decision 3); extend the reusable workflow to accept `head-sha-at-trigger` and plumb `FIX_CHECKS_IGNORE` through to the container as an env var; the resolver job's `checkout` step uses the repo-standard pinned SHA (`actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0`) with `persist-credentials: false` (per `AGENTS.md`'s security defaults); update `AGENTS.md` MVP Workflow step 4 and `README.md` as needed to describe the hybrid trigger and the ignore-list variable | Issue #656, Issue #657 |
-| [#667](https://github.com/mfrancza/agentic-development-workflow/issues/667) | Entrypoint freshness / duplicate-work guard in `action_fix_checks()` (`docker/scripts/entrypoint.sh`): after `gh pr checkout` and before `run_agent`, (a) check whether the PR carries the `human-required` label via `gh pr view --json labels` and exit 0 if present (the agent escalated an unfixable failure via `respond-to-checks.md`; wait for a human to remove the label before re-attempting); (b) enumerate PR checks via `gh pr checks --json name,state,bucket` (ignore-list applied throughout); (c) classify non-ignored *pending* checks by comparing the container's HEAD SHA to `GITHUB_HEAD_SHA_AT_TRIGGER` — if HEAD **changed** since trigger, treat pending as *stale replacement* and bounded-wait (default 15 min, overridable via `FIX_CHECKS_WAIT_SECONDS`) for them to become terminal; if HEAD **unchanged**, treat pending as *unrelated* and do **not** wait (their own completion events are valid re-triggers). After the wait (or immediately on the HEAD-unchanged branch), if any non-ignored check is still failing (`failure`/`timed_out`/`action_required`), fall through to `run_agent`; otherwise exit 0. Stale-HEAD escape hatch: if HEAD changed and the initial snapshot already shows no non-ignored failing or pending checks, exit 0 without entering the wait. Read `FIX_CHECKS_IGNORE` and `GITHUB_HEAD_SHA_AT_TRIGGER` from env (plumbed in by Issue #658). Extract the guard into a helper function (e.g. `fix_checks_should_run`) and cover with bats-style/shellcheck-tested units — including a case where the `human-required` label is present and the agent must not be invoked. | Issue #658 |
-| [#668](https://github.com/mfrancza/agentic-development-workflow/issues/668) | Scheduled polling backstop workflow `.github/workflows/agent-fix-checks-poll.yml`: `schedule:` (default 15 min) + `workflow_dispatch:`; enumerate open PRs authored by `mfrancza-developer-agent[bot]` that do **not** carry the `human-required` label (`gh pr list --author "mfrancza-developer-agent[bot]" --search "-label:human-required"`), apply `FIX_CHECKS_IGNORE`, and for each PR with at least one non-ignored failing check — **regardless of whether any non-ignored checks are also pending** — call `agent-fix-checks-reusable.yml` with the PR number and current HEAD SHA (as `head-sha-at-trigger` so Decision 4c sees HEAD-unchanged and classifies any pending checks as "unrelated → don't wait, proceed to fix"); use the pinned `actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0` with `persist-credentials: false`; `max-parallel: 1` on the dispatch matrix so the backstop fans in to the per-PR concurrency group one PR at a time. Dedup with event-driven runs is provided by the shared `agent-fix-checks-pr-<N>` concurrency group (Decision 4a) and the entrypoint freshness guard (Decision 4c), including the guard's `human-required` label short-circuit for any late event that reaches a PR after the backstop has already begun. Update `AGENTS.md` and `README.md` to document the backstop, its operator knobs, and the "remove the `human-required` label to resume the automatic fix pipeline" operator gesture. | Issue #656, Issue #658, Issue #667 |
-| [#659](https://github.com/mfrancza/agentic-development-workflow/issues/659) | End-to-end validation on a disposable agent-authored PR, with **each origin and each guard behaviour exercised independently** (per the review feedback): (1) a failing same-repo workflow job *other than* a job in `CI` starts fix-checks via the `workflow_run` branch of the trigger; (2) a failing check reported by a workflow defined in another repository (e.g. a test organization ruleset) starts fix-checks via the `check_run` branch **if** `check_run` events are delivered for that origin — **and** if events are not delivered, the Decision 1a polling backstop (Issue #668) picks it up within one interval; (3) a synthesized third-party check (posted via the Checks API from a GitHub App that is **not** GitHub Actions) starts fix-checks via the `check_run` branch — exercised as its own case, not substituted for case (2) — with the same backstop-coverage check as case (2); (4)/(5)/(6) adding each check's name to `FIX_CHECKS_IGNORE` suppresses the next run (both event-driven and polled), with explicit cases for `failure`, `timed_out`, and `action_required` conclusions on the ignored name (to catch regressions of the Decision 3 `if:` grouping); (7) with two different non-ignored checks failing on the same PR in close succession, only one agent pass runs — the queued run exercises the Decision 4c freshness guard and exits 0 without invoking the agent; (8) **pending-check-succeeds regression** — with HEAD unchanged, a failing check A + an unrelated pending check B must still fix A immediately (the guard does not wait); with HEAD changed by the in-flight fix push, a pending replacement check A' must trigger the bounded wait and the original failure must not be stranded even when A' later reports `success`; (9) **polling-backstop dedup regression** — a polled dispatch arriving while an event-driven run is in flight is queued and short-circuited by the freshness guard without a second agent pass; (10) a failing check on a human-authored PR does *not* start fix-checks (neither event-driven nor polled); (11) record which `check_run` delivery classes empirically fire for this subscription (same-repo, cross-repo-Actions, third-party on Actions-associated SHA, third-party on non-Actions SHA) so the design doc's uncertainty around Decision 1 is replaced with observed evidence; (12) **polling-backstop pending-veto regression (new)** — on a *suppressed-origin* PR, non-ignored check A fails while non-ignored check B stays pending across at least two polling intervals; the backstop must dispatch A on the first interval (not wait for B) and the agent must fix A, verifying that an indefinitely-pending unrelated check cannot block the backstop; (13) **escalation stop regression (new)** — the agent is driven to a failure it cannot fix (e.g. a check whose root cause is outside the diff) so it applies the `human-required` label, assigns a human, and posts a comment without producing a fix; the subsequent polling tick and a subsequent `check_run.completed` / `workflow_run.completed` event on the same PR must **not** re-invoke the agent (the guard and the backstop filter both short-circuit on the label); removing the `human-required` label must re-enable the automatic fix pipeline so the next trigger picks the failure back up. | Issue #658, Issue #667, Issue #668 |
+| [#658](https://github.com/mfrancza/agentic-development-workflow/issues/658) | Caller stub + reusable workflow rewiring using a **hybrid** trigger: `.github/workflows/agent-fix-checks.yml` subscribes to both explicit same-repo `workflow_run.workflows` and `check_run: [completed]`; split the stub into resolver + dependent reusable-call jobs keyed by `needs.resolve-pr.outputs.pr_number`; add the conclusion-whitelist + `FIX_CHECKS_ALLOW` opt-in filter on the resolver `if:` (including an empty/missing-variable fail-closed guard); extend the reusable workflow to accept `head-sha-at-trigger` and plumb `FIX_CHECKS_ALLOW` through to the container; use the pinned checkout SHA with `persist-credentials: false`; update operator documentation for the opt-in policy | Issue #656, Issue #657 |
+| [#667](https://github.com/mfrancza/agentic-development-workflow/issues/667) | Entrypoint freshness / duplicate-work guard in `action_fix_checks()` (`docker/scripts/entrypoint.sh`): after `gh pr checkout` and before `run_agent`, short-circuit `human-required`, enumerate checks with the `FIX_CHECKS_ALLOW` allowlist applied throughout, classify allowed pending checks by `GITHUB_HEAD_SHA_AT_TRIGGER`, bounded-wait only stale replacements, and invoke the agent only when an allowed check remains failing. Read `FIX_CHECKS_ALLOW` and `GITHUB_HEAD_SHA_AT_TRIGGER` from env and cover the guard with shell tests. | Issue #658 |
+| [#668](https://github.com/mfrancza/agentic-development-workflow/issues/668) | Scheduled polling backstop workflow `.github/workflows/agent-fix-checks-poll.yml`: schedule + manual dispatch; enumerate open agent PRs without `human-required`, apply `FIX_CHECKS_ALLOW`, and dispatch only PRs with an allowed failing check (even if allowed checks are pending). Use the shared concurrency group and freshness guard for dedup; document the opt-in operator knobs and the human-required re-enable gesture. | Issue #656, Issue #658, Issue #667 |
+| [#659](https://github.com/mfrancza/agentic-development-workflow/issues/659) | End-to-end validation: prove an unlisted cross-repo/third-party check never dispatches (event-driven or polled); prove adding its exact display name to `FIX_CHECKS_ALLOW` enables each origin independently; prove selected same-repo workflows still require their `workflow_run.workflows` subscription; cover all three actionable conclusions, burst dedup, pending-check safety, polling dedup, human-PR exclusion, escalation stop/re-enable, and empirical `check_run` delivery coverage. | Issue #658, Issue #667, Issue #668 |
 
 Issues #656 and #657 are independent of each other — one defines the
-Actions variable contract (`FIX_CHECKS_IGNORE`, JSON array, default `[]`);
+Actions variable contract (`FIX_CHECKS_ALLOW`, JSON array, default `[]`,
+fail-closed when empty);
 the other defines the composite action contract (inputs: `event_name`,
 `token`, `repository`; outputs: `proceed`, `pr_number`, `head_sha`).
 Issue #658 integrates both, wires the hybrid trigger, and restructures
 the stub into the resolver + reusable-call job pair. The entrypoint
 guard task (#667) depends on Issue #658 only for the
-`FIX_CHECKS_IGNORE` env-var plumbing and the `head-sha-at-trigger`
+`FIX_CHECKS_ALLOW` env-var plumbing and the `head-sha-at-trigger`
 input; the shell logic itself is independent. Issue #668 (polling
-backstop) depends on Issue #656 (for the ignore list), Issue #658 (for
+backstop) depends on Issue #656 (for the allowlist), Issue #658 (for
 the reusable workflow's `head-sha-at-trigger` input and the per-PR
 concurrency group), and Issue #667 (for the entrypoint freshness guard
 that keeps event-driven and polled runs from duplicating work).
 Issue #659 exercises the entire chain end-to-end — with each check
-origin, each ignored conclusion, the burst-dedup scenario, the
+origin, allowlist exclusion and admission, the burst-dedup scenario, the
 pending-check-succeeds regression, the polling-backstop dedup
 regression, and an explicit record of empirical `check_run` delivery
 coverage — and is blocked by all five implementation issues (#656,
