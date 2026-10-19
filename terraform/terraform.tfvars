@@ -34,7 +34,7 @@ code_reviewers = [
 # See docs/design/auto-trigger-agents.md for full behavior and security notes.
 auto_trigger_agents = {
   groom     = false
-  design    = true
+  design    = false
   developer = true
   review    = true
 }
