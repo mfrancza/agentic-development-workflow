@@ -603,6 +603,7 @@ metadata from the event:
 ```yaml
 jobs:
   check-protected-approvals:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
     permissions:
       contents: read
       pull-requests: read
