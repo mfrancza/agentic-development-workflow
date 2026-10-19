@@ -13,9 +13,13 @@ not managed by Terraform and so default to empty in a greenfield install,
 leaving every workflow in build mode. The four feedback-path caller stubs
 (`agent-fix-checks`, `agent-fix-deployment`, `agent-resolve-conflicts`,
 `agent-respond-review`) deliberately hardcode `image: ''` so they always
-build from source, which lets them pick up in-progress `docker/` changes
-on a PR branch — but they pay the full rebuild cost on every run even when
-`docker/` has not changed.
+build from source — preserving the no-GHCR escape hatch for forks and
+bootstrapping. The build context is the `docker/` tree checked out at
+`helpers-ref` (the default-branch commit for the workflow_run,
+push-to-main, and deployment_status triggers used by the first three of
+those stubs; the PR merge SHA for the pull_request_review trigger used by
+`agent-respond-review`). Either way they pay the full rebuild cost on
+every run even when `docker/` has not changed.
 
 This design keeps the existing two-mode split intact and reduces the per-run
 image-prep cost of both modes to seconds:
@@ -49,9 +53,15 @@ notes the resolution so a reviewer can push back:
    pull-mode default for the four main-path workflows; cached source-build
    for the four feedback-path workflows. Resolution: addressing only the
    four main-path workflows leaves half the runs paying full rebuild cost;
-   addressing all eight with a single pull-only strategy would silently
-   break the "feedback workflows exercise PR-level `docker/` changes"
-   semantic that `agent-fix-checks` and `agent-respond-review` rely on.
+   addressing all eight with a single pull-only strategy would remove the
+   no-GHCR escape hatch that fork-based adopters and the composite action's
+   documented build-mode contract depend on. (The empty-image default is
+   the "no publishing required" fallback, not a mechanism for exercising
+   PR-level `docker/` changes — after the issue #498 self-checkout
+   migration the build context is the `helpers-ref` tree, which for three
+   of the four feedback-path reusables resolves to the default-branch
+   commit; only `agent-respond-review` sees a PR-related SHA, and even
+   there it is the merge commit rather than the PR head.)
 2. **Strategy — pre-built image, GHA cache, or something else?** Pre-built
    image for pull mode, registry-backed BuildKit cache (`type=registry`,
    read-only, pointing at the published `:main` tag) for build mode.
@@ -105,13 +115,13 @@ already read:
 
 ```hcl
 variable "developer_image" {
-  description = "Pre-built developer image reference consumed by agent-groom, agent-design, and agent-implement via the DEVELOPER_IMAGE Actions variable. Empty string means build from docker/ source (slower but no GHCR dependency). The recommended value after image publishing is wired up is ghcr.io/<owner>/<repo>/developer:main — pinned to the floating major tag (e.g. :v1) for stricter reproducibility."
+  description = "Pre-built developer image reference consumed by agent-groom, agent-design, and agent-implement via the DEVELOPER_IMAGE Actions variable. Empty string means build from docker/ source (slower but no GHCR dependency). The recommended default once image publishing is wired up is ghcr.io/<owner>/<repo>/developer:main — a floating pointer republished on every main-branch docker/** change. Operators who want a frozen pointer for stricter reproducibility should instead pin to the floating major tag (e.g. :v1) or a full tag (e.g. :v1.2.3)."
   type        = string
   default     = ""
 }
 
 variable "reviewer_image" {
-  description = "Pre-built reviewer image reference consumed by agent-review via the REVIEWER_IMAGE Actions variable. Same semantics as developer_image but for docker/reviewer."
+  description = "Pre-built reviewer image reference consumed by agent-review via the REVIEWER_IMAGE Actions variable. Same semantics as developer_image but for docker/reviewer: default empty, recommended floating value ghcr.io/<owner>/<repo>/reviewer:main, pin to :v<N> or a full tag for reproducibility."
   type        = string
   default     = ""
 }
@@ -140,32 +150,105 @@ and republishes the `:main` tag whenever the Dockerfiles, prompts, or
 scripts change. The existing tag-triggered job is left intact (continues
 to publish `:v<N>` and `:v<N.M.P>` on `v*` tags).
 
+Two GitHub Actions constraints shape the exact shape of this change:
+
+- **Workflow-level `paths:` filters apply to every ref matched by the
+  trigger — including tag pushes.** Putting `paths: ['docker/**']` on
+  `on.push` would therefore skip the existing `release-images` job on any
+  `v*` tag whose diff does not touch `docker/**` (e.g. a release that only
+  changes workflows or docs). The path filter has to live elsewhere.
+- **`paths:` is not a job-level key.** GitHub ignores a `paths:` field on
+  a job definition, so the "filter lives on the main-publish job only"
+  idiom cannot be expressed with `paths:` syntax.
+
+Required shape (adjusting the trigger block, gating the existing job, and
+adding a path-detection + publish job pair):
+
 ```yaml
 on:
   push:
     tags: ['v*']
     branches: ['main']
-    paths-ignore: []  # path filter lives on the main-publish job only
   workflow_dispatch:
     inputs:
       tag: ...
+
+jobs:
+  release-images:
+    # Existing job. Add this gate so main-branch pushes do not run the tag
+    # validation (which would fail the FULL_TAG=~^v[0-9] regex). Keeps
+    # workflow_dispatch runs (manual re-push from a branch) working.
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      startsWith(github.ref, 'refs/tags/')
+    ...
+
+  detect-docker-changes:
+    # Tiny gate job that reads the push diff. Separated from publish-main
+    # so publish-main's permissions block only grants packages: write when
+    # we actually intend to publish.
+    if: >
+      github.event_name == 'push' &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.detect.outputs.changed }}
+    steps:
+      - uses: actions/checkout@<pinned-sha>
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: detect
+        run: |
+          set -euo pipefail
+          if git diff --name-only HEAD^1 HEAD | grep -q '^docker/'; then
+            echo "changed=true"  >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish-main:
+    needs: detect-docker-changes
+    if: needs.detect-docker-changes.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@<pinned-sha>
+        with:
+          persist-credentials: false
+      - name: Log in to GHCR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          _ACTOR: ${{ github.actor }}
+        run: |
+          echo "${GITHUB_TOKEN}" | docker login ghcr.io -u "${_ACTOR}" --password-stdin
+      - name: Build and push :main images
+        env:
+          _REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          BASE="ghcr.io/${_REPO}"
+          docker build ./docker          -t "${BASE}/developer:main"
+          docker build ./docker/reviewer -t "${BASE}/reviewer:main"
+          docker push "${BASE}/developer:main"
+          docker push "${BASE}/reviewer:main"
 ```
 
-A new `publish-main` job gates on `github.ref == 'refs/heads/main'`, uses
-`paths: ['docker/**']` to skip no-op pushes, logs into GHCR with the same
-`GITHUB_TOKEN`, and runs:
+The two image builds run sequentially inside `publish-main` (same pattern
+as the existing release job) because the GHCR login step is shared and the
+push is seconds. Freshness guarantee: workflows that pull `:main` are at
+most one post-merge push behind HEAD.
 
-```bash
-docker build ./docker          -t "${BASE}/developer:main"
-docker push                       "${BASE}/developer:main"
-docker build ./docker/reviewer -t "${BASE}/reviewer:main"
-docker push                       "${BASE}/reviewer:main"
-```
-
-The two builds run sequentially inside one job (same pattern as the
-existing release job) because the GHCR login step is shared and the push
-is seconds. Freshness guarantee: workflows that pull `:main` are at most
-one post-merge push behind HEAD.
+**Alternatives considered for the path gate.** (a) `dorny/paths-filter` —
+rejected because it is a non-GitHub-owned action and would require an
+allowlist entry in `terraform/main.tf`'s `patterns_allowed`. (b) A
+separate workflow file dedicated to the main-branch path — rejected
+because duplicating the GHCR-login scaffolding adds surface area with no
+compensating benefit. (c) A single workflow-level `paths:` filter —
+rejected per the first bullet above (would skip tag pushes whose diff
+does not touch `docker/**`).
 
 **Alternatives considered.** (a) Publish on every push to main regardless
 of changed paths — rejected as wasteful: ~95% of main pushes do not touch
@@ -235,9 +318,15 @@ the normal docker image store.
 The AGENTS.md comment explaining this ("they continue to build from
 source regardless of this variable") remains accurate: they still build
 from source. They just build faster now because `run-agent` fetches cached
-layers from GHCR. A PR that edits `docker/` still exercises its own
-changes end-to-end — the cache is advisory and BuildKit invalidates any
-layer whose input has changed.
+layers from GHCR. The build context remains the `docker/` tree checked
+out at `helpers-ref` (the default-branch commit for the workflow_run,
+push-to-main, and deployment_status triggers used by three of the four;
+the PR merge SHA for `agent-respond-review`), so the empty-image mode
+preserves the "no GHCR dependency" escape hatch for forks and private
+deployments. The registry cache simply makes that path fast when `:main`
+is reachable; BuildKit invalidates any layer whose input has changed, so
+a landed `docker/` change on `main` still fully rebuilds the next time
+these workflows run.
 
 ### Documentation updates (bundled with implementation sub-issues)
 
@@ -296,7 +385,7 @@ changes needed there.
 | [#685](https://github.com/mfrancza/agentic-development-workflow/issues/685) | `release-images.yml`: add `publish-main` job that republishes `ghcr.io/<owner>/<repo>/{developer,reviewer}:main` on push to main when `docker/**` changes | — |
 | [#686](https://github.com/mfrancza/agentic-development-workflow/issues/686) | `run-agent` composite action: switch build mode to `docker buildx build --cache-from=type=registry,ref=…:main --load`; resolve the cache ref from `build-context`; add a smoke test covering the ref-resolution logic | — |
 | [#687](https://github.com/mfrancza/agentic-development-workflow/issues/687) | This repo's `terraform.tfvars`: set `developer_image` / `reviewer_image` to the `:main` tags so the main-path workflows switch to pull mode by default | #684, #685 |
-| [#688](https://github.com/mfrancza/agentic-development-workflow/issues/688) | End-to-end validation: measure image-prep baseline across all eight agent-container workflows (last 10 runs each), re-measure after #685/#686/#687 land, post the comparison as a comment on this design PR and on issue #643; confirm cache fall-through on an induced docker/ change in a feedback workflow | #685, #686, #687 |
+| [#688](https://github.com/mfrancza/agentic-development-workflow/issues/688) | End-to-end validation: measure image-prep baseline across all eight agent-container workflows (last 10 runs each), re-measure after #685/#686/#687 land, post the comparison as a comment on this design PR and on issue #643; confirm cache fall-through by landing a small `docker/` change on `main` and observing that the next workflow_run / push-to-main / deployment_status feedback-path trigger (whose `helpers-ref` is the just-updated default-branch commit) rebuilds the affected layer against the updated `:main` cache source. Do **not** try to validate cache-miss by opening a PR that edits `docker/` and inspecting `agent-fix-checks` — feedback reusables build the `helpers-ref` tree, not the PR head, so a PR-only `docker/` change is invisible to that workflow until it merges. | #685, #686, #687 |
 
 Issue #684, Issue #685, and Issue #686 are independent and can land in
 any order:
