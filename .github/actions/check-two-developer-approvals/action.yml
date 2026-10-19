@@ -17,9 +17,6 @@ inputs:
   pr-number:
     description: 'Pull request number'
     required: true
-  pr-author:
-    description: 'Login of the pull request author'
-    required: true
   head-sha:
     description: 'Advisory pull request head SHA; the activity fetches the live value'
     required: true
@@ -64,7 +61,6 @@ runs:
         INPUT_ENABLED: ${{ inputs.enabled }}
         INPUT_GENERATION: ${{ inputs.generation }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
-        INPUT_PR_AUTHOR: ${{ inputs.pr-author }}
         INPUT_HEAD_SHA: ${{ inputs.head-sha }}
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_DEPARTED_SHA: ${{ inputs.departed-sha }}
