@@ -43,6 +43,16 @@ on:
           helper actions. Must not be empty.
         required: true
         type: string
+      departed-sha:
+        description: Optional SHA the triggering pull request departed.
+        required: false
+        type: string
+        default: ''
+      departed-pr-number:
+        description: Optional pull request number to exclude while reconciling departed-sha.
+        required: false
+        type: number
+        default: 0
 
 permissions:
   contents: read
@@ -109,3 +119,5 @@ jobs:
           pr-number: ${{ inputs.pr-number }}
           head-sha: ${{ inputs.head-sha }}
           repo: ${{ inputs.repo }}
+          departed-sha: ${{ inputs.departed-sha }}
+          departed-pr-number: ${{ inputs.departed-pr-number }}

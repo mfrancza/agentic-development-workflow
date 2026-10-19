@@ -566,8 +566,39 @@ All reusable workflows are called via:
 uses: mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@v0
 ```
 
-For the protected-approval check, pass the same helpers ref as the reusable
-workflow ref and provide the pull request metadata from the caller event:
+For the protected-approval check, use a trusted publisher plus a zero-
+permission review notifier. Do not run the publisher directly on
+`pull_request` or `pull_request_review`: those events load workflow YAML from
+the PR and cannot publish Checks API results for fork PRs. The publisher runs
+on `pull_request_target` and on completion of the notifier; pass the same
+trusted helpers ref as the reusable workflow ref.
+
+```yaml
+name: require-two-developer-approvals-publisher
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
+  workflow_run:
+    workflows: ["require-two-developer-approvals-notify"]
+    types: [completed]
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+concurrency:
+  group: require-two-developer-approvals-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: false
+```
+
+The `workflow_run` publishing job must be guarded with
+`github.event.workflow_run.pull_requests[0] != null`. The notifier is a
+separate workflow with `pull_request_review` types `submitted`, `edited`, and
+`dismissed`, `permissions: {}`, and one `true` step. Give it the matching
+`require-two-developer-approvals-pr-${{ github.event.pull_request.number }}`
+concurrency group with `cancel-in-progress: false`.
+
+Inside the publisher job, call the reusable and provide the pull request
+metadata from the event:
 
 ```yaml
 jobs:

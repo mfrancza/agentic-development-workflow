@@ -1,0 +1,44 @@
+name: require-two-developer-approvals-backfill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  find-open-prs:
+    runs-on: ubuntu-24.04
+    outputs:
+      prs: ${{ steps.prs.outputs.value }}
+    steps:
+      - id: prs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 1000 --json number,headRefOid | jq -c 'unique_by(.headRefOid) | map({number, sha: .headRefOid})')"
+          echo "value=${prs}" >> "$GITHUB_OUTPUT"
+  publish:
+    needs: find-open-prs
+    if: needs.find-open-prs.outputs.prs != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.find-open-prs.outputs.prs) }}
+    concurrency:
+      group: require-two-developer-approvals-sha-${{ matrix.pr.sha }}
+      cancel-in-progress: false
+    uses: ./.github/workflows/require-two-developer-approvals-reusable.yml
+    with:
+      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
+      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
+      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      generation: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION }}
+      pr-number: ${{ matrix.pr.number }}
+      pr-author: ''
+      head-sha: ${{ matrix.pr.sha }}
+      repo: ${{ github.repository }}
+      helpers-ref: ${{ github.sha }}

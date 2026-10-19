@@ -1,0 +1,19 @@
+name: require-two-developer-approvals-notify
+
+# This intentionally executes no application code. Its completion is the
+# untrusted-event signal consumed by the trusted publisher workflow_run leg.
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions: {}
+
+concurrency:
+  group: require-two-developer-approvals-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: 'true'
