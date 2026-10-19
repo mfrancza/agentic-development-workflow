@@ -186,12 +186,14 @@ originates from a workflow attached to a PR — `check_run.pull_requests[]`.
 
 **Impact on existing passing-run history.** `AGENTS.md` § "Reverting or
 replacing code with a passing live-run history" requires runtime evidence
-when replacing working code. The current `workflow_run` trigger has a
-passing history for same-repo `CI` failures; the hybrid preserves that
-exact delivery path for same-repo Actions and extends coverage via
-`check_run` + the Decision 1a polling backstop for the origins the
-current trigger demonstrably does not see. No historically-passing path
-is being replaced.
+when replacing working code. The hybrid preserves the `workflow_run`
+*delivery* mechanism for same-repo `CI` failures, but the universal
+allowlist deliberately adds an authorization gate to that historically
+passing path. Therefore #656 must seed this repository's current canonical
+CI check-run name, `ci / Typecheck and test`, in `terraform.tfvars` at
+rollout. The variable's schema default remains `[]` for consumers who want
+fix-checks disabled, but this repository must not deploy that empty policy
+while claiming existing CI handling stays enabled.
 
 ### Decision 1a: Delivery backstop for suppressed origins — scheduled poll
 
@@ -755,7 +757,7 @@ permission grants.
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#656](https://github.com/mfrancza/agentic-development-workflow/issues/656) | Terraform: add `fix_checks_allow` variable (`list(string)`, default `[]`), expose as `FIX_CHECKS_ALLOW` Actions variable via `github_actions_variable` in `terraform/modules/agent-vars/`, update `terraform.tfvars.example` with an explicit **Checks API name** example and document that an empty list disables all fix-checks delivery, extend `AGENTS.md`'s Terraform Actions-variable list to reference the new var | — |
+| [#656](https://github.com/mfrancza/agentic-development-workflow/issues/656) | Terraform: add `fix_checks_allow` variable (`list(string)`, schema default `[]`), expose as `FIX_CHECKS_ALLOW` Actions variable via `github_actions_variable` in `terraform/modules/agent-vars/`, seed this repo's `terraform.tfvars` with `['ci / Typecheck and test']` to preserve current CI handling, update `terraform.tfvars.example` with an explicit **Checks API name** example and document that an empty list disables all fix-checks delivery, extend `AGENTS.md`'s Terraform Actions-variable list to reference the new var | — |
 | [#657](https://github.com/mfrancza/agentic-development-workflow/issues/657) | `resolve-check-pr` TypeScript activity + composite action: accept `event_name`, `token`, `repository`, and `allowed-checks`; resolve either payload via `pull_requests[0]` first, then `listPullRequestsAssociatedWithCommit(head_sha)`; query the resolved SHA's Checks API to apply the canonical-name allowlist; output `pr_number`, `head_sha`, and `proceed`; add vitest coverage for both payload shapes, fallback paths, empty/unlisted lists, and workflow-run reconciliation | — |
 | [#658](https://github.com/mfrancza/agentic-development-workflow/issues/658) | Caller stub + reusable workflow rewiring using a **hybrid** trigger: `.github/workflows/agent-fix-checks.yml` subscribes to both explicit same-repo `workflow_run.workflows` and `check_run: [completed]`; fail closed for missing/empty `FIX_CHECKS_ALLOW`, split into resolver + dependent reusable-call jobs keyed by `needs.resolve-pr.outputs.pr_number`, and let the resolver apply canonical Checks API membership for both origins; extend the reusable workflow to accept `head-sha-at-trigger`, put both `FIX_CHECKS_ALLOW` and `GITHUB_HEAD_SHA_AT_TRIGGER` in the Run-agent step `env:`, and update `.github/actions/run-agent/action.yml` to forward both optional env vars into Docker; use the pinned checkout SHA with `persist-credentials: false`; update operator documentation for the universal opt-in policy | Issue #656, Issue #657 |
 | [#667](https://github.com/mfrancza/agentic-development-workflow/issues/667) | Entrypoint freshness / duplicate-work guard in `action_fix_checks()` (`docker/scripts/entrypoint.sh`): after `gh pr checkout` and before `run_agent`, short-circuit `human-required`, enumerate canonical Checks API names with the `FIX_CHECKS_ALLOW` allowlist applied throughout, classify allowed pending checks by `GITHUB_HEAD_SHA_AT_TRIGGER`, bounded-wait only stale replacements, and invoke the agent only when an allowed check remains failing. Treat missing/empty allowlist as skip and cover the guard with shell tests. | Issue #658 |
