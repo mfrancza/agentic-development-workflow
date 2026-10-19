@@ -4,11 +4,11 @@ Manages the GitHub Actions repository variables that configure agentic workflow 
 
 | Variable | Type | Purpose |
 |----------|------|---------|
-| `AGENT_ALLOWLIST` | JSON array | Individual GitHub logins (users or bots) and/or `org/team-slug` references permitted to trigger agent workflows. The in-reusable runtime gate reads this variable directly and resolves teams at trigger time; there is no cached companion variable. |
+| `AGENT_ALLOWLIST` | JSON array | Individual GitHub logins (users or bots) permitted to trigger agent workflows. |
 | `DEFAULT_MODEL` | string | Repo-wide default model for all agent containers. Issue-driven workflows can override per-issue via `model:*` labels. |
 | `DESIGN_DEFAULT_MODEL` | string | Design-agent default model. When non-empty, `agent-design` workflows prefer this value over `DEFAULT_MODEL`. Empty string (the default) means "not configured — fall through to `DEFAULT_MODEL`"; the caller stub uses `vars.DESIGN_DEFAULT_MODEL \|\| vars.DEFAULT_MODEL` so the fallback is transparent. |
-| `ADMIN_ASSIGNEES` | JSON array | Individual GitHub logins (users or bots) and/or `org/team-slug` references assigned to issues/PRs when the agent applies `human-required` and needs a human in the loop. |
-| `CODE_REVIEWERS` | JSON array | Individual GitHub logins (users or bots) and/or `org/team-slug` references requested as PR reviewers when the agent opens a PR and wants human sign-off. |
+| `ADMIN_ASSIGNEES` | JSON array | Individual GitHub logins assigned to issues/PRs when the agent applies `human-required` and needs a human in the loop. |
+| `CODE_REVIEWERS` | JSON array | Individual GitHub logins requested as PR reviewers when the agent opens a PR and wants human sign-off. |
 | `PROTECTED_PR_AUTHOR_LOGINS` | JSON array | PR author logins subject to the protected approval threshold. Defaults to `["mfrancza-developer-agent[bot]"]`. |
 | `REQUIRED_APPROVAL_COUNT` | string integer | Required non-self approvals for protected PRs. Defaults to `"2"`. |
 | `ENABLE_PROTECTED_APPROVAL_GATE` | string (`"true"` / `"false"`) | Enables the opt-in protected-approval gate. Defaults to `"false"`. |
@@ -26,11 +26,11 @@ Manages the GitHub Actions repository variables that configure agentic workflow 
 module "agent_vars" {
   source              = "./modules/agent-vars"
   repository          = github_repository.this.name
-  agent_allowlist     = ["your-github-username", "<developer-agent-app-slug>[bot]", "Brale-xyz/dev"]
+  agent_allowlist     = ["your-github-username", "<developer-agent-app-slug>[bot]"]
   default_model       = "sonnet"
   # design_default_model = "opus"  # omit or leave "" to fall back to default_model
-  admin_assignees     = ["your-github-username", "Brale-xyz/dev"]
-  code_reviewers      = ["your-github-username", "Brale-xyz/dev"]
+  admin_assignees     = ["your-github-username"]
+  code_reviewers      = ["your-github-username"]
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
   # required_approval_count                          = 2
   # enable_protected_approval_gate                   = true
@@ -59,11 +59,11 @@ module "agent_vars" {
 module "agent_vars" {
   source              = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/agent-vars?ref=<tag>"
   repository          = "<your-repo-name>"
-  agent_allowlist     = ["your-github-username", "<developer-agent-app-slug>[bot]", "Brale-xyz/dev"]
+  agent_allowlist     = ["your-github-username", "<developer-agent-app-slug>[bot]"]
   default_model       = "sonnet"
   # design_default_model = "opus"  # omit or leave "" to fall back to default_model
-  admin_assignees     = ["your-github-username", "Brale-xyz/dev"]
-  code_reviewers      = ["your-github-username", "Brale-xyz/dev"]
+  admin_assignees     = ["your-github-username"]
+  code_reviewers      = ["your-github-username"]
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
   # required_approval_count                          = 2
   # enable_protected_approval_gate                   = true
@@ -109,11 +109,11 @@ provider "github" {
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `repository` | `string` | yes | — | Name of the GitHub repository to manage Actions variables for. |
-| `agent_allowlist` | `list(string)` | yes | — | Individual GitHub logins (users or bots) and/or `org/team-slug` references permitted to trigger agent workflows. The in-reusable runtime gate reads `AGENT_ALLOWLIST` directly and resolves teams at trigger time; no cached companion variable exists. |
+| `agent_allowlist` | `list(string)` | yes | — | Individual GitHub logins (users or bots) permitted to trigger agent workflows. |
 | `default_model` | `string` | no | `"sonnet"` | Repo-wide default model for agent containers. |
 | `design_default_model` | `string` | no | `""` | Design-agent default model. When non-empty, `agent-design` uses this instead of `default_model`. Empty (the default) falls through to `default_model`. |
-| `admin_assignees` | `list(string)` | no | `[]` | Individual GitHub logins (users or bots) and/or `org/team-slug` references to assign to escalation issues/PRs. |
-| `code_reviewers` | `list(string)` | no | `[]` | Individual GitHub logins (users or bots) and/or `org/team-slug` references to request as PR reviewers. |
+| `admin_assignees` | `list(string)` | no | `[]` | Individual GitHub logins to assign to escalation issues/PRs. |
+| `code_reviewers` | `list(string)` | no | `[]` | Individual GitHub logins to request as PR reviewers. |
 | `protected_pr_author_logins` | `list(string)` | no | developer-agent bot | Protected PR-author logins, encoded as JSON. |
 | `required_approval_count` | `number` | no | `2` | Non-self approvals required for a protected PR. |
 | `enable_protected_approval_gate` | `bool` | no | `false` | Enables the protected-approval gate. |
@@ -146,8 +146,7 @@ provider "github" {
 - `DESIGN_DEFAULT_MODEL` defaults to `""` (empty string). The caller stub expresses the fallback as `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL` — when empty, GitHub Actions evaluates the empty string as falsy and falls through to `DEFAULT_MODEL`, preserving existing behavior for repos that have not set this variable. Set it to any model identifier accepted by the agent `--model` flag to give the design stage its own model tier.
 - `AUTO_TRIGGER_AGENTS` must never be absent from the repository — the workflow guard `vars.AUTO_TRIGGER_AGENTS != ''` prevents `fromJSON('')` from throwing a runtime error. All gates default to `false` so behavior is unchanged unless you opt in.
 - `REVIEWER_MODELS` defaults to `[]` (JSON-encoded empty array). Workflows guard with `vars.REVIEWER_MODELS != ''` before calling `fromJSON` — an absent variable evaluates to `''` and `fromJSON('')` would throw a runtime error; the guard fails closed (multi-reviewer disabled) instead. An empty list (`[]`) is the canonical signal that multi-reviewer is disabled.
-- `agent_allowlist`, `admin_assignees`, and `code_reviewers` accept mixed lists of individual GitHub logins (users or bots) and `org/team-slug` references. Entries must be non-empty and contain at most one `/`.
-- `AGENT_ALLOWLIST` is read directly by the in-reusable runtime gate, which resolves team references at trigger time. There is no `AGENT_ALLOWLIST_RESOLVED` companion variable, scheduled resolver, or Terraform team-members data source.
+- `agent_allowlist`, `admin_assignees`, and `code_reviewers` contain individual GitHub logins. Entries must be non-empty and contain at most one `/`.
 - Include the developer-agent and reviewer-agent bot identities (e.g. `mfrancza-developer-agent[bot]`) as explicit `agent_allowlist` entries so that agents can apply `agent:*` labels to route work to one another.
 - The protected-approval variables preserve existing behavior because `ENABLE_PROTECTED_APPROVAL_GATE` defaults to `"false"`. `PROTECTED_PR_AUTHOR_LOGINS` must be non-empty with unique, non-empty logins; both the approval count and reconciliation interval must be positive integers.
 - `REVIEW_MODEL_PAIRING` defaults to `{"enabled":false,...}`. The `enabled = false` default is a fail-safe: a fresh repo behaves exactly as it did before the variable existed (pairing tier is dormant). Set `enabled = true` and choose a `policy` to opt in. Workflows must guard with `vars.REVIEW_MODEL_PAIRING != ''` before calling `fromJSON` — an absent variable evaluates to `''` and `fromJSON('')` would throw a runtime error. `fromJSON(vars.REVIEW_MODEL_PAIRING).enabled` is the primary gate that the agent-review workflow checks before entering the pairing tier.
