@@ -29,11 +29,14 @@ image-prep cost of both modes to seconds:
   underlying `DEVELOPER_IMAGE` / `REVIEWER_IMAGE` Actions variables become
   Terraform-managed so the pull-mode default survives a `terraform apply`
   and is reproducible across adopters.
-- **Feedback-path workflows** keep building from source so they still exercise
-  PR-level changes to `docker/`, but the `run-agent` build step uses the
-  same published `:main` image as a BuildKit registry cache source. Unchanged
+- **Feedback-path workflows** keep building from source (preserving the
+  no-GHCR escape hatch described above), building the `docker/` tree
+  checked out at `helpers-ref`. The `run-agent` build step uses the
+  published `:main` image as a BuildKit registry cache source. Unchanged
   layers (OS install, CLI installs — the slow 60–120 s portion) are reused
-  from the registry; only PR-modified layers are rebuilt.
+  from the registry; a landed `docker/` change on `main` invalidates the
+  affected layer inputs so the next feedback-path run rebuilds those
+  layers against the updated `:main` cache.
 
 Source-build without any cache remains the behavior external callers get
 when the registry cache is unreachable, so the escape hatch for local dev
@@ -81,9 +84,11 @@ notes the resolution so a reviewer can push back:
 4. **Measurable target.** Baseline: median image-prep step duration across
    the last 10 runs of each of the eight agent-container workflows (expected
    ~90–150 s). Target: median <15 s for pull-mode runs and <30 s for cached
-   build-mode runs when `docker/**` is unchanged in the triggering PR. The
-   final sub-issue (end-to-end validation) measures both and posts the
-   comparison back on this design PR.
+   build-mode runs when the `:main` cache source satisfies every layer the
+   build context needs (i.e. `docker/**` on `main` has not changed since
+   the cache was last published — which is also when `release-images.yml`
+   last republished `:main`). The final sub-issue (end-to-end validation)
+   measures both and posts the comparison back on this design PR.
 
 Repo-conventions requirements the design must respect without re-arguing
 them (see `AGENTS.md`):
