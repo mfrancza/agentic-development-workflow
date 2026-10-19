@@ -755,15 +755,16 @@ non-matching App and confirms the required check is **not** satisfied.
 handles each with a specific publication posture:
 
 1. **Opt-in OFF (default).** The publisher **does not publish anything
-   under the enforcing context** (`require-two-developer-approvals`). It
+   under the enforcing context**
+   (`require-two-developer-approvals-g${generation}`). It
    optionally publishes a diagnostic context named
-   `require-two-developer-approvals (preview)` that reflects what the
-   gate *would* say if enabled. The ruleset never lists the preview
-   context as required, so the preview has no gating effect; its purpose
-   is to let maintainers see what enabling the opt-in would do without
-   affecting any merge decisions. The enforcing-context check-run from a
-   prior OFF-mode run is **not** reused: see "Activation reconciliation"
-   below.
+   `require-two-developer-approvals-g${generation} (preview)` that
+   reflects what the gate *would* say if enabled. The ruleset never lists
+   the preview context as required, so the preview has no gating effect;
+   its purpose is to let maintainers see what enabling the opt-in would do
+   without affecting any merge decisions. The enforcing-context check-run
+   from a prior OFF-mode run is **not** reused: see "Activation
+   reconciliation" below.
 2. **Opt-in ON, configuration valid.** The publisher computes the
    qualifying-approval count per Decision 4 and publishes
    `success` / `failure` on the enforcing context.
@@ -920,8 +921,8 @@ concurrency:
 #
 # `[0]` is also only sufficient as a concurrency-key hint / starting
 # point: Decision 8a already re-resolves the full candidate PR set from
-# the live head SHA via `GET /commits/{sha}/pulls`, so a case where two
-# PRs share a head SHA is handled correctly in the activity even though
+# the authoritative paginated open-PR listing, so a case where two PRs
+# share a head SHA is handled correctly in the activity even though
 # `workflow_run.pull_requests[0]` only names one of them.
 concurrency:
   group: require-two-developer-approvals-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
@@ -1031,13 +1032,22 @@ sharing that SHA with fewer than two approvals.
 
 To make the published check-run on a head SHA reflect **the strictest
 qualifying-approval requirement across every open PR that currently
-has that SHA as its head**, the activity:
+has that SHA as its head**, the activity performs this lookup *inside the
+per-SHA lock* and then:
 
-1. Resolves `candidatePrNumbers` by calling
-   `GET /repos/{owner}/{repo}/commits/{liveHeadSha}/pulls` and
-   filtering to PRs with `state == "open"` and
-   `head.sha == liveHeadSha` (defensively re-checking per-PR because
-   the commit-to-PR index can lag). The trigger-PR is included.
+1. Resolves `candidatePrNumbers` by paginating
+   `GET /repos/{owner}/{repo}/pulls?state=open&per_page=100` and
+   filtering the authoritative open-PR listing to `head.sha ==
+   liveHeadSha`. It deliberately does **not** use
+   `GET /commits/{sha}/pulls`: that commit index can lag newly opened
+   sibling PRs, and re-checking only returned rows cannot detect an
+   omitted under-approved protected PR. The triggering PR is included
+   only if it is still open and its re-fetched head is `liveHeadSha`.
+   If the open-PR listing or pagination fails, the activity must fail
+   closed: publish a `failure` conclusion for `liveHeadSha` with an
+   error summary (unless the Checks API itself is unavailable, in which
+   case fail the job loudly), and must never publish `success` from an
+   incomplete candidate set.
 2. For each candidate PR, re-fetches the PR via
    `GET /repos/{owner}/{repo}/pulls/{number}` to read `user.login`
    (PR author) and the latest `pr.head.sha` (to drop any PR whose
@@ -1100,11 +1110,14 @@ For each departing SHA, under the per-SHA concurrency lock
 to the live-head publication, so the same workflow run holds both
 locks), the activity:
 
-- Calls `GET /repos/{owner}/{repo}/commits/{departingSha}/pulls`,
-  filters to `state == "open"` with `head.sha == departingSha`, and
-  **excludes the departing PR number** (which may or may not have
-  already dropped out of the commit→PRs index; the explicit exclude
-  is for correctness regardless).
+- Paginates `GET /repos/{owner}/{repo}/pulls?state=open&per_page=100`,
+  filters to `head.sha == departingSha`, and **excludes the departing
+  PR number**. This uses the same authoritative open-PR source as the
+  live-head path rather than the lag-prone commit→PR index; the explicit
+  exclusion remains necessary whether or not the closed/moved PR has
+  already disappeared from that listing. A listing failure follows the
+  same fail-closed rule: publish `failure` on `departingSha` if possible
+  and fail the job loudly; never publish `success` from a partial set.
 - If the remaining-candidate set is empty, no republication is
   needed: the stale check-run on `departingSha` is now orphaned
   (no open PR has that SHA as head) and cannot block any merge.
@@ -1180,7 +1193,14 @@ the design adds a **periodic reconciliation sweep workflow**
   variable as a no-op below the committed N — is intentional: the
   reviewer correctly pointed out that under a committed `*/10 * * * *`,
   values below 10 would be silently ignored and the "smaller values
-  react faster" promise would be false.
+  react faster" promise would be false. The reconcile workflow must
+  declare `permissions: { actions: read, pull-requests: read, checks:
+  write }`: `actions: read` is required for this runs lookup. If that
+  lookup errors, the activity must **not** early-exit; it logs an error
+  and continues with a full reconciliation. If an open-PR listing or
+  check publication then fails, it follows the fail-closed publication
+  rule above and fails the job loudly, rather than reporting a successful
+  sweep that silently left a stale result in place.
 - Takes its own repository-wide concurrency group
   `require-two-developer-approvals-reconcile` with
   `cancel-in-progress: false`, so it does not share concurrency
@@ -1478,7 +1498,17 @@ end-to-end validation on a scratch PR under Issue #665.
     dropped by a later notifier-driven C — the sweep must still
     reconcile H1 within its interval. (Covers Decision 8a's
     pending-replacement safety net.)
-17. **Standard counting cases** — the full matrix listed in Issue #662
+17. **Shared-SHA listing and sweep API failures fail closed** — simulate
+    an under-approved protected PR that has only just joined a SHA and
+    make the historical `GET /commits/{sha}/pulls` index omit it; the
+    paginated open-PR listing must still find it and publish `failure`.
+    Then inject failures in (a) an open-PR-list page and (b) the sweep's
+    Actions-runs lookup. Case (a) must publish `failure` when possible
+    and fail the job, never `success` from a partial candidate set; case
+    (b) must log the lookup error and perform the full reconciliation
+    rather than early-exiting. Verify the reconcile workflow grants
+    `actions: read` so the normal lookup succeeds. (Covers Decision 8a.)
+18. **Standard counting cases** — the full matrix listed in Issue #662
     (0/1/2/3 non-self approvals, self-approval ignored, DISMISSED
     latest-per-reviewer, etc.).
 
@@ -1643,8 +1673,8 @@ AGENTS.md § "Keeping Documentation Current"):
 | Issue | Task | Depends on |
 |-------|------|-----------|
 | [#661](https://github.com/mfrancza/agentic-development-workflow/issues/661) | Terraform: add `protected_pr_author_logins` (non-empty unique list), `required_approval_count` (positive integer), `require_two_developer_approvals`, generation, and reconcile-interval variables; expose the first two as JSON `PROTECTED_PR_AUTHOR_LOGINS` and numeric `REQUIRED_APPROVAL_COUNT` Actions variables. Wire all values to the publisher, branch-protection module, examples, and operator documentation. | — |
-| [#662](https://github.com/mfrancza/agentic-development-workflow/issues/662) | TypeScript activity + composite action: implement the approval check. Read `protected-pr-author-logins` and `required-approval-count` inputs, validate the JSON list and positive integer before making any author decision, and fail every PR visibly when invalid. For each protected PR, exclude its own author from latest-per-reviewer `APPROVED` reviews and compare against the configured threshold; non-protected PRs pass immediately. Preserve the Decision 8/8a serialization, shared-SHA, departed-SHA, draft, and generation contracts. Unit tests cover two protected identities, custom thresholds, invalid JSON/list/count, and author-specific self-exclusion in addition to Decision 9. | — |
-| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add the publisher, zero-permission named notifier, backfill, reconcile workflow, and paired reusable defined in Decisions 5, 7, 8, and 8a. Publisher stubs pass `vars.PROTECTED_PR_AUTHOR_LOGINS`, `vars.REQUIRED_APPROVAL_COUNT`, `vars.REQUIRE_TWO_DEVELOPER_APPROVALS`, and generation to the reusable. Preserve the documented trusted-ref, `workflow_run` null guard/fallback, per-PR/per-SHA concurrency, departed-SHA, and per-minute sweep contracts. | Issue #662 |
+| [#662](https://github.com/mfrancza/agentic-development-workflow/issues/662) | TypeScript activity + composite action: implement the approval check. Read `protected-pr-author-logins` and `required-approval-count` inputs, validate the JSON list and positive integer before making any author decision, and fail every PR visibly when invalid. For each protected PR, exclude its own author from latest-per-reviewer `APPROVED` reviews and compare against the configured threshold; non-protected PRs pass immediately. Resolve every shared-SHA candidate by paginating the authoritative open-PR listing (never the lag-prone commit→PR index); on a listing error publish failure when possible and fail loudly, never success from a partial set. Preserve the Decision 8/8a serialization, shared-SHA, departed-SHA, draft, and generation contracts. Unit tests cover two protected identities, custom thresholds, invalid JSON/list/count, API-error fail-closed behavior, and author-specific self-exclusion in addition to Decision 9. | — |
+| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add the publisher, zero-permission named notifier, backfill, reconcile workflow, and paired reusable defined in Decisions 5, 7, 8, and 8a. Publisher stubs pass `vars.PROTECTED_PR_AUTHOR_LOGINS`, `vars.REQUIRED_APPROVAL_COUNT`, `vars.REQUIRE_TWO_DEVELOPER_APPROVALS`, and generation to the reusable. Preserve the documented trusted-ref, `workflow_run` null guard/fallback, per-PR/per-SHA concurrency, departed-SHA, and per-minute sweep contracts. The reconcile workflow MUST grant `actions: read`, `pull-requests: read`, and `checks: write`; an Actions-runs lookup failure logs and continues a full sweep rather than early-exiting. | Issue #662 |
 | [#664](https://github.com/mfrancza/agentic-development-workflow/issues/664) | Documentation: update `AGENTS.md`, module READMEs, examples, and `docs/adopting.md` for `protected_pr_author_logins` / `PROTECTED_PR_AUTHOR_LOGINS` and `required_approval_count` / `REQUIRED_APPROVAL_COUNT`, including JSON format, threshold validation, and the existing activation, shared-SHA, bypass, and residual-risk contracts. | Issue #661, Issue #663 |
 | [#665](https://github.com/mfrancza/agentic-development-workflow/issues/665) | End-to-end validation: execute Decision 9, including multiple protected authors, a non-default threshold, author-specific self-exclusion, and every invalid configuration path, alongside the fork, spoofing, concurrency, activation, shared-SHA, draft, and departed-SHA cases. | Issues #661, #662, #663, #664 |
 
