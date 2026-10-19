@@ -26,16 +26,34 @@ variable "code_reviewers" {
   default     = []
 }
 
-variable "developer_bot_login" {
-  description = "Login of the developer-agent GitHub App bot (for example, `<developer-agent-app-slug>[bot]`). Stored as the DEVELOPER_BOT_LOGIN Actions variable for workflows that need to identify developer-authored PRs."
-  type        = string
-  default     = ""
+variable "protected_pr_author_logins" {
+  description = "GitHub login list whose PRs require the custom approval threshold. Stored as the JSON-encoded PROTECTED_PR_AUTHOR_LOGINS Actions variable."
+  type        = list(string)
+  default     = ["mfrancza-developer-agent[bot]"]
 }
 
-variable "require_two_developer_approvals" {
-  description = "Whether workflows should enforce two approvals for developer-authored PRs. Stored as the REQUIRE_TWO_DEVELOPER_APPROVALS Actions variable. Defaults to false so the feature is opt-in."
+variable "required_approval_count" {
+  description = "Number of non-self approvals required for a protected PR. Stored as REQUIRED_APPROVAL_COUNT."
+  type        = number
+  default     = 2
+}
+
+variable "enable_protected_approval_gate" {
+  description = "Whether the protected-approval gate is enabled. Stored as ENABLE_PROTECTED_APPROVAL_GATE."
   type        = bool
   default     = false
+}
+
+variable "enable_protected_approval_gate_check_generation" {
+  description = "Generation suffix for the protected-approval required-check context. Stored as ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION."
+  type        = number
+  default     = 1
+}
+
+variable "enable_protected_approval_gate_reconcile_minutes" {
+  description = "Minimum interval in minutes between protected-approval reconciliation sweeps. Stored as ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES."
+  type        = number
+  default     = 10
 }
 
 variable "auto_trigger_agents" {

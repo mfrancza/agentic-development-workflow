@@ -48,11 +48,14 @@ resource "github_repository_ruleset" "main" {
     }
 
     dynamic "required_status_checks" {
-      for_each = var.require_two_developer_approvals ? [var.require_two_developer_approvals_check_context] : []
+      for_each = var.enable_protected_approval_gate ? [1] : []
 
       content {
+        strict_required_status_checks_policy = false
+
         required_check {
-          context = required_status_checks.value
+          context        = coalesce(var.enable_protected_approval_gate_check_context, "require-two-developer-approvals-g${var.enable_protected_approval_gate_check_generation}")
+          integration_id = var.enable_protected_approval_gate_check_integration_id
         }
       }
     }

@@ -74,17 +74,21 @@ module "agent_vars" {
   design_default_model            = var.design_default_model
   admin_assignees                 = var.admin_assignees
   code_reviewers                  = var.code_reviewers
-  developer_bot_login             = var.developer_bot_login
-  require_two_developer_approvals = var.require_two_developer_approvals
+  protected_pr_author_logins                         = var.protected_pr_author_logins
+  required_approval_count                            = var.required_approval_count
+  enable_protected_approval_gate                     = var.enable_protected_approval_gate
+  enable_protected_approval_gate_check_generation    = var.enable_protected_approval_gate_check_generation
+  enable_protected_approval_gate_reconcile_minutes   = var.enable_protected_approval_gate_reconcile_minutes
   auto_trigger_agents             = var.auto_trigger_agents
   reviewer_models                 = var.reviewer_models
   review_model_pairing            = var.review_model_pairing
 }
 
 module "branch_protection" {
-  source                          = "./modules/branch-protection"
-  repository                      = github_repository.this.name
-  require_two_developer_approvals = var.require_two_developer_approvals
+  source                                           = "./modules/branch-protection"
+  repository                                       = github_repository.this.name
+  enable_protected_approval_gate                   = var.enable_protected_approval_gate
+  enable_protected_approval_gate_check_generation  = var.enable_protected_approval_gate_check_generation
 }
 
 module "labels" {

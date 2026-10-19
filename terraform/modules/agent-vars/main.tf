@@ -46,20 +46,36 @@ resource "github_actions_variable" "code_reviewers" {
   value         = jsonencode(var.code_reviewers)
 }
 
-# Expose the developer-agent bot login so workflows can distinguish
-# developer-authored PRs from other contributions.
-resource "github_actions_variable" "developer_bot_login" {
+# Expose protected PR authors as JSON so workflows can scope the gate without
+# hardcoding identities.
+resource "github_actions_variable" "protected_pr_author_logins" {
   repository    = var.repository
-  variable_name = "DEVELOPER_BOT_LOGIN"
-  value         = var.developer_bot_login
+  variable_name = "PROTECTED_PR_AUTHOR_LOGINS"
+  value         = jsonencode(var.protected_pr_author_logins)
 }
 
-# Expose the opt-in two-developer-approvals gate as a string Actions variable.
-# GitHub Actions variables are strings; workflows compare this value to "true".
-resource "github_actions_variable" "require_two_developer_approvals" {
+resource "github_actions_variable" "required_approval_count" {
   repository    = var.repository
-  variable_name = "REQUIRE_TWO_DEVELOPER_APPROVALS"
-  value         = tostring(var.require_two_developer_approvals)
+  variable_name = "REQUIRED_APPROVAL_COUNT"
+  value         = tostring(var.required_approval_count)
+}
+
+resource "github_actions_variable" "enable_protected_approval_gate" {
+  repository    = var.repository
+  variable_name = "ENABLE_PROTECTED_APPROVAL_GATE"
+  value         = tostring(var.enable_protected_approval_gate)
+}
+
+resource "github_actions_variable" "enable_protected_approval_gate_check_generation" {
+  repository    = var.repository
+  variable_name = "ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION"
+  value         = tostring(var.enable_protected_approval_gate_check_generation)
+}
+
+resource "github_actions_variable" "enable_protected_approval_gate_reconcile_minutes" {
+  repository    = var.repository
+  variable_name = "ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES"
+  value         = tostring(var.enable_protected_approval_gate_reconcile_minutes)
 }
 
 # Expose the auto-trigger gates as a JSON-encoded repository Actions variable
