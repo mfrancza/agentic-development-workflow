@@ -32,6 +32,56 @@ variable "code_reviewers" {
   default     = []
 }
 
+variable "protected_pr_author_logins" {
+  description = "GitHub login list whose PRs require the custom approval threshold. Stored as the JSON-encoded PROTECTED_PR_AUTHOR_LOGINS Actions variable."
+  type        = list(string)
+  default     = ["mfrancza-developer-agent[bot]"]
+
+  validation {
+    condition     = length(var.protected_pr_author_logins) > 0 && alltrue([for login in var.protected_pr_author_logins : trimspace(login) != ""]) && length(distinct(var.protected_pr_author_logins)) == length(var.protected_pr_author_logins)
+    error_message = "protected_pr_author_logins must be non-empty and contain unique, non-empty logins."
+  }
+}
+
+variable "required_approval_count" {
+  description = "Number of latest-per-reviewer non-self APPROVED reviews required for a protected PR. Stored as REQUIRED_APPROVAL_COUNT."
+  type        = number
+  default     = 2
+
+  validation {
+    condition     = var.required_approval_count >= 1 && floor(var.required_approval_count) == var.required_approval_count
+    error_message = "required_approval_count must be a positive integer."
+  }
+}
+
+variable "enable_protected_approval_gate" {
+  description = "Whether to require the protected-approval status check before merging. Defaults to false so the gate is opt-in. Stored as ENABLE_PROTECTED_APPROVAL_GATE."
+  type        = bool
+  default     = false
+}
+
+variable "enable_protected_approval_gate_check_generation" {
+  description = "Generation suffix for the protected-approval check context. Bump it on every ON → OFF → ON cycle to invalidate stale check-runs. Stored as ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION."
+  type        = number
+  default     = 1
+
+  validation {
+    condition     = var.enable_protected_approval_gate_check_generation >= 1 && floor(var.enable_protected_approval_gate_check_generation) == var.enable_protected_approval_gate_check_generation
+    error_message = "enable_protected_approval_gate_check_generation must be a positive integer."
+  }
+}
+
+variable "enable_protected_approval_gate_reconcile_minutes" {
+  description = "Minimum interval in minutes between protected-approval reconciliation sweeps. Stored as ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.enable_protected_approval_gate_reconcile_minutes >= 1 && floor(var.enable_protected_approval_gate_reconcile_minutes) == var.enable_protected_approval_gate_reconcile_minutes
+    error_message = "enable_protected_approval_gate_reconcile_minutes must be a positive integer."
+  }
+}
+
 variable "auto_trigger_agents" {
   description = "Per-agent:*-label switches that auto-advance the SDLC pipeline. Set a key to true to have agent-auto-trigger.yml automatically apply that stage's agent:* label at the natural upstream signal (issue opened → agent:groom, plan labeled → agent:design, do labeled / draft removed → agent:developer, agent-branch PR opened → agent:review). Every switch defaults to false so existing manual behavior is preserved; flipping a switch opts the whole repo into auto-triggering for that stage. Stored as a JSON-encoded repository Actions variable AUTO_TRIGGER_AGENTS."
   type = object({

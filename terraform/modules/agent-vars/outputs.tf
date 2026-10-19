@@ -18,6 +18,31 @@ output "code_reviewers_variable_name" {
   value       = github_actions_variable.code_reviewers.variable_name
 }
 
+output "protected_pr_author_logins_variable_name" {
+  description = "Name of the PROTECTED_PR_AUTHOR_LOGINS Actions variable."
+  value       = github_actions_variable.protected_pr_author_logins.variable_name
+}
+
+output "required_approval_count_variable_name" {
+  description = "Name of the REQUIRED_APPROVAL_COUNT Actions variable."
+  value       = github_actions_variable.required_approval_count.variable_name
+}
+
+output "enable_protected_approval_gate_variable_name" {
+  description = "Name of the ENABLE_PROTECTED_APPROVAL_GATE Actions variable."
+  value       = github_actions_variable.enable_protected_approval_gate.variable_name
+}
+
+output "enable_protected_approval_gate_check_generation_variable_name" {
+  description = "Name of the ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION Actions variable."
+  value       = github_actions_variable.enable_protected_approval_gate_check_generation.variable_name
+}
+
+output "enable_protected_approval_gate_reconcile_minutes_variable_name" {
+  description = "Name of the ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES Actions variable."
+  value       = github_actions_variable.enable_protected_approval_gate_reconcile_minutes.variable_name
+}
+
 output "auto_trigger_agents_variable_name" {
   description = "Name of the AUTO_TRIGGER_AGENTS Actions variable."
   value       = github_actions_variable.auto_trigger_agents.variable_name

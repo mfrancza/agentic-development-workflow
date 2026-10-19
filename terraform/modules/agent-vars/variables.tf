@@ -26,6 +26,36 @@ variable "code_reviewers" {
   default     = []
 }
 
+variable "protected_pr_author_logins" {
+  description = "GitHub login list whose PRs require the custom approval threshold. Stored as the JSON-encoded PROTECTED_PR_AUTHOR_LOGINS Actions variable."
+  type        = list(string)
+  default     = ["mfrancza-developer-agent[bot]"]
+}
+
+variable "required_approval_count" {
+  description = "Number of non-self approvals required for a protected PR. Stored as REQUIRED_APPROVAL_COUNT."
+  type        = number
+  default     = 2
+}
+
+variable "enable_protected_approval_gate" {
+  description = "Whether the protected-approval gate is enabled. Stored as ENABLE_PROTECTED_APPROVAL_GATE."
+  type        = bool
+  default     = false
+}
+
+variable "enable_protected_approval_gate_check_generation" {
+  description = "Generation suffix for the protected-approval required-check context. Stored as ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION."
+  type        = number
+  default     = 1
+}
+
+variable "enable_protected_approval_gate_reconcile_minutes" {
+  description = "Minimum interval in minutes between protected-approval reconciliation sweeps. Stored as ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES."
+  type        = number
+  default     = 10
+}
+
 variable "auto_trigger_agents" {
   description = "Per-agent:*-label switches that auto-advance the SDLC pipeline. Set a key to true to have agent-auto-trigger.yml automatically apply that stage's agent:* label at the natural upstream signal (issue opened → agent:groom, plan labeled → agent:design, do labeled / draft removed → agent:developer, agent-branch PR opened → agent:review). Every switch defaults to false so existing manual behavior is preserved; flipping a switch opts the whole repo into auto-triggering for that stage. Stored as a JSON-encoded repository Actions variable AUTO_TRIGGER_AGENTS."
   type = object({

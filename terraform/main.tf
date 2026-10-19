@@ -67,21 +67,28 @@ module "security" {
 }
 
 module "agent_vars" {
-  source               = "./modules/agent-vars"
-  repository           = github_repository.this.name
-  agent_allowlist      = var.agent_allowlist
-  default_model        = var.default_model
-  design_default_model = var.design_default_model
-  admin_assignees      = var.admin_assignees
-  code_reviewers       = var.code_reviewers
-  auto_trigger_agents  = var.auto_trigger_agents
-  reviewer_models      = var.reviewer_models
-  review_model_pairing = var.review_model_pairing
+  source                                           = "./modules/agent-vars"
+  repository                                       = github_repository.this.name
+  agent_allowlist                                  = var.agent_allowlist
+  default_model                                    = var.default_model
+  design_default_model                             = var.design_default_model
+  admin_assignees                                  = var.admin_assignees
+  code_reviewers                                   = var.code_reviewers
+  protected_pr_author_logins                       = var.protected_pr_author_logins
+  required_approval_count                          = var.required_approval_count
+  enable_protected_approval_gate                   = var.enable_protected_approval_gate
+  enable_protected_approval_gate_check_generation  = var.enable_protected_approval_gate_check_generation
+  enable_protected_approval_gate_reconcile_minutes = var.enable_protected_approval_gate_reconcile_minutes
+  auto_trigger_agents                              = var.auto_trigger_agents
+  reviewer_models                                  = var.reviewer_models
+  review_model_pairing                             = var.review_model_pairing
 }
 
 module "branch_protection" {
-  source     = "./modules/branch-protection"
-  repository = github_repository.this.name
+  source                                          = "./modules/branch-protection"
+  repository                                      = github_repository.this.name
+  enable_protected_approval_gate                  = var.enable_protected_approval_gate
+  enable_protected_approval_gate_check_generation = var.enable_protected_approval_gate_check_generation
 }
 
 module "labels" {
