@@ -1,0 +1,119 @@
+name: require-two-developer-approvals (reusable)
+
+# The caller supplies PR event data explicitly because github.event in a
+# reusable workflow contains the workflow_call event, not its caller's event.
+on:
+  workflow_call:
+    inputs:
+      protected-pr-author-logins:
+        description: JSON array of protected PR author logins.
+        required: true
+        type: string
+      required-approval-count:
+        description: Positive number of qualifying approvals required.
+        required: true
+        type: string
+      enabled:
+        description: Whether the protected-approval gate is enabled.
+        required: true
+        type: string
+      generation:
+        description: Positive generation number for the published check context.
+        required: true
+        type: string
+      pr-number:
+        description: Pull request number to evaluate.
+        required: true
+        type: number
+      head-sha:
+        description: Head SHA from the triggering pull request event.
+        required: true
+        type: string
+      repo:
+        description: Repository in owner/name format.
+        required: true
+        type: string
+      helpers-ref:
+        description: >
+          Git ref of mfrancza/agentic-development-workflow to check out for
+          helper actions. Must not be empty.
+        required: true
+        type: string
+      departed-sha:
+        description: Optional SHA the triggering pull request departed.
+        required: false
+        type: string
+        default: ''
+      departed-pr-number:
+        description: Optional pull request number to exclude while reconciling departed-sha.
+        required: false
+        type: number
+        default: 0
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+
+      - name: Publish two-developer-approvals check
+        uses: ./_agentic-workflow/.github/actions/check-two-developer-approvals
+        with:
+          protected-pr-author-logins: ${{ inputs.protected-pr-author-logins }}
+          required-approval-count: ${{ inputs.required-approval-count }}
+          enabled: ${{ inputs.enabled }}
+          generation: ${{ inputs.generation }}
+          pr-number: ${{ inputs.pr-number }}
+          head-sha: ${{ inputs.head-sha }}
+          repo: ${{ inputs.repo }}
+          departed-sha: ${{ inputs.departed-sha }}
+          departed-pr-number: ${{ inputs.departed-pr-number }}

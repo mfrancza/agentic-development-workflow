@@ -22,7 +22,7 @@ Complete these steps in order before wiring up any reusable workflows.
    Dependabot, and secret scanning/push protection from the `security_and_analysis`
    block require a public repo or a GitHub Advanced Security licence).
 3. **Create the GitHub Apps.** Follow the [Manual GitHub App setup](#github-app-identities)
-   steps below.  Note the **Client ID** (e.g. `Iv23.xxx`) for each App — this is
+   steps below. Note the **Client ID** (e.g. `Iv23.xxx`) for each App — this is
    distinct from the numeric App ID on the same settings page.
 4. **Find your bot identities.** Each App's bot login is the App's name in
    lowercase with spaces replaced by hyphens, followed by `[bot]` — e.g. an App
@@ -203,19 +203,21 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 > organization. If your repository is in a **different organization** (or is a
 > personal-account repo), `secrets: inherit` does not propagate any secrets
 > across the org boundary — the reusable will fail immediately with:
+>
 > ```
 > Secret DEVELOPER_APP_ID is required, but not provided while calling
 > ```
+>
 > The caller stubs in this guide therefore use an explicit `secrets:` block that
 > names every secret by name, which works for both same-org and cross-org callers:
 >
 > ```yaml
 > secrets:
->   DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+>   DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
 >   DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
->   ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
->   OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
->   XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+>   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+>   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+>   XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 > ```
 >
 > **Do not replace the explicit `secrets:` blocks with `secrets: inherit`** — it
@@ -236,22 +238,23 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 
 **Secrets inventory per reusable** (source of truth: each reusable's own `secrets:` block)
 
-| Reusable | Required secrets | Optional secrets |
-|----------|------------------|------------------|
-| `agent-auto-trigger-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | — |
-| `agent-design-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-fix-checks-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-fix-deployment-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-groom-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-implement-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-pr-merged-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | — |
-| `agent-resolve-conflicts-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-respond-review-reusable.yml` | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-review-reusable.yml` | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY` | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `ci-reusable.yml` | — | — |
-| `secret-scan-reusable.yml` | — | — |
-| `terraform-ci-reusable.yml` | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | — |
-| `test-helper-ref-reusable.yml` | — | — |
+| Reusable                                       | Required secrets                                                | Optional secrets                                     |
+| ---------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
+| `agent-auto-trigger-reusable.yml`              | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | —                                                    |
+| `agent-design-reusable.yml`                    | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-fix-checks-reusable.yml`                | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-fix-deployment-reusable.yml`            | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-groom-reusable.yml`                     | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-implement-reusable.yml`                 | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-pr-merged-reusable.yml`                 | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | —                                                    |
+| `agent-resolve-conflicts-reusable.yml`         | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-respond-review-reusable.yml`            | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `agent-review-reusable.yml`                    | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`                   | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
+| `ci-reusable.yml`                              | —                                                               | —                                                    |
+| `require-two-developer-approvals-reusable.yml` | —                                                               | —                                                    |
+| `secret-scan-reusable.yml`                     | —                                                               | —                                                    |
+| `terraform-ci-reusable.yml`                    | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | —                                                    |
+| `test-helper-ref-reusable.yml`                 | —                                                               | —                                                    |
 
 > **Note:** `terraform-ci-reusable.yml` is consumer-only for this repo and is not
 > part of the externally published adoption surface in v0 — see the
@@ -300,11 +303,11 @@ Every release of this repo is tagged `v<major>.<minor>.<patch>` (e.g.
 the newest release within that major version. Three pinning options are
 available:
 
-| Pin | Example reference | Semantics |
-|-----|-------------------|-----------|
-| Major (recommended) | `@v0` / `?ref=v0` | Tracks patches and minor releases within `v0`; updated automatically on every non-breaking release. |
-| Exact | `@v0.0.0` / `?ref=v0.0.0` | Fully reproducible; only update when you choose to. |
-| SHA | `@<40-char-sha>` / `?ref=<sha>` | Maximally reproducible; opaque to humans but immune to tag moves. |
+| Pin                 | Example reference               | Semantics                                                                                           |
+| ------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Major (recommended) | `@v0` / `?ref=v0`               | Tracks patches and minor releases within `v0`; updated automatically on every non-breaking release. |
+| Exact               | `@v0.0.0` / `?ref=v0.0.0`       | Fully reproducible; only update when you choose to.                                                 |
+| SHA                 | `@<40-char-sha>` / `?ref=<sha>` | Maximally reproducible; opaque to humans but immune to tag moves.                                   |
 
 **Recommendation:** pin at the major tag (`@v0`) for day-to-day use. Drop to
 an exact tag or SHA when you need reproducibility for auditing or when a
@@ -465,7 +468,7 @@ pinned to a full 40-character SHA in the workflow YAML — omitting the entry
 causes a loud workflow failure, not a silent bypass.
 
 **The reusable workflows from this repository count as non-GitHub-owned.**
-The policy is evaluated in *your* repository against the full `uses:` string
+The policy is evaluated in _your_ repository against the full `uses:` string
 of every call, and a reusable workflow in another owner's repository is only
 permitted if a pattern matches it. The `patterns_allowed` entry must therefore
 be in GitHub's reusable-workflow form,
@@ -563,6 +566,60 @@ All reusable workflows are called via:
 uses: mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@v0
 ```
 
+For the protected-approval check, use a trusted publisher plus a zero-
+permission review notifier. Do not run the publisher directly on
+`pull_request` or `pull_request_review`: those events load workflow YAML from
+the PR and cannot publish Checks API results for fork PRs. The publisher runs
+on `pull_request_target` and on completion of the notifier; pass the same
+trusted helpers ref as the reusable workflow ref.
+
+```yaml
+name: require-two-developer-approvals-publisher
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
+  workflow_run:
+    workflows: ["require-two-developer-approvals-notify"]
+    types: [completed]
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+concurrency:
+  group: require-two-developer-approvals-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: false
+```
+
+The `workflow_run` publishing job must be guarded with
+`github.event.workflow_run.pull_requests[0] != null`. The notifier is a
+separate workflow with `pull_request_review` types `submitted`, `edited`, and
+`dismissed`, `permissions: {}`, and one `true` step. Give it the matching
+`require-two-developer-approvals-pr-${{ github.event.pull_request.number }}`
+concurrency group with `cancel-in-progress: false`.
+
+Inside the publisher job, call the reusable and provide the pull request
+metadata from the event:
+
+```yaml
+jobs:
+  check-protected-approvals:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
+    permissions:
+      contents: read
+      pull-requests: read
+      checks: write
+    uses: mfrancza/agentic-development-workflow/.github/workflows/require-two-developer-approvals-reusable.yml@v0
+    with:
+      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
+      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
+      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      generation: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION }}
+      pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+      head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
+      repo: ${{ github.repository }}
+      helpers-ref: v0
+```
+
 Pass `image:` to pull the published agent container image from GHCR — this
 skips a `docker build` step that the reusable workflow cannot perform without
 the source `docker/` tree in the caller's workspace:
@@ -573,7 +630,7 @@ image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0
 ```
 
 **Security note on allowlist gating.** Each reusable workflow performs
-*operational* preflight checks (skip if a PR already exists, block on open
+_operational_ preflight checks (skip if a PR already exists, block on open
 blockers, etc.) but performs **no sender-allowlist check**. The caller stub is
 the security gate: add an `if:` condition that checks
 `contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` before
@@ -632,11 +689,11 @@ jobs:
       logs-retention-days: 30
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
-      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** The reusable mints a short-lived developer-agent
@@ -707,11 +764,11 @@ jobs:
       logs-retention-days: 30
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
-      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 
   call-undraft:
     if: >
@@ -725,11 +782,11 @@ jobs:
       repo: ${{ github.repository }}
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
-      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** Same as `agent-groom`: short-lived token minted from
@@ -789,11 +846,11 @@ jobs:
       logs-retention-days: 30
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
-      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
@@ -864,11 +921,11 @@ jobs:
       logs-retention-days: 30
       helpers-ref: v0
     secrets:
-      REVIEWER_APP_ID:           ${{ secrets.REVIEWER_APP_ID }}
-      REVIEWER_APP_PRIVATE_KEY:  ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
-      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+      REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
+      REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** The reviewer App token has Contents (R) only — the
@@ -949,11 +1006,11 @@ jobs:
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
-      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 ```
 
 > **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` and
@@ -995,7 +1052,7 @@ name: agent-fix-checks
 
 on:
   workflow_run:
-    workflows: ["CI"]   # must match your CI workflow's `name:` field exactly
+    workflows: ["CI"] # must match your CI workflow's `name:` field exactly
     types: [completed]
 
 permissions:
@@ -1018,11 +1075,11 @@ jobs:
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
-      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 ```
 
 > **Adapt `agent-login`** to your developer-agent App's bot login (e.g.
@@ -1081,11 +1138,11 @@ jobs:
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
-      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 ```
 
 **Trust considerations.** The reusable requires `actions: read` (to list
@@ -1127,7 +1184,7 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: 'PR number to resolve (skips conflict enumeration)'
+        description: "PR number to resolve (skips conflict enumeration)"
         required: false
 
 permissions:
@@ -1144,11 +1201,11 @@ jobs:
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY:         ${{ secrets.ANTHROPIC_API_KEY }}
-      OPENAI_API_KEY:            ${{ secrets.OPENAI_API_KEY }}
-      XAI_API_KEY:               ${{ secrets.XAI_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
 ```
 
 > **Adapt `developer-author`** to your developer-agent App's GitHub App slug in
@@ -1233,7 +1290,7 @@ jobs:
     with:
       issue-number: ${{ needs.extract-issue-number.outputs.issue_number }}
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 ```
 
@@ -1256,14 +1313,14 @@ Applies the next-stage `agent:*` label at each SDLC transition, gated on the
 per-stage boolean switches in `vars.AUTO_TRIGGER_AGENTS`. Six transitions are
 supported (all opt-in, all default to `false`):
 
-| Transition | Trigger | Action |
-|---|---|---|
-| `auto-groom` | `issues.opened` | Applies `agent:groom` |
-| `auto-design` | `issues.labeled` (`plan`) | Applies `agent:design` |
-| `auto-developer-do` | `issues.labeled` (`do`) | Applies `agent:developer` (or `blocked` if open blockers) |
-| `auto-developer-undraft` | `issues.unlabeled` (`draft`) | Applies `agent:developer` (or `blocked`) |
-| `auto-review` | `pull_request.opened` on `agent/…` or `design/…` branch, or authored by `<developer-agent-slug>[bot]` (same-repo only) | Applies `agent:review` |
-| `auto-developer-unblock` | `issues.closed` | Applies `agent:developer` on newly-unblocked downstream issues |
+| Transition               | Trigger                                                                                                                | Action                                                         |
+| ------------------------ | ---------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `auto-groom`             | `issues.opened`                                                                                                        | Applies `agent:groom`                                          |
+| `auto-design`            | `issues.labeled` (`plan`)                                                                                              | Applies `agent:design`                                         |
+| `auto-developer-do`      | `issues.labeled` (`do`)                                                                                                | Applies `agent:developer` (or `blocked` if open blockers)      |
+| `auto-developer-undraft` | `issues.unlabeled` (`draft`)                                                                                           | Applies `agent:developer` (or `blocked`)                       |
+| `auto-review`            | `pull_request.opened` on `agent/…` or `design/…` branch, or authored by `<developer-agent-slug>[bot]` (same-repo only) | Applies `agent:review`                                         |
+| `auto-developer-unblock` | `issues.closed`                                                                                                        | Applies `agent:developer` on newly-unblocked downstream issues |
 
 No agent container runs in this workflow — each job only mints an App token
 and applies a label.
@@ -1305,7 +1362,7 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   auto-design:
@@ -1322,7 +1379,7 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   auto-developer-do:
@@ -1340,7 +1397,7 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   auto-developer-undraft:
@@ -1357,7 +1414,7 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   auto-review:
@@ -1376,7 +1433,7 @@ jobs:
       pr-number: ${{ github.event.pull_request.number }}
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
   auto-developer-unblock:
@@ -1392,7 +1449,7 @@ jobs:
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
     secrets:
-      DEVELOPER_APP_ID:          ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 ```
 
@@ -1465,11 +1522,11 @@ name: secret-scan
 
 on:
   push:
-    branches: ['**']
+    branches: ["**"]
   pull_request:
     branches: [main]
   schedule:
-    - cron: '0 6 * * 1'  # Weekly, Mondays at 06:00 UTC
+    - cron: "0 6 * * 1" # Weekly, Mondays at 06:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -1554,9 +1611,11 @@ The `release` workflow (triggered manually by the maintainer via
 the container images automatically when a `v*` tag is pushed.
 
 **Fix:** Check whether a release tag exists:
+
 ```bash
 gh api repos/mfrancza/agentic-development-workflow/tags --jq '.[].name'
 ```
+
 If no tags are listed, a release has not been created yet. Contact the source
 repo maintainer or pin to a commit SHA instead.
 
@@ -1634,12 +1693,14 @@ shown there (e.g. `my-developer-agent[bot]`) is what to add.
 Terraform `labels` module tries to create them again and fails.
 
 **Fix:** Import the pre-existing labels before the first apply:
+
 ```bash
 REPO="your-repo-name"
 terraform import 'module.labels.github_issue_label.automation["bug"]'         "${REPO}:bug"
 terraform import 'module.labels.github_issue_label.automation["enhancement"]' "${REPO}:enhancement"
 terraform import 'module.labels.github_issue_label.automation["question"]'    "${REPO}:question"
 ```
+
 Then re-run `terraform apply`.
 
 ---
@@ -1794,8 +1855,8 @@ patterns_allowed = [
 
 For an exact pin, use the same selector you use in `uses:` after the `@`, e.g.
 `...workflows/*@v0.1.0` or `...workflows/*@<40-char-sha>`. Without Terraform,
-the same list lives under *Settings → Actions → General → Allow specified
-actions and reusable workflows*.
+the same list lives under _Settings → Actions → General → Allow specified
+actions and reusable workflows_.
 
 ---
 
@@ -1830,6 +1891,7 @@ A caller stub copied from this guide before that release does not pass them.
 **Fix:** Add the two lines to the `with:` block of your caller stub and, if
 missing, the author-inequality line to the `if:` condition:
 
+<!-- prettier-ignore -->
 ```yaml
     with:
       review-author: ${{ github.event.review.user.login }}
@@ -1893,15 +1955,15 @@ and `agent-pr-merged` stubs.
 ### `terraform-ci-reusable.yml` is not available for external adoption in v0
 
 `terraform-ci-reusable.yml` is **consumer-only** — it is not part of the
-externally published surface for v0.  The workflow's `plan` and `apply` jobs
+externally published surface for v0. The workflow's `plan` and `apply` jobs
 depend on paths specific to this repository's layout (`terraform/`,
 `.github/actions/`, `.tool-versions`) and target this repository's dedicated
-Terraform GitHub App.  Attempting to call it from an external repository will
+Terraform GitHub App. Attempting to call it from an external repository will
 fail at the composite-action resolution step.
 
 External repositories that need Terraform CI should copy the workflow and its
 helper composite actions directly, or build a bespoke CI workflow.
 
 See [docs/design/reusable-workflow-helper-resolution.md](design/reusable-workflow-helper-resolution.md)
-Decision 6 for the rationale.  This restriction may be revisited in a future
+Decision 6 for the rationale. This restriction may be revisited in a future
 release if external demand emerges.

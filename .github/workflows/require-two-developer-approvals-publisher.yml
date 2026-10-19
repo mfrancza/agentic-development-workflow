@@ -1,0 +1,42 @@
+name: require-two-developer-approvals-publisher
+
+# Run for every PR and every review event so the status check is available for
+# both protected and unprotected authors. The activity decides whether a PR
+# author is protected; do not gate this workflow on AGENT_ALLOWLIST.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
+  workflow_run:
+    workflows: ["require-two-developer-approvals-notify"]
+    types: [completed]
+
+# contents: read is required only to retrieve the trusted helper checkout in
+# the reusable workflow. The composite action uses pull-request metadata and
+# publishes its result through the Checks API; it never checks out PR content.
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+concurrency:
+  # The workflow_run fallback prevents unrelated PR-less notifier runs from
+  # sharing one empty concurrency key. The job guard below prevents publication
+  # when GitHub cannot associate the notifier run with a pull request.
+  group: require-two-developer-approvals-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
+    uses: ./.github/workflows/require-two-developer-approvals-reusable.yml
+    with:
+      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
+      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
+      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      generation: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION }}
+      pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+      head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
+      repo: ${{ github.repository }}
+      helpers-ref: ${{ github.sha }}
+      departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
+      departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
