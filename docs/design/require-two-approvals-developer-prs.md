@@ -4,20 +4,21 @@
 
 ## Summary
 
-Add an opt-in setting that requires two approving reviews before a pull
-request can merge, scoped to pull requests authored by the configured
-developer agent. Pull requests from humans, the reviewer agent, or any other
-bot continue to require only whatever the base `required_approving_review_count`
-on the `main-protection` ruleset says (today: 1).
+Add an opt-in setting that requires a configurable number of approving
+reviews before a pull request can merge, scoped to pull requests authored by
+a configurable list of protected identities. Pull requests whose authors are
+not in that list continue to require only whatever the base
+`required_approving_review_count` on the `main-protection` ruleset says
+(today: 1).
 
 GitHub's branch-protection `required_approving_review_count` is per-branch,
 not per-author, so a direct bump to 2 would raise the bar for every PR on
 the default branch — the exact outcome the issue rules out. The design uses
 the mechanism the issue's Notes section already identifies: a **required
 status check** backed by a short GitHub Actions workflow. The check passes
-immediately when the PR author is not the configured developer agent;
-otherwise it passes only once two qualifying approvals exist (excluding the
-developer agent's own review from the count). The check context is wired
+immediately when the PR author is not in the configured protected-author
+list; otherwise it passes only once the configured number of qualifying
+approvals exist (excluding the PR author's own review from the count). The check context is wired
 into the `main-protection` ruleset as a required check only when the opt-in
 is enabled, so the default behavior of the repository is unchanged. The
 required-check entry pins its `integration_id` to the GitHub Actions App
@@ -58,12 +59,12 @@ guaranteed publication on their live head SHA, even with no
 subsequent events) and `closed` (so the departed-SHA
 reconciliation above fires when a sibling PR closes or merges).
 
-Identity (the login of the developer agent) is sourced from a new
-Terraform-managed Actions variable `DEVELOPER_BOT_LOGIN` so that external
-adopters can point the gate at their own developer-agent App — consistent
-with the direction already established by the `developer-author` reusable
-input introduced in [#580](https://github.com/mfrancza/agentic-development-workflow/issues/580)
-([`docs/design/resolve-conflicts-developer-author.md`](resolve-conflicts-developer-author.md)).
+Protected identities are sourced from a JSON-encoded Terraform-managed
+Actions variable `PROTECTED_PR_AUTHOR_LOGINS`, and the threshold from
+`REQUIRED_APPROVAL_COUNT`. The defaults preserve this issue's intended
+posture: `["mfrancza-developer-agent[bot]"]` and `2`; adopters can use a
+different developer-agent identity, protect additional identities, or choose
+another positive threshold without changing workflow code.
 
 ## Requirements as understood
 
@@ -72,18 +73,16 @@ From issue #628 and its grooming notes:
 1. **Opt-in gate.** A new setting that is OFF by default. When OFF, no
    behavior anywhere in the repo changes — the base
    `required_approving_review_count = 1` on `main-protection` continues to
-   govern every PR. When ON, developer-agent-authored PRs need two
-   qualifying approvals.
-2. **Scope by PR author.** The two-approvals rule applies only when the PR
-   author is the configured developer agent. Human-authored PRs, reviewer
-   agent-authored PRs, and PRs opened by any other bot are unaffected.
-3. **Identity is configured, not hardcoded.** Match the same developer
-   identity callers already configure elsewhere — `developer-author`
-   (`app/<slug>` form, consumed by the resolve-conflicts reusable) and the
-   corresponding `<slug>[bot]` login. Hardcoding `mfrancza-developer-agent[bot]`
-   anywhere is disallowed, including in the gate workflow.
-4. **Self-reviews don't count.** An `APPROVED` review by the developer
-   agent itself does not count toward the two. Reviews by anyone else do
+   govern every PR. When ON, a PR whose author is in the protected-author
+   list needs the configured number of qualifying approvals.
+2. **Scope by PR author.** The gate applies only when the PR author's login
+   is in the configured protected-author list. All other PR authors are
+   unaffected.
+3. **Configuration is not hardcoded.** The protected-author list is a
+   JSON-encoded list of GitHub logins and the threshold is a positive integer;
+   neither is embedded in the gate workflow.
+4. **Self-reviews don't count.** An `APPROVED` review by the PR author does
+   not count toward that PR's configured threshold. Reviews by anyone else do
    count (subject to the detail in Decision 4).
 5. **Mechanism must not raise the per-branch count.** The ruleset's
    `required_approving_review_count` stays at its current value (1). The
@@ -91,11 +90,12 @@ From issue #628 and its grooming notes:
    check**, not through a global count bump.
 6. **Non-matching PRs must pass instantly.** The required status check must
    produce `success` without delay (and without waiting for any approvals)
-   whenever the PR author is not the configured developer agent, so that
+   whenever the PR author is not in the protected-author list, so that
    adding this check to the ruleset does not slow down or block human PRs
    or PRs from the reviewer agent / Copilot / other bots.
 7. **Fail-loud configuration errors.** If the opt-in is ON but
-   `DEVELOPER_BOT_LOGIN` is empty, the gate must not silently fail open
+   `PROTECTED_PR_AUTHOR_LOGINS` is empty or invalid, or
+   `REQUIRED_APPROVAL_COUNT` is not a positive integer, the gate must not silently fail open
    (which would let agent PRs merge with a single approval) and must not
    silently fail closed on human PRs (which would block all PRs). The
    workflow fails loudly with `::error::` so the misconfiguration surfaces
@@ -133,28 +133,41 @@ The required-status-check approach also stacks cleanly with the existing
 `required_approving_review_count = 1` rule: GitHub still demands at least
 one write-access human approval (which the reviewer-agent app's advisory
 `APPROVE` deliberately does not satisfy — see [`docs/design/code-review-agent.md`](code-review-agent.md)),
-and the custom check additionally demands two non-self approvals when the
-author matches. For a developer-agent PR with the opt-in ON, the effective
-merge gate is therefore "≥1 write-access human approval AND ≥2 non-self
-approvals" — which is the standard interpretation of "two human reviews
-for agent code".
+and the custom check additionally demands the configured number of non-self
+approvals when the author is protected. With the defaults, a developer-agent
+PR's effective merge gate remains "≥1 write-access human approval AND ≥2
+non-self approvals".
 
 ### Decision 2 — New Terraform-managed variables and Actions variables
 
-**Decision.** Add four new Terraform variables and expose each as a
+**Decision.** Add five new Terraform variables and expose each as a
 repository Actions variable, following the established pattern used by
 `ADMIN_ASSIGNEES`, `CODE_REVIEWERS`, `AUTO_TRIGGER_AGENTS`, etc. in the
 `agent-vars` module (see [`terraform/modules/agent-vars/README.md`](../../terraform/modules/agent-vars/README.md)).
 
 ```hcl
-variable "developer_bot_login" {
-  description = "GitHub App bot login of the developer agent in `<slug>[bot]` form (e.g. `mfrancza-developer-agent[bot]`). Exposed as the DEVELOPER_BOT_LOGIN Actions variable. Used by the two-approvals status-check workflow to identify developer-agent-authored PRs. Must be non-empty when require_two_developer_approvals is true; the workflow fails loudly otherwise. Related: the `developer-author` input on agent-resolve-conflicts-reusable.yml holds the same identity in `app/<slug>` search-qualifier form."
-  type        = string
-  default     = ""
+variable "protected_pr_author_logins" {
+  description = "GitHub login list whose PRs require the custom approval threshold, encoded for the Actions variable as JSON. Exposed as PROTECTED_PR_AUTHOR_LOGINS. Must be a non-empty JSON array of unique, non-empty strings when require_two_developer_approvals is true. Defaults to the developer-agent bot login to preserve Issue #628's posture."
+  type        = list(string)
+  default     = ["mfrancza-developer-agent[bot]"]
+  validation {
+    condition     = length(var.protected_pr_author_logins) > 0 && alltrue([for login in var.protected_pr_author_logins : trimspace(login) != ""]) && length(distinct(var.protected_pr_author_logins)) == length(var.protected_pr_author_logins)
+    error_message = "protected_pr_author_logins must be non-empty and contain unique, non-empty logins."
+  }
+}
+
+variable "required_approval_count" {
+  description = "Number of latest-per-reviewer non-self APPROVED reviews required for a protected PR. Exposed as REQUIRED_APPROVAL_COUNT. Must be a positive integer; defaults to 2."
+  type        = number
+  default     = 2
+  validation {
+    condition     = var.required_approval_count >= 1 && floor(var.required_approval_count) == var.required_approval_count
+    error_message = "required_approval_count must be a positive integer."
+  }
 }
 
 variable "require_two_developer_approvals" {
-  description = "When true, developer-agent-authored PRs require two qualifying approvals (excluding the agent's own review) before they can merge. Enforced via a required status check on main-protection — the base required_approving_review_count stays at 1 so human PRs and other-bot PRs are unaffected. Defaults to false (opt-in)."
+  description = "When true, PRs authored by PROTECTED_PR_AUTHOR_LOGINS require REQUIRED_APPROVAL_COUNT qualifying approvals (excluding the PR author's own review) before they can merge. Enforced via a required status check on main-protection. Defaults to false (opt-in)."
   type        = bool
   default     = false
 }
@@ -172,9 +185,9 @@ variable "require_two_developer_approvals_reconcile_minutes" {
 }
 ```
 
-All four variables are wired through `terraform/main.tf` →
+All five variables are wired through `terraform/main.tf` →
 `agent_vars` module → `github_actions_variable` resources named
-`DEVELOPER_BOT_LOGIN`, `REQUIRE_TWO_DEVELOPER_APPROVALS`,
+`PROTECTED_PR_AUTHOR_LOGINS`, `REQUIRED_APPROVAL_COUNT`, `REQUIRE_TWO_DEVELOPER_APPROVALS`,
 `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`, and
 `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES`. The
 branch-protection module gains a new input
@@ -186,10 +199,10 @@ generation suffix) that is referenced only when the opt-in is on.
 
 | Alternative | Reason rejected |
 |-------------|-----------------|
-| Reuse `developer-author` (which stores `app/<slug>`) and derive the login by stripping `app/` and appending `[bot]` | `developer-author` is a reusable-workflow input today, not a Terraform-managed Actions variable. The status-check workflow needs to resolve the identity at `pull_request` / `pull_request_review` event time where it cannot inherit a reusable input from an unrelated workflow. A new Actions variable is the natural fit. Terraform can still cross-check that `developer_bot_login` is consistent with the login form, but the two configuration surfaces remain independent so operators can rotate them separately. Grooming for #580 explicitly chose "explicit input over derivation" ([`docs/design/resolve-conflicts-developer-author.md`](resolve-conflicts-developer-author.md) Decision 1); the same reasoning applies here. |
+| Reuse `developer-author` (which stores one `app/<slug>`) | It cannot represent a configurable list, and it is a reusable-workflow input rather than an Actions variable available to this independent workflow. A JSON Actions variable is the natural fit. |
 | Add a boolean key inside an existing JSON Actions variable (e.g. a new `two_developer_approvals` key in `AUTO_TRIGGER_AGENTS`) | `AUTO_TRIGGER_AGENTS` is about applying `agent:*` labels at SDLC transitions — a different domain. Overloading it would make its contract less cohesive and complicate the `fromJSON(vars.AUTO_TRIGGER_AGENTS)` consumers in `agent-auto-trigger.yml`. A dedicated boolean is clearer. |
 | Expose only a module-level input on the branch-protection module and skip the Actions variable | The workflow needs to know, independently of the ruleset, whether to compute the check result at all. Without the Actions variable, the workflow would run against every PR, make API calls, and emit either `success` or `failure` — but there would be nothing in the ruleset referencing it, so a `failure` would be ignored. That is wasteful and surprising. Having both the Actions variable (consumed by the workflow) and the module input (consumed by the ruleset) keeps the two sides in step and makes the opt-in reversible in a single `terraform apply`. |
-| Hardcode `mfrancza-developer-agent[bot]` in the workflow (as `agent-pr-merged.yml`, `agent-respond-review.yml`, `agent-fix-checks.yml` do today) | Explicitly disallowed by the issue constraints. The hardcoded uses in those three workflows were considered-but-out-of-scope in [`docs/design/auto-review-author-gate.md`](auto-review-author-gate.md); this feature is the first use site added since that doc that **cannot** hardcode (per issue text), so it establishes `DEVELOPER_BOT_LOGIN` as the shared Actions variable the eventual follow-up conversion of those three sites can also use. |
+| Hardcode one protected identity or threshold in the workflow | It prevents adopters from protecting multiple identities or selecting their policy without editing trusted workflow code. |
 
 ### Decision 3 — Conditional required-check wiring in `branch-protection` module
 
@@ -247,7 +260,7 @@ New module variables:
 
 ```hcl
 variable "require_two_developer_approvals" {
-  description = "When true, add the two-approvals status check as a required check on main-protection, gating developer-agent PRs until two qualifying approvals exist. Defaults to false."
+  description = "When true, add the approvals status check as a required check on main-protection. The workflow gates only authors in PROTECTED_PR_AUTHOR_LOGINS until they meet REQUIRED_APPROVAL_COUNT. Defaults to false."
   type        = bool
   default     = false
 }
@@ -295,7 +308,7 @@ through to the module. External adopters that use the published
 | Use a separate ruleset scoped to the required status check only | Multiple rulesets on the same branch stack, but splitting across two rulesets makes the policy harder to reason about and audit. Keeping all branch rules in one ruleset mirrors the existing shape. |
 | Enforce via `strict_required_status_checks_policy = true` (require the check to be from the latest head SHA) | Not needed and interacts awkwardly with `pull_request_review` events, which don't change the head SHA. The workflow handles staleness correctly on its own by always re-reading reviews from the API at run time. |
 
-### Decision 4 — "Qualifying approval" semantics
+### Decision 4 — Configurable scope and "qualifying approval" semantics
 
 **Decision.** The workflow groups reviews by reviewer login, keeps only
 the **latest** review state per reviewer, and treats the review as
@@ -303,22 +316,27 @@ the **latest** review state per reviewer, and treats the review as
 
 1. State is `APPROVED` (not `COMMENTED`, `CHANGES_REQUESTED`, `DISMISSED`,
    or `PENDING`).
-2. Reviewer login is **not** the configured `DEVELOPER_BOT_LOGIN`.
+2. Reviewer login is **not** the PR author's login.
 
 The check conclusion is `success` iff the count of qualifying approvals is
-≥ 2. All other `APPROVED` reviews count — including from the reviewer
+at least `REQUIRED_APPROVAL_COUNT`. The custom threshold is evaluated only
+when the PR author's login appears in `PROTECTED_PR_AUTHOR_LOGINS`; otherwise
+the per-PR outcome is immediately `success`. All other `APPROVED` reviews count — including from the reviewer
 agent, from Copilot, and from any human reviewer (regardless of whether
 GitHub itself would count the approval for the `required_approving_review_count`
 rule).
 
-**Rationale.** This matches the issue text verbatim: "A review written by
-the developer agent itself does not count toward the two." The issue's
+**Rationale.** The default list and threshold match the issue text, while
+the configuration permits the same mechanism to protect more than one author
+identity and to require another count. Excluding the PR author rather than a
+single configured bot makes self-review exclusion correct for every protected
+identity. The issue's
 "Human authors, the reviewer agent, and any other bot are unchanged"
 sentence refers to **PR authors**, not review authors — it carves out the
 scope of the gate, not the counting rule. GitHub's own `required_approving_review_count = 1`
 rule continues to insist on at least one write-access approval on top of
 our custom check (see Decision 1), so a developer-agent PR with the opt-in
-on can only merge with ≥1 write-access human approval AND ≥2 non-self
+on can only merge with ≥1 write-access human approval AND the configured number of non-self
 approvals. In practice this means a reviewer-agent approval alone cannot
 satisfy both gates, which matches the existing [`docs/design/code-review-agent.md`](code-review-agent.md)
 posture.
@@ -327,7 +345,7 @@ posture.
 
 | Alternative | Reason rejected |
 |-------------|-----------------|
-| Exclude all bot approvals (any login ending in `[bot]`) from the count | Would make the reviewer agent's `APPROVE` not count toward the two. The reviewer agent's approval is already advisory for the base `required_approving_review_count = 1` rule (read-only Contents permission), so excluding it from our custom count too would make the practical merge gate "≥2 human approvals". Possibly desirable, but the issue text does not demand it and this design keeps the simpler, verbatim interpretation. If operators later want "≥2 **human** approvals", a follow-up can add an opt-in flag to exclude `[bot]` identities — strictly stricter than the shipping behavior. |
+| Exclude all bot approvals (any login ending in `[bot]`) from the count | Would make the reviewer agent's `APPROVE` not count. The reviewer agent's approval is already advisory for the base `required_approving_review_count = 1` rule (read-only Contents permission), so excluding it from the custom count too would make the practical merge gate require the configured number of human approvals. This remains a possible future policy flag, but is distinct from configurable author scope and count. |
 | Replicate GitHub's write-access rule exactly (count only approvals from users with write access on the repo) | Requires an extra API call per reviewer to resolve collaborator permissions, adds a failure mode, and still arrives at the same effective merge gate when combined with `required_approving_review_count = 1` (because that rule already enforces the write-access filter). Not worth the extra surface. |
 | Count reviews in all states, not just `APPROVED` | Would conflate `COMMENTED` with approval and double-count stale `CHANGES_REQUESTED` reviews that were later superseded by an `APPROVED` review. GitHub's own count uses latest-per-reviewer `APPROVED`; mirroring that is the least surprising behavior. |
 
@@ -617,7 +635,8 @@ reconciliation* (a `closed` event always runs so Decision 8a can
 recompute sibling check-runs; a `synchronize` or `ready_for_review`
 event always runs even on a draft because of the draft-handling
 contract above), the
-`DEVELOPER_BOT_LOGIN` / `REQUIRE_TWO_DEVELOPER_APPROVALS` variable reads,
+`PROTECTED_PR_AUTHOR_LOGINS` / `REQUIRED_APPROVAL_COUNT` /
+`REQUIRE_TWO_DEVELOPER_APPROVALS` variable reads,
 and the trusted-ref selection for `helpers-ref`. The reusable holds the
 composite-action invocation and the four-step helper-checkout bootstrap
 (AGENTS.md § "Reusable workflows: self-checkout for helper actions").
@@ -748,13 +767,13 @@ handles each with a specific publication posture:
 2. **Opt-in ON, configuration valid.** The publisher computes the
    qualifying-approval count per Decision 4 and publishes
    `success` / `failure` on the enforcing context.
-3. **Opt-in ON, `DEVELOPER_BOT_LOGIN` empty (misconfiguration).** The
-   activity emits `::error::DEVELOPER_BOT_LOGIN must be set when
-   REQUIRE_TWO_DEVELOPER_APPROVALS is true` and publishes `failure` on
-   the enforcing context for every PR (not just dev-agent PRs), so the
-   misconfiguration surfaces visibly rather than silently letting agent
-   PRs through on a single approval or silently blocking only a subset
-   of authors.
+3. **Opt-in ON, invalid scope or threshold (misconfiguration).** If
+   `PROTECTED_PR_AUTHOR_LOGINS` is empty, malformed JSON, or contains a
+   duplicate/empty login, or `REQUIRED_APPROVAL_COUNT` is not a positive
+   integer, the activity emits an error and publishes `failure` on the
+   enforcing context for every PR. It cannot safely select the protected
+   subset or compute its threshold, so failing every PR visibly is safer
+   than silently letting protected PRs through.
 
 **Activation reconciliation across the full ON ↔ OFF cycle.**
 Flipping `require_two_developer_approvals` from `false` to `true` in
@@ -798,7 +817,7 @@ workflow stay in sync via a single source of truth.
 
 Operators must bump the generation integer every time they
 re-enable the gate after any OFF interval during which approvals,
-PR authors, or `DEVELOPER_BOT_LOGIN` could have changed (operationally:
+PR authors, the protected-author list, or the threshold could have changed (operationally:
 every ON transition after the first). Terraform's `terraform plan`
 output will show the ruleset's required-check `context` field
 changing, so the bump is visible in review. The ruleset now requires
@@ -860,8 +879,8 @@ on compliant PRs instead of fail-closed red).
 |-------------|-----------------|
 | Publish `success` on the enforcing context when the opt-in is off | Was the original design; the OFF-mode success can satisfy the newly enforcing rule on an unchanged head SHA when the opt-in is flipped ON, allowing an already-open developer-agent PR to merge with fewer than two approvals. Replaced by "preview-context only in OFF mode" per the Decision above. |
 | Skip the job entirely when the opt-in is off | The preview-context posting is a cheap signal that lets maintainers see what the gate would do if enabled, catching misconfiguration before activation. Keeping the publisher running also keeps the end-to-end wiring exercised. |
-| Fail open (treat empty login as "no PRs match → always success") when the opt-in is on | Silently defeats the whole feature. Explicitly against the issue's intent. |
-| Fail closed on only the dev-agent-author path when the login is empty | Insufficient: without `DEVELOPER_BOT_LOGIN` the publisher cannot tell which PRs are dev-agent-authored, so it cannot know which subset to block. Blocking every PR with `::error::` is the correct behaviour because the misconfiguration genuinely prevents the gate from working on *any* PR. |
+| Fail open (treat invalid scope as "no PRs match → always success") when the opt-in is on | Silently defeats the whole feature. |
+| Fail closed on only the protected-author path when scope is invalid | Insufficient: without a valid list the publisher cannot tell which subset to block. Blocking every PR with an error is the correct behaviour because the misconfiguration prevents the gate from working on *any* PR. |
 | Enable in a single step (flip both Terraform and the Actions variable in the same `terraform apply`) | Also acceptable because the fail-closed posture holds between the two apply operations — Terraform sequences the ruleset change before the Actions-variable change within one apply only when the dependency graph requires it, and in this repo they are independent resources. The two-step document still recommends the backfill because the ruleset flip alone does not re-post anything on existing open PRs, so the backfill is where the operator confirms activation worked. |
 | Keep a fixed context name and rely only on the operator-run backfill to invalidate prior ON-interval successes | Was the previous draft; the reviewer identified an ON → OFF → ON cycle where approvals change *while OFF* (so the prior success is still the most-recent check-run under the fixed context when the gate re-enables) and the stale success is reused. The generation counter in the Decision above removes this failure mode structurally: a bumped generation makes the previous success invisible to the ruleset's required-check lookup regardless of whether the operator remembers to run the backfill. The backfill then exists purely to make the transition green quickly, not to defend correctness. |
 | Encode the generation in the ruleset `required_check` entry only (not in the context name) | GitHub rulesets evaluate check-runs by exact context name — there is no "generation" field on the `required_check` entry. Encoding the generation in the name itself is the only mechanism that makes prior check-runs invisible without requiring the operator to also invalidate them. |
@@ -1025,17 +1044,17 @@ has that SHA as its head**, the activity:
    head has moved since step 1).
 3. For each remaining candidate, applies the per-PR qualifying rule
    from Decision 4:
-   - If PR author is **not** `DEVELOPER_BOT_LOGIN`, the per-PR
+   - If PR author is **not** in `PROTECTED_PR_AUTHOR_LOGINS`, the per-PR
      outcome is `success` (Requirement 6).
-   - If PR author **is** `DEVELOPER_BOT_LOGIN`, re-fetches reviews
+   - If PR author **is** in `PROTECTED_PR_AUTHOR_LOGINS`, re-fetches reviews
      via `GET /repos/{owner}/{repo}/pulls/{number}/reviews`, counts
-     latest-per-reviewer `APPROVED` reviews excluding
-     `DEVELOPER_BOT_LOGIN`, and the per-PR outcome is `success` iff
-     count ≥ 2.
+     latest-per-reviewer `APPROVED` reviews excluding that PR's author,
+     and the per-PR outcome is `success` iff count ≥
+     `REQUIRED_APPROVAL_COUNT`.
 4. Publishes a single check-run for `liveHeadSha` under the generation
    context name with `conclusion = success` iff **every** candidate
-   PR's per-PR outcome is `success` (strictest wins — if any dev-PR
-   needs 2 and has fewer, the whole SHA is `failure`). The
+   PR's per-PR outcome is `success` (strictest wins — if any protected
+   PR has fewer than its configured threshold, the whole SHA is `failure`). The
    `output.summary` lists the candidate PR numbers and each one's
    per-PR outcome so reviewers can see why the SHA was blocked.
 
@@ -1204,13 +1223,13 @@ rejected in the Alternatives table below with their reasons.
   a non-dev PR whose head is not shared with any dev PR: the single
   candidate's outcome is `success` and the published conclusion is
   `success` with no delay.
-- A non-dev PR that happens to share a SHA with an under-approved
-  dev-agent PR will see its merge blocked until the dev PR is either
+- A non-protected PR that happens to share a SHA with an under-approved
+  protected PR will see its merge blocked until that PR is either
   approved to the required count, closed, or has its head advanced to
   a different SHA. This is the only correct outcome — the shared
   commit is the thing being merged, and the gate's purpose is to
-  demand two approvals on that commit when any proposer is the dev
-  agent. The non-dev PR author can advance their head by one no-op
+  demand the configured threshold on that commit when any protected
+  proposer is present. The non-protected PR author can advance their head by one no-op
   commit to split the SHA if they need to unblock their own merge
   without approving the dev PR.
 - When the departing path (close or synchronize to a new head) does
@@ -1224,7 +1243,7 @@ rejected in the Alternatives table below with their reasons.
 - An attacker cannot borrow a non-dev PR's `success` to merge a
   shared-SHA dev-agent PR with 0 approvals, because the shared-SHA
   publisher strictly intersects per-PR outcomes.
-- Two dev-agent PRs with different approval counts on the same SHA
+- Two protected PRs with different approval counts on the same SHA
   intersect to the lower approval count's outcome, which is
   consistent with "the SHA is only safe to merge when every proposer
   of this SHA has met the bar".
@@ -1370,19 +1389,22 @@ end-to-end validation on a scratch PR under Issue #665.
    merge is blocked until the second approval re-lands. This is the
    specific defect the generation counter prevents. (Covers
    Decision 7.)
-9. **Opt-in on with empty login** — set the Actions variable to the
-   opt-in on and leave `DEVELOPER_BOT_LOGIN` empty. Every PR (human,
-   agent, bot) must see `::error::` and a `failure` conclusion.
-   (Covers Decision 7.)
+9. **Opt-in on with invalid configuration** — set the opt-in on and test
+   each invalid configuration: an empty protected-author list, malformed
+   JSON, duplicate/empty list member, and a zero/non-integer threshold.
+   Every PR must see an error and a `failure` conclusion. Also verify a
+   list with two protected identities applies the same configured threshold
+   to either author and that each author's own review is excluded only from
+   that author's PR. (Covers Decisions 2, 4, and 7.)
 10. **Shared head SHA — human + developer** — open two PRs whose head
     branches point at the same commit SHA, one authored by a human
     and one by the developer agent with 0 qualifying approvals. The
     published check-run on the shared SHA must be `failure`; the
     human PR must be blocked from merging as long as the dev PR's
     requirement is unmet. (Covers Decision 8a.)
-11. **Shared head SHA — two dev-agent PRs with different approval
-    counts** — open two developer-agent PRs on the same head SHA, one
-    with 2 qualifying approvals and one with 1. The published
+11. **Shared head SHA — two protected PRs with different approval
+    counts** — open two protected PRs on the same head SHA, one meeting
+    the configured threshold and one one approval short. The published
     check-run on the shared SHA must be `failure` (the strictest wins)
     regardless of the order in which the two PRs' publishers run.
     (Covers Decision 8a.)
@@ -1466,7 +1488,7 @@ The following must be updated in the same PR as the implementation (per
 AGENTS.md § "Keeping Documentation Current"):
 
 - `AGENTS.md`:
-  - Add `DEVELOPER_BOT_LOGIN`, `REQUIRE_TWO_DEVELOPER_APPROVALS`,
+  - Add `PROTECTED_PR_AUTHOR_LOGINS`, `REQUIRED_APPROVAL_COUNT`, `REQUIRE_TWO_DEVELOPER_APPROVALS`,
     `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`, and
     `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES` to the
     "Terraform-managed … Actions variables" list in the documentation-update
@@ -1517,18 +1539,18 @@ AGENTS.md § "Keeping Documentation Current"):
   activity on the human PR; also auto-unblocked within the sweep
   interval even if the per-event cleanup was dropped by
   pending-run replacement).
-- `terraform/modules/agent-vars/README.md`: document the four new
-  Actions variables (`DEVELOPER_BOT_LOGIN`,
+- `terraform/modules/agent-vars/README.md`: document the five new
+  Actions variables (`PROTECTED_PR_AUTHOR_LOGINS`, `REQUIRED_APPROVAL_COUNT`,
   `REQUIRE_TWO_DEVELOPER_APPROVALS`,
   `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`, and
   `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES`) and the usage
   example.
 - `terraform/terraform.tfvars.example`: show commented-out example values
-  for `developer_bot_login`, `require_two_developer_approvals`, and
+  for `protected_pr_author_logins`, `required_approval_count`, `require_two_developer_approvals`, and
   `require_two_developer_approvals_check_generation`.
 - `docs/adopting.md`: add a section for external adopters explaining
-  the identity-configuration contract (set `developer_bot_login` to
-  their own App's `<slug>[bot]`), the enable/disable + backfill
+  the policy-configuration contract (set `protected_pr_author_logins` and
+  `required_approval_count`), the enable/disable + backfill
   procedure, the generation-counter bump requirement on re-enable,
   the override path for
   `require_two_developer_approvals_check_integration_id` when they
@@ -1588,38 +1610,13 @@ AGENTS.md § "Keeping Documentation Current"):
   Net effect: a dev-agent PR with only the reviewer agent approving fails
   both gates; with the reviewer agent plus one write-access human
   approving, it satisfies both gates.
-- **Hardcoded `mfrancza-developer-agent[bot]` sites in
-  `agent-pr-merged.yml`, `agent-respond-review.yml`,
-  `agent-fix-checks.yml`.** This feature introduces `DEVELOPER_BOT_LOGIN`
-  as a shared source of truth. A follow-up could migrate those three
-  hardcoded sites to the same variable, but that is explicitly out of
-  scope here per Issue [#559](https://github.com/mfrancza/agentic-development-workflow/issues/559)'s
-  design decision (see Decision 1 of [`docs/design/auto-review-author-gate.md`](auto-review-author-gate.md)).
 
 ## Out of scope
 
-- **Migrating the three hardcoded `mfrancza-developer-agent[bot]` sites**
-  in `agent-pr-merged.yml`, `agent-respond-review.yml`, and
-  `agent-fix-checks.yml` to `DEVELOPER_BOT_LOGIN`. Deliberately deferred
-  to a focused follow-up; see the cross-reference above.
-- **A separate "require N approvals" generalisation** (e.g. configurable
-  review count). The issue specifies two; a configurable count can be
-  added later with no breaking changes.
 - **Automatically dismissing the reviewer-agent's advisory `APPROVE`** when
   it isn't paired with a human approval. Out of scope — the status quo
   already correctly treats the reviewer agent's approval as non-blocking
   for `required_approving_review_count = 1`.
-- **Replacing `developer-author` on `agent-resolve-conflicts-reusable.yml`
-  with `DEVELOPER_BOT_LOGIN`.** Two configuration surfaces are
-  maintained in parallel on purpose — one in the `app/<slug>` search-qualifier
-  form and one in the `<slug>[bot]` login form. A consistency check could
-  be added later via a Vitest static test that asserts
-  `DEVELOPER_BOT_LOGIN` and `developer_author` resolve to the same App.
-- **Covering review requirements for the designer agent, reviewer agent, or
-  grooming agent authored PRs.** Only the designer agent realistically
-  opens PRs under its own identity today, and the issue scope is explicitly
-  the developer agent. If the scope expands, a sibling boolean (e.g.
-  `require_two_designer_approvals`) can be added using the same mechanism.
 - **Scheduled re-posting of the check on long-open PRs *in the common
   case*.** Event-driven triggers cover every state change that matters
   in the normal path. The scheduled
@@ -1645,15 +1642,15 @@ AGENTS.md § "Keeping Documentation Current"):
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#661](https://github.com/mfrancza/agentic-development-workflow/issues/661) | Terraform: add `developer_bot_login`, `require_two_developer_approvals`, `require_two_developer_approvals_check_generation`, and `require_two_developer_approvals_reconcile_minutes` top-level variables; wire through `terraform/main.tf` to the `agent-vars` module (which exposes them as `DEVELOPER_BOT_LOGIN`, `REQUIRE_TWO_DEVELOPER_APPROVALS`, `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`, and `REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES` Actions variables) and to the `branch-protection` module. Extend `branch-protection` with the four new inputs (`require_two_developer_approvals`, `require_two_developer_approvals_check_context` defaulting to `null` and composed via the locals in Decision 3, `require_two_developer_approvals_check_integration_id` defaulted to 15368, and `require_two_developer_approvals_check_generation` defaulted to 1) and the dynamic `required_status_checks` block in the ruleset. Document the admin-bypass caveat, the generation-counter semantics, the shared-SHA cross-PR note, the modified-notifier residual risk, the reconcile-sweep interval trade-off, and the two-step enable/disable + backfill procedure in both module READMEs and `terraform.tfvars.example`. | — |
-| [#662](https://github.com/mfrancza/agentic-development-workflow/issues/662) | TypeScript activity + composite action: implement `.github/scripts/src/check-two-developer-approvals.ts` and `.github/actions/check-two-developer-approvals/action.yml`. Activity reads inputs `developer-bot-login`, `require-two-developer-approvals`, `check-generation`, `pr-number`, `pr-author`, `event-head-sha`, `event-name`, `event-before-sha`, `repo`; fetches the PR and reviews via Octokit **inside** the serialization boundary (Decision 8), resolves all open PRs that share `liveHeadSha` and applies the strictest-wins intersection from Decision 8a, groups latest-per-reviewer per PR, counts qualifying approvals, and publishes the check conclusion via the Checks API against `liveHeadSha` under context `require-two-developer-approvals-g${generation}` (enforcing) or `require-two-developer-approvals-g${generation} (preview)` (opt-in off, per Decision 7). Always publishes against `liveHeadSha` even when it disagrees with the event SHA (Decision 8). On `pull_request_target: synchronize` and `pull_request_target: closed`, also runs the Decision 8a departed-SHA reconciliation against the departing SHA (`event-before-sha` for synchronize; `event-head-sha` of the closed PR for closed) and republishes the intersected check-run on that SHA under the per-SHA concurrency lock. Honours the draft-handling contract: skips the main path on draft PRs except when the triggering event is `ready_for_review`. Fails loudly per Decision 7. Unit tests cover the full matrix in Decision 9 that is unit-testable (counting, self-exclusion, DISMISSED, opt-in-off → preview context only, opt-in-on + empty login → `::error::` + failure, event-SHA ≠ live-SHA → publishes against live SHA, two-PR same-SHA strictest-wins intersection, departed-SHA reconciliation on closure and on synchronize, draft-to-ready reconciliation with unchanged head). | — |
-| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add `require-two-developer-approvals-publisher.yml` (caller stub, triggered by `pull_request_target: [opened, reopened, synchronize, edited, ready_for_review, closed]` and `workflow_run`), `require-two-developer-approvals-notify.yml` (empty, zero-permission `pull_request_review` trigger; **MUST set `name: require-two-developer-approvals-notify`** so the publisher's `workflow_run.workflows:` filter matches — see Decision 5), and the paired reusable with the four-step helper-checkout bootstrap. Also add `require-two-developer-approvals-backfill.yml` (`workflow_dispatch` only) that fans out across open PRs for the Decision 7 opt-in reconciliation, **and** `require-two-developer-approvals-reconcile.yml` (triggered by `schedule: cron: "* * * * *"` — a build-time literal — and `workflow_dispatch`) that is the Decision 8a pending-replacement safety net; the reconcile workflow enumerates all open PRs, deduplicates to unique live head SHAs, and runs the Decision 8a strictest-wins intersection once per SHA under its own repository-wide concurrency group `require-two-developer-approvals-reconcile` with `cancel-in-progress: false`. The effective sweep interval is enforced by the activity's own early-exit guard reading `vars.REQUIRE_TWO_DEVELOPER_APPROVALS_RECONCILE_MINUTES` and querying `GET /actions/workflows/require-two-developer-approvals-reconcile.yml/runs?status=success&per_page=10` (excluding `GITHUB_RUN_ID`): if the most recent prior successful run completed less than `minutes` minutes ago, the activity exits 0. The default is 10 minutes with a floor of 1; this contract — per-minute cron + early-exit guard — is deliberate so smaller values are a real reduction in sweep latency, which `cron: "*/10 * * * *"` could not provide. All publisher/notifier/backfill stubs set the per-PR concurrency group with `cancel-in-progress: false` per Decision 8, and the publisher additionally takes a secondary per-head-SHA concurrency group per Decision 8a (both for the live-head publication and for the departed-SHA reconciliation sibling job, each in its own job because Actions supports one `concurrency` block per job). The publisher's `workflow_run` leg caller stub MUST copy both the `|| github.event.workflow_run.id` fallback in the concurrency group key AND the `if: github.event.workflow_run.pull_requests[0] != null` guard on the job from `agent-fix-checks.yml` so fork-headed trigger runs (where `workflow_run.pull_requests` is empty) do not collapse the group key or invoke the reusable with an empty `pr-number`. The publisher's departed-SHA sibling job must restrict its no-op condition to the case where the triggering PR is **still open** at `liveHeadSha` so that `pull_request_target: closed` with an unchanged head still reconciles. Publisher stubs read `vars.DEVELOPER_BOT_LOGIN`, `vars.REQUIRE_TWO_DEVELOPER_APPROVALS`, and `vars.REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION` and pass them to the reusable, which invokes the composite action from Issue #662. Publisher stubs pass `event-name` and `event-before-sha` (populated from `github.event.before` on `synchronize`; from `github.event.pull_request.head.sha` on `closed`) so the activity can run the departed-SHA reconciliation. Publisher stubs select the trusted `helpers-ref: ${{ github.sha }}` per Decision 5 on both legs (base-branch HEAD under both `pull_request_target` and `workflow_run`). | Issue #662 |
-| [#664](https://github.com/mfrancza/agentic-development-workflow/issues/664) | Documentation: update `AGENTS.md` (new workflows in the Repository Layout note, new Actions variables in the doc-update checklist, branch-protection-immutability bullet, admin-bypass caveat cross-reference, honest modified-notifier degradation cross-reference) and `docs/adopting.md` (section for external adopters covering `developer_bot_login`, `require_two_developer_approvals_check_integration_id` override, the generation-counter bump requirement on re-enable, the shared-SHA cross-PR note, the departed-SHA reconciliation behaviour, the modified-notifier residual-risk discussion with the honest effective-gate-degradation statement, and the enable/disable + backfill procedure). | Issue #661, Issue #663 |
-| [#665](https://github.com/mfrancza/agentic-development-workflow/issues/665) | End-to-end validation: execute every acceptance test in Decision 9 against a scratch repository configured per the Decision 10 docs, including the fork-PR publication case, the extended trust-anchor "PR modifies the gate" case (publisher + reusable + composite action + activity + notifier + spoof-publisher workflow all in one PR) with the honest 3a/3b assertions (authoritative-publisher correctness and the one-approval-under-attack effective-gate-degradation case), the integration_id binding case, the stale-event replacement (three-run interleaving) case, the OFF → ON → OFF → ON cycle with dismissal while OFF, the three same-SHA cross-PR cases, the draft-to-ready reconciliation case, the departed-SHA reconciliation on close with the unchanged-head sub-case that specifically triggers the Decision 8a `liveHeadSha == departingSha` guard, the departed-SHA reconciliation on synchronize, **and** the pending-run replacement sweep test (Decision 9 item 16) which must assert the sweep workflow reconciles a shared-SHA block within its interval when the per-event cleanup was dropped. Also exercise the misconfiguration path (opt-in on + empty login). | Issues #661, #662, #663, #664 |
+| [#661](https://github.com/mfrancza/agentic-development-workflow/issues/661) | Terraform: add `protected_pr_author_logins` (non-empty unique list), `required_approval_count` (positive integer), `require_two_developer_approvals`, generation, and reconcile-interval variables; expose the first two as JSON `PROTECTED_PR_AUTHOR_LOGINS` and numeric `REQUIRED_APPROVAL_COUNT` Actions variables. Wire all values to the publisher, branch-protection module, examples, and operator documentation. | — |
+| [#662](https://github.com/mfrancza/agentic-development-workflow/issues/662) | TypeScript activity + composite action: implement the approval check. Read `protected-pr-author-logins` and `required-approval-count` inputs, validate the JSON list and positive integer before making any author decision, and fail every PR visibly when invalid. For each protected PR, exclude its own author from latest-per-reviewer `APPROVED` reviews and compare against the configured threshold; non-protected PRs pass immediately. Preserve the Decision 8/8a serialization, shared-SHA, departed-SHA, draft, and generation contracts. Unit tests cover two protected identities, custom thresholds, invalid JSON/list/count, and author-specific self-exclusion in addition to Decision 9. | — |
+| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add the publisher, zero-permission named notifier, backfill, reconcile workflow, and paired reusable defined in Decisions 5, 7, 8, and 8a. Publisher stubs pass `vars.PROTECTED_PR_AUTHOR_LOGINS`, `vars.REQUIRED_APPROVAL_COUNT`, `vars.REQUIRE_TWO_DEVELOPER_APPROVALS`, and generation to the reusable. Preserve the documented trusted-ref, `workflow_run` null guard/fallback, per-PR/per-SHA concurrency, departed-SHA, and per-minute sweep contracts. | Issue #662 |
+| [#664](https://github.com/mfrancza/agentic-development-workflow/issues/664) | Documentation: update `AGENTS.md`, module READMEs, examples, and `docs/adopting.md` for `protected_pr_author_logins` / `PROTECTED_PR_AUTHOR_LOGINS` and `required_approval_count` / `REQUIRED_APPROVAL_COUNT`, including JSON format, threshold validation, and the existing activation, shared-SHA, bypass, and residual-risk contracts. | Issue #661, Issue #663 |
+| [#665](https://github.com/mfrancza/agentic-development-workflow/issues/665) | End-to-end validation: execute Decision 9, including multiple protected authors, a non-default threshold, author-specific self-exclusion, and every invalid configuration path, alongside the fork, spoofing, concurrency, activation, shared-SHA, draft, and departed-SHA cases. | Issues #661, #662, #663, #664 |
 
 Issues #661 and #662 are independent and can proceed in parallel — the
-contract (variable names `DEVELOPER_BOT_LOGIN`,
-`REQUIRE_TWO_DEVELOPER_APPROVALS`, and
+contract (variable names `PROTECTED_PR_AUTHOR_LOGINS`,
+`REQUIRED_APPROVAL_COUNT`, `REQUIRE_TWO_DEVELOPER_APPROVALS`, and
 `REQUIRE_TWO_DEVELOPER_APPROVALS_CHECK_GENERATION`; enforcing
 check-context name composed as
 `require-two-developer-approvals-g${generation}`; preview context
