@@ -22,11 +22,11 @@ exempted in the docs: cross-repo (org-ruleset) Actions origins and
 third-party checks on an Actions-associated SHA may also be suppressed,
 and a time-based backstop is the only delivery-independent fallback.
 Introduce a repo-wide `FIX_CHECKS_ALLOW` Actions variable (JSON array
-of check names, default `[]`) that the caller stub consults on the
-`check_run` branch of the trigger (and the polling backstop consults on
-every PR). An empty list disables fix handling until an operator
-explicitly opts a displayed check name in; the `workflow_run.workflows`
-list remains the separate delivery subscription for same-repository Actions.
+of check-run names, default `[]`) that the resolver and polling backstop
+consult for **every** delivery path. An empty list disables fix handling
+until an operator explicitly opts a name in; the `workflow_run.workflows`
+list remains the separate delivery subscription for same-repository Actions,
+not an alternative authorization mechanism.
 Preserve the existing agent-authored trust gate; dedupe per PR via (a) a two-job
 stub whose reusable-call job uses `needs.resolve-pr.outputs.pr_number`
 as the concurrency key — the same group used by the polling backstop so
@@ -59,7 +59,7 @@ Restated requirements, in the design's own words:
 2. **Caller-configured allowlist by check name.** The allowlist is
    names of **checks** (e.g. `"CodeQL"`, `"Lint"`), not workflow file
    names, because third-party checks have no workflow file at all. An empty
-   list allows no `check_run` or polled checks. The default is empty. Callers set the list via a
+   list allows no checks from any delivery path. The default is empty. Callers set the list via a
    repository Actions variable without editing the reusable workflow —
    matching the `AUTO_TRIGGER_AGENTS` / `AGENT_ALLOWLIST` pattern already
    used in this repo.
@@ -98,15 +98,19 @@ Restated requirements, in the design's own words:
   these are the conclusions GitHub treats as blocking a required-check
   policy. `cancelled`, `skipped`, `stale`, and `neutral` are not failures
   and must not start the agent.
-- **Which check names does the allowlist match against?** The
-  `check_run` event payload's `check_run.name` field. For a (cross-repo
-  or third-party) GitHub Actions-authored job this is the job name as
-  displayed in the PR check list (not the workflow file name, and not
-  the workflow `name:` key). Document this explicitly in the stub
-  comment so operators look at the PR's "Checks" tab rather than at
-  `.github/workflows/*.yml` to find the right string. The allowlist is
-  applied again by the post-lock guard to every delivery path; same-repo
-  Actions also need their workflow in the stub's `workflows:` list.
+- **Which check names does the allowlist match against?** The canonical
+  value is the Checks API `check_runs[].name` string. For a `check_run`
+  delivery this is exactly `github.event.check_run.name`; for
+  `workflow_run`, polling, and the post-lock guard, query the same Checks
+  API for the resolved head SHA and compare its `name` field. The PR Checks
+  tab may decorate a name as `workflow / job`, so it is a discovery aid but
+  not the canonical copy source. The stub comment must direct operators to
+  copy the raw name from `gh api repos/$OWNER/$REPO/commits/$SHA/check-runs
+  --jq '.check_runs[].name'` (or the equivalent REST response), not a
+  workflow file name, workflow `name:`, or a rendered UI label. The
+  allowlist is applied again by the post-lock guard to every delivery path;
+  same-repo Actions also need their workflow in the stub's `workflows:`
+  list.
 
 ## Design
 
@@ -197,8 +201,8 @@ is being replaced.
 `workflow_dispatch:` for manual triggering. The polling job lists every
 **open PR authored by `mfrancza-developer-agent[bot]`** that does **not**
 carry the `human-required` label (via `gh pr list --author
-"mfrancza-developer-agent[bot]" --search "-label:human-required"`), calls
-`gh pr checks --json name,bucket,state` for each, applies
+"mfrancza-developer-agent[bot]" --search "-label:human-required"`), queries
+the Checks API for each PR head SHA (`GET /commits/{sha}/check-runs`), and applies
 `FIX_CHECKS_ALLOW` to the result, and — for every PR where at least one
 allowed check is in a failing conclusion (`failure`, `timed_out`,
 `action_required`) — invokes the same reusable workflow
@@ -305,8 +309,14 @@ delivery-independent.
 
 ### Decision 2: PR resolution — payload first, fall back to SHA lookup
 
-**Decision.** The `resolve-check-pr` activity accepts the event name and
-branches on it:
+**Decision.** The `resolve-check-pr` activity accepts `event_name`,
+`token`, `repository`, and the JSON `allowed-checks` list. It branches on
+the event name to resolve the PR and then queries the Checks API for the
+resolved head SHA. `proceed=true` only when that canonical check-run list
+contains an allowed actionable failure. Its outputs are `pr_number`,
+`head_sha`, and `proceed`.
+
+The resolution portion branches as follows:
 
 - **`workflow_run` event:** read `workflow_run.pull_requests[0].number`
   and `workflow_run.head_sha` from the payload. If `pull_requests[]` is
@@ -322,6 +332,13 @@ branches on it:
   observed `head_sha`; use the first open PR whose head SHA matches.
 - If no PR is resolved, emit `proceed=false` so the dependent reusable
   call is skipped.
+- **Allowlist reconciliation (both events):** call
+  `GET /repos/{owner}/{repo}/commits/{head_sha}/check-runs` and compare
+  `check_runs[].name` (the canonical allowlist string from the clarifying
+  resolution) against `allowed-checks`. Emit `proceed=true` only if an
+  allowed check has conclusion `failure`, `timed_out`, or
+  `action_required`. A missing, malformed, or empty allowlist emits
+  `proceed=false` without a reusable call.
 
 The activity also emits `head_sha` so the reusable workflow can pass it
 through to the container (used by the Decision 4c freshness guard).
@@ -333,6 +350,13 @@ established activity pattern (see `AGENTS.md` § "Workflow Activity
 Conventions" and the `resolve-deployment` activity as the closest
 exemplar — it already uses `listPullRequestsAssociatedWithCommit` for the
 same mapping shape).
+
+**Why the reconciliation is required.** A `workflow_run` payload names a
+workflow, not an individual check run, so it cannot enforce a check-name
+allowlist by itself. Resolving the PR then reading the Checks API makes the
+same fail-closed policy apply to `workflow_run`, `check_run`, and polling.
+It also avoids assuming that `gh pr checks --json name` and the rendered
+Checks tab use an identical display string.
 
 **Why the two-step resolution.** GitHub populates `pull_requests[]` on
 `check_run` payloads for same-repo workflow checks, but typically leaves
@@ -363,46 +387,48 @@ never observed in practice.
 **Decision.** Add a Terraform variable `fix_checks_allow` (`list(string)`,
 default `[]`) exposed via `github_actions_variable` as
 `FIX_CHECKS_ALLOW`, mirroring `AGENT_ALLOWLIST` and `REVIEWER_MODELS`.
-The caller stub consults it only on the `check_run` branch of the trigger.
-The `workflow_run` branch is independently opt-in because its
-`workflows:` list explicitly enumerates same-repo workflows. The `if:` on
-the resolver job (see Decision 4 for the two-job structure):
+The allowlist is a universal, fail-closed authorization boundary: it applies
+to `workflow_run`, `check_run`, the polling backstop, and the container
+guard. `workflow_run.workflows` selects delivery subscriptions only; it
+never authorizes a fix pass by itself. The resolver job's `if:` performs
+only the event's actionable-conclusion whitelist, then passes the variable
+to `resolve-check-pr` for canonical name matching:
 
 ```yaml
 if: >
-  (github.event_name == 'workflow_run' &&
-   (github.event.workflow_run.conclusion == 'failure' ||
-    github.event.workflow_run.conclusion == 'timed_out' ||
-    github.event.workflow_run.conclusion == 'action_required')) ||
+  vars.FIX_CHECKS_ALLOW != '' &&
+  ((github.event_name == 'workflow_run' &&
+    (github.event.workflow_run.conclusion == 'failure' ||
+     github.event.workflow_run.conclusion == 'timed_out' ||
+     github.event.workflow_run.conclusion == 'action_required')) ||
   (github.event_name == 'check_run' &&
    (github.event.check_run.conclusion == 'failure' ||
     github.event.check_run.conclusion == 'timed_out' ||
-    github.event.check_run.conclusion == 'action_required') &&
-   vars.FIX_CHECKS_ALLOW != '' &&
-   contains(fromJSON(vars.FIX_CHECKS_ALLOW), github.event.check_run.name))
+    github.event.check_run.conclusion == 'action_required')))
 ```
 
 **Operator-precedence note.** The three conclusion comparisons are
-parenthesised as a single group before the `&&` with the allowlist
-check. GitHub Actions expressions evaluate `&&` before `||`
+parenthesised as a single group before the outer `&&` with the non-empty
+allowlist guard. GitHub Actions expressions evaluate `&&` before `||`
 (`https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#operators`),
 so without the outer parens around the conclusion group the expression
-would read as `failure || timed_out || (action_required && allowed)`.
-That would bypass the allowlist for `failure` and `timed_out`, defeating
-the opt-in safety boundary. The validation task includes explicit cases
-for an *unlisted* check at each supported conclusion (`failure`,
+would bypass the fail-closed precondition for `failure` and `timed_out`.
+The resolver performs the exact check-name membership test after it has a
+PR and a canonical Checks API snapshot. The validation task includes
+explicit cases for an *unlisted* check at each supported conclusion (`failure`,
 `timed_out`, `action_required`) to catch regressions of this grouping.
 
 The leading `vars.FIX_CHECKS_ALLOW != ''` guard prevents `fromJSON('')`
 when Terraform has not yet provisioned the variable. An absent or empty
-variable is deliberately **disabled**, not fail-open: no `check_run` or
-polled check can start the agent until an operator adds its exact display
-name to the JSON array.
+variable is deliberately **disabled**, not fail-open: no delivery path can
+start the agent until an operator adds its exact canonical Checks API name
+to the JSON array. The resolver treats `[]` identically, so malformed or
+empty policy cannot reach token minting, image setup, or the container.
 
 The `workflow_run` branch deliberately uses the same three-conclusion
 actionable set. This keeps same-repo Actions event delivery immediate for
-`timed_out` and `action_required` rather than making those outcomes wait
-for the polling backstop.
+`timed_out` and `action_required` once its check-run name is explicitly
+allowed, rather than making those outcomes wait for the polling backstop.
 
 **Why repo-wide (not per-PR).** The allowlist expresses operator policy
 ("this check is safe and useful for the agent to handle in this repo"),
@@ -455,8 +481,11 @@ jobs:
         uses: ./.github/actions/resolve-check-pr
         with:
           event_name: ${{ github.event_name }}
-          # The activity reads either the check_run payload or the
-          # workflow_run payload depending on event_name; see Decision 2.
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          allowed-checks: ${{ vars.FIX_CHECKS_ALLOW }}
+          # The activity reads the event payload, resolves the PR, then
+          # queries the head SHA's Checks API names; see Decisions 2 and 3.
 
   fix-checks:
     needs: resolve-pr
@@ -466,7 +495,7 @@ jobs:
       cancel-in-progress: false
     uses: ./.github/workflows/agent-fix-checks-reusable.yml
     with:
-      pr-number: ${{ fromJSON(needs.resolve-pr.outputs.pr_number) }}
+      pr-number: ${{ needs.resolve-pr.outputs.pr_number }}
       head-sha-at-trigger: ${{ needs.resolve-pr.outputs.head_sha }}
       # … existing agent-login / image / helpers-ref inputs …
 ```
@@ -532,10 +561,14 @@ sufficient** for requirement 3. Two real races remain:
 
 **Guard.** `action_fix_checks()` grows a short preamble, run after
 `gh pr checkout` and before `run_agent`. The guard reads the allowlist
-from `FIX_CHECKS_ALLOW` (passed through to the container as an env var
-by the reusable workflow — a one-line plumbing addition) and the
-trigger-time HEAD SHA from `GITHUB_HEAD_SHA_AT_TRIGGER` (passed as an
-env var via the new `head-sha-at-trigger` reusable-workflow input), and
+from `FIX_CHECKS_ALLOW` and the trigger-time HEAD SHA from
+`GITHUB_HEAD_SHA_AT_TRIGGER`. Issue #658 must plumb both values through
+three explicit layers: the reusable workflow input/Run-agent step `env:`,
+the `run-agent` composite action's optional-environment forwarding list,
+and finally Docker's `-e` flags. This is deliberately **not** a one-line
+change: without the reusable `env:` binding and matching
+`_opt_env+=(-e …)` entries, the container sees neither value. The guard
+then
 distinguishes two classes of pending check so a pending-check completion
 cannot permanently discard the failure that triggered the run:
 
@@ -554,9 +587,10 @@ cannot permanently discard the failure that triggered the run:
   trigger or polling tick picks the failure back up. This check runs
   before the pending-check classification so an escalated PR with
   pending checks does not enter the bounded wait.
-- **Snapshot.** Enumerate current PR checks via `gh pr checks
-  "$GITHUB_PR_NUMBER" --json name,state,bucket --jq ...`. Apply the
-  allowlist throughout: a check whose name does not appear in
+- **Snapshot.** Enumerate current PR checks using the Checks API for the
+  checked-out head SHA (`GET /repos/$GITHUB_REPO/commits/$HEAD/check-runs`),
+  not `gh pr checks --json name`. Apply the
+  allowlist to canonical `check_runs[].name` values throughout: a check whose name does not appear in
   `FIX_CHECKS_ALLOW` is excluded from both the failing-set and the
   pending-set the guard considers.
 - **Pending-check classification by HEAD SHA.** Compare the container's
@@ -564,7 +598,7 @@ cannot permanently discard the failure that triggered the run:
   - **HEAD changed since trigger** → allowed pending checks are
     *stale replacement* checks for the fix the in-flight run already
     pushed. Perform a bounded wait (default 15 min, overridable via
-    `FIX_CHECKS_WAIT_SECONDS`) polling `gh pr checks` until every
+    `FIX_CHECKS_WAIT_SECONDS`) polling the same Checks API until every
     allowed check is terminal **or** the timeout fires, then
     re-evaluate.
   - **HEAD unchanged since trigger** → allowed pending checks are
@@ -574,7 +608,7 @@ cannot permanently discard the failure that triggered the run:
     future `agent-fix-checks` run on whatever conclusion they report.
     Proceed to the final evaluation immediately so the failure that
     triggered *this* run is addressed now.
-- **Final evaluation.** Re-run `gh pr checks` (post-wait if we waited)
+- **Final evaluation.** Re-run the same Checks API query (post-wait if we waited)
   and apply the allowlist:
   - If any allowed check is in a failing conclusion (`failure`,
     `timed_out`, `action_required`), fall through to `run_agent`.
@@ -721,18 +755,19 @@ permission grants.
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#656](https://github.com/mfrancza/agentic-development-workflow/issues/656) | Terraform: add `fix_checks_allow` variable (`list(string)`, default `[]`), expose as `FIX_CHECKS_ALLOW` Actions variable via `github_actions_variable` in `terraform/modules/agent-vars/`, update `terraform.tfvars.example` with an explicit check-name example and document that an empty list disables check-run/polling handling, extend `AGENTS.md`'s Terraform Actions-variable list to reference the new var | — |
-| [#657](https://github.com/mfrancza/agentic-development-workflow/issues/657) | `resolve-check-pr` TypeScript activity + composite action: `.github/scripts/src/resolve-check-pr.ts` accepts `event_name` and branches between `check_run` and `workflow_run` payload shapes (both resolve via `pull_requests[0]` first, then `listPullRequestsAssociatedWithCommit(head_sha)`); outputs `pr_number`, `head_sha`, and `proceed`; `.github/actions/resolve-check-pr/action.yml` thin wrapper; vitest tests under `.github/scripts/test/` covering both event types and the fallback paths; follows the composite-action portability pattern (`${{ github.action_path }}/../../scripts`, Resolve-scripts-directory step) | — |
-| [#658](https://github.com/mfrancza/agentic-development-workflow/issues/658) | Caller stub + reusable workflow rewiring using a **hybrid** trigger: `.github/workflows/agent-fix-checks.yml` subscribes to both explicit same-repo `workflow_run.workflows` and `check_run: [completed]`; split the stub into resolver + dependent reusable-call jobs keyed by `needs.resolve-pr.outputs.pr_number`; add the conclusion-whitelist + `FIX_CHECKS_ALLOW` opt-in filter on the resolver `if:` (including an empty/missing-variable fail-closed guard); extend the reusable workflow to accept `head-sha-at-trigger` and plumb `FIX_CHECKS_ALLOW` through to the container; use the pinned checkout SHA with `persist-credentials: false`; update operator documentation for the opt-in policy | Issue #656, Issue #657 |
-| [#667](https://github.com/mfrancza/agentic-development-workflow/issues/667) | Entrypoint freshness / duplicate-work guard in `action_fix_checks()` (`docker/scripts/entrypoint.sh`): after `gh pr checkout` and before `run_agent`, short-circuit `human-required`, enumerate checks with the `FIX_CHECKS_ALLOW` allowlist applied throughout, classify allowed pending checks by `GITHUB_HEAD_SHA_AT_TRIGGER`, bounded-wait only stale replacements, and invoke the agent only when an allowed check remains failing. Read `FIX_CHECKS_ALLOW` and `GITHUB_HEAD_SHA_AT_TRIGGER` from env and cover the guard with shell tests. | Issue #658 |
-| [#668](https://github.com/mfrancza/agentic-development-workflow/issues/668) | Scheduled polling backstop workflow `.github/workflows/agent-fix-checks-poll.yml`: schedule + manual dispatch; enumerate open agent PRs without `human-required`, apply `FIX_CHECKS_ALLOW`, and dispatch only PRs with an allowed failing check (even if allowed checks are pending). Use the shared concurrency group and freshness guard for dedup; document the opt-in operator knobs and the human-required re-enable gesture. | Issue #656, Issue #658, Issue #667 |
-| [#659](https://github.com/mfrancza/agentic-development-workflow/issues/659) | End-to-end validation: prove an unlisted cross-repo/third-party check never dispatches (event-driven or polled); prove adding its exact display name to `FIX_CHECKS_ALLOW` enables each origin independently; prove selected same-repo workflows still require their `workflow_run.workflows` subscription and deliver each actionable conclusion (`failure`, `timed_out`, `action_required`) immediately; cover all three actionable conclusions, burst dedup, pending-check safety, polling dedup, human-PR exclusion, escalation stop/re-enable, and empirical `check_run` delivery coverage. | Issue #658, Issue #667, Issue #668 |
+| [#656](https://github.com/mfrancza/agentic-development-workflow/issues/656) | Terraform: add `fix_checks_allow` variable (`list(string)`, default `[]`), expose as `FIX_CHECKS_ALLOW` Actions variable via `github_actions_variable` in `terraform/modules/agent-vars/`, update `terraform.tfvars.example` with an explicit **Checks API name** example and document that an empty list disables all fix-checks delivery, extend `AGENTS.md`'s Terraform Actions-variable list to reference the new var | — |
+| [#657](https://github.com/mfrancza/agentic-development-workflow/issues/657) | `resolve-check-pr` TypeScript activity + composite action: accept `event_name`, `token`, `repository`, and `allowed-checks`; resolve either payload via `pull_requests[0]` first, then `listPullRequestsAssociatedWithCommit(head_sha)`; query the resolved SHA's Checks API to apply the canonical-name allowlist; output `pr_number`, `head_sha`, and `proceed`; add vitest coverage for both payload shapes, fallback paths, empty/unlisted lists, and workflow-run reconciliation | — |
+| [#658](https://github.com/mfrancza/agentic-development-workflow/issues/658) | Caller stub + reusable workflow rewiring using a **hybrid** trigger: `.github/workflows/agent-fix-checks.yml` subscribes to both explicit same-repo `workflow_run.workflows` and `check_run: [completed]`; fail closed for missing/empty `FIX_CHECKS_ALLOW`, split into resolver + dependent reusable-call jobs keyed by `needs.resolve-pr.outputs.pr_number`, and let the resolver apply canonical Checks API membership for both origins; extend the reusable workflow to accept `head-sha-at-trigger`, put both `FIX_CHECKS_ALLOW` and `GITHUB_HEAD_SHA_AT_TRIGGER` in the Run-agent step `env:`, and update `.github/actions/run-agent/action.yml` to forward both optional env vars into Docker; use the pinned checkout SHA with `persist-credentials: false`; update operator documentation for the universal opt-in policy | Issue #656, Issue #657 |
+| [#667](https://github.com/mfrancza/agentic-development-workflow/issues/667) | Entrypoint freshness / duplicate-work guard in `action_fix_checks()` (`docker/scripts/entrypoint.sh`): after `gh pr checkout` and before `run_agent`, short-circuit `human-required`, enumerate canonical Checks API names with the `FIX_CHECKS_ALLOW` allowlist applied throughout, classify allowed pending checks by `GITHUB_HEAD_SHA_AT_TRIGGER`, bounded-wait only stale replacements, and invoke the agent only when an allowed check remains failing. Treat missing/empty allowlist as skip and cover the guard with shell tests. | Issue #658 |
+| [#668](https://github.com/mfrancza/agentic-development-workflow/issues/668) | Scheduled polling backstop workflow `.github/workflows/agent-fix-checks-poll.yml`: schedule + manual dispatch; enumerate open agent PRs without `human-required`, use canonical Checks API names to apply `FIX_CHECKS_ALLOW`, and dispatch only PRs with an allowed failing check (even if allowed checks are pending). Use the shared concurrency group and freshness guard for dedup; document the opt-in operator knobs and the human-required re-enable gesture. | Issue #656, Issue #658, Issue #667 |
+| [#659](https://github.com/mfrancza/agentic-development-workflow/issues/659) | End-to-end validation: prove an unlisted check never dispatches from any origin; prove adding its exact canonical Checks API name enables each origin independently; prove selected same-repo workflows still require `workflow_run.workflows` and deliver each actionable conclusion (`failure`, `timed_out`, `action_required`) immediately; prove `check_run.name` equals the Checks API name used by the poller/guard for every origin; cover burst dedup, pending-check safety, polling dedup, human-PR exclusion, escalation stop/re-enable, and empirical `check_run` delivery coverage. | Issue #658, Issue #667, Issue #668 |
 
 Issues #656 and #657 are independent of each other — one defines the
 Actions variable contract (`FIX_CHECKS_ALLOW`, JSON array, default `[]`,
-fail-closed when empty);
-the other defines the composite action contract (inputs: `event_name`,
-`token`, `repository`; outputs: `proceed`, `pr_number`, `head_sha`).
+fail-closed when empty); the other defines the composite action contract
+(inputs: `event_name`, `token`, `repository`, `allowed-checks`; outputs:
+`proceed`, `pr_number`, `head_sha`) and applies the canonical Checks API
+name match.
 Issue #658 integrates both, wires the hybrid trigger, and restructures
 the stub into the resolver + reusable-call job pair. The entrypoint
 guard task (#667) depends on Issue #658 only for the
