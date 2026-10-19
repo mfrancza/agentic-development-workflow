@@ -1212,3 +1212,21 @@ must have `contents: read` (inherited only where the reusable already grants
 it) plus its own four-step helpers-ref bootstrap before local-composite
 detect/mint/gate steps. The wrapper's nested-worker reference must use
 `uses: $/.github/workflows/agent-review-worker-reusable.yml`, never `./`.
+
+For #649 caller cleanup, every explicit-secrets caller stub must pass the
+optional resolver-App secrets through to its reusable:
+`ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}` and
+`ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{
+secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}`. This applies to
+`agent-design.yml`, `agent-implement.yml`, `agent-review.yml`,
+`agent-respond-review.yml`, and `agent-auto-trigger.yml`; #650 already
+specifies the same passthrough for `agent-groom.yml`. Without these explicit
+maps, the reusable's optional `workflow_call` secrets are empty and every
+team-reference allowlist fails closed with `credential-unavailable`.
+
+`agent-review.yml` must retain its existing job-level `permissions:` block
+(`contents: write` and `pull-requests: write`) when its caller-level
+concurrency moves into the reusable. Its workflow-level `permissions: {}`
+remains deny-all. The outer job's grant is the ceiling for both nested
+reusables, so removing it would prevent helper checkout and
+`resolveReviewThread` even though the inner wrapper declares the same scopes.
