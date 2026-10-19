@@ -91,6 +91,17 @@ jobs:
             echo "::error::Activity entry file(s) above import a sibling entry file — move the shared logic into .github/scripts/src/lib/."
             STATUS=1
           fi
+          # GitHub list endpoints return 30 items per page by default. The
+          # container scripts have no unit tests, so an unpaginated reviews
+          # fetch silently hid the newest reviews from respond-review once a
+          # PR passed 30 reviews (#677). Every gh api read of a reviews or
+          # comments list in a container script must pass --paginate.
+          if grep -rnE --include='*.sh' 'gh api [^|]*/(reviews|comments)\b' docker/ \
+              | grep -v -- '--paginate' \
+              | grep -vE -- '-X (POST|PUT|PATCH|DELETE)|--method'; then
+            echo "::error::Unpaginated gh api list read(s) above — add --paginate so results past the first 30 are not dropped."
+            STATUS=1
+          fi
           exit "$STATUS"
 
       # Execute every activity entrypoint the same way the composite actions

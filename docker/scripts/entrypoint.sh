@@ -430,7 +430,7 @@ action_respond_review() {
     COMMITS_SINCE_BASE="$(git log --pretty='format:%h %s' "${BASE_SHA}..HEAD")"
 
     log "Fetching reviews and comments (IDs preserved for replies)"
-    REVIEWS_JSON="$(gh api "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" --jq '[.[] | {id, user: .user.login, state, body, submitted_at}]')"
+    REVIEWS_JSON="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" --jq '[.[] | {id, user: .user.login, state, body, submitted_at}]')"
     INLINE_COMMENTS_JSON="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/comments" --jq '[.[] | {id, in_reply_to_id, pull_request_review_id, user: .user.login, path, line, body, created_at}]')"
     ISSUE_COMMENTS_JSON="$(gh api --paginate "repos/${GITHUB_REPO}/issues/${GITHUB_PR_NUMBER}/comments" --jq '[.[] | {id, user: .user.login, body, created_at}]')"
 
@@ -511,24 +511,23 @@ request_rereview() {
 
     log "Detected HEAD change; requesting re-review from all currently assigned reviewers on PR #${pr_number}"
 
-    local pr_author_login auth_login pending_json reviewed_json users_json teams_json
+    local pr_author_login auth_login pending_json reviewer_logins users_json teams_json
     pr_author_login="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}" --jq '.user.login' 2>/dev/null || echo "")"
     auth_login="$(gh api user --jq '.login' 2>/dev/null || echo "")"
 
     pending_json="$(gh api "repos/${GITHUB_REPO}/pulls/${pr_number}/requested_reviewers" 2>/dev/null)" || pending_json='{"users":[],"teams":[]}'
-    reviewed_json="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${pr_number}/reviews" 2>/dev/null | jq -s 'add // []')" || reviewed_json='[]'
+    # Fetch only the reviewer logins, never the full review objects: on a PR
+    # with many reviews the bodies exceed the kernel's 128 KiB per-argument
+    # limit, and passing them via --argjson failed jq with "Argument list too
+    # long" (exit 126). Logins are fed to jq on stdin, which has no size limit.
+    reviewer_logins="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${pr_number}/reviews" --jq '.[].user.login' 2>/dev/null)" || reviewer_logins=''
 
-    users_json="$(jq -nc \
-        --argjson pending "$pending_json" \
-        --argjson reviewed "$reviewed_json" \
-        --arg pr_author "$pr_author_login" \
-        --arg auth_user "$auth_login" \
-        '($pending.users // []) + ($reviewed // [])
-         | map(.user.login // .login)
-         | map(select(. != null and . != "" and . != $pr_author and . != $auth_user))
-         | unique')"
-    teams_json="$(jq -nc --argjson pending "$pending_json" \
-        '($pending.teams // []) | map(.slug) | unique')"
+    users_json="$( { jq -r '(.users // [])[].login' <<<"$pending_json"; printf '%s\n' "$reviewer_logins"; } \
+        | jq -Rnc \
+            --arg pr_author "$pr_author_login" \
+            --arg auth_user "$auth_login" \
+            '[inputs | select(. != "" and . != $pr_author and . != $auth_user)] | unique')" || users_json='[]'
+    teams_json="$(jq -c '(.teams // []) | map(.slug) | unique' <<<"$pending_json")" || teams_json='[]'
 
     local user_count team_count
     user_count="$(echo "$users_json" | jq 'length')"
