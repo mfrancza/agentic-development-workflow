@@ -31,12 +31,13 @@ image-prep cost of both modes to seconds:
   and is reproducible across adopters.
 - **Feedback-path workflows** keep building from source (preserving the
   no-GHCR escape hatch described above), building the `docker/` tree
-  checked out at `helpers-ref`. The `run-agent` build step uses the
-  published `:main` image as a BuildKit registry cache source. Unchanged
-  layers (OS install, CLI installs — the slow 60–120 s portion) are reused
-  from the registry; a landed `docker/` change on `main` invalidates the
-  affected layer inputs so the next feedback-path run rebuilds those
-  layers against the updated `:main` cache.
+  checked out at `helpers-ref`. The `run-agent` build step best-effort
+  `docker pull`s the published `:main` image and then runs
+  `docker build --cache-from` against it, so unchanged layers (OS
+  install, CLI installs — the slow 60–120 s portion) are reused from the
+  local image store populated by the pull; a landed `docker/` change on
+  `main` invalidates the affected layer inputs so the next feedback-path
+  run rebuilds those layers against the updated `:main` cache.
 
 Source-build without any cache remains the behavior external callers get
 when the registry cache is unreachable, so the escape hatch for local dev
@@ -66,15 +67,23 @@ notes the resolution so a reviewer can push back:
    commit; only `agent-respond-review` sees a PR-related SHA, and even
    there it is the merge commit rather than the PR head.)
 2. **Strategy — pre-built image, GHA cache, or something else?** Pre-built
-   image for pull mode, registry-backed BuildKit cache (`type=registry`,
-   read-only, pointing at the published `:main` tag) for build mode.
+   image for pull mode. For build mode: best-effort `docker pull` of the
+   published `:main` tag followed by `docker build --cache-from` against
+   the pulled reference, reusing the inline cache metadata that
+   `release-images.yml` embeds in `:main`. This driver-agnostic path
+   avoids the `docker/setup-buildx-action` dependency a BuildKit
+   `type=registry` cache importer would need (that importer requires the
+   containerd image store, which the default `docker`/overlay2 driver on
+   `ubuntu-24.04` runners does not provide — see the Design section's
+   "Why the plain `docker build --cache-from` pattern" rationale).
    Freshness guarantee: the main-path pulled image is at most one `main`
    push behind HEAD (push-to-main republishes `:main` whenever `docker/**`
    changes); the build-mode cache is advisory and never silently serves
-   stale layers (BuildKit invalidates cache for any changed layer input).
-   Reproducibility: operators who need a frozen image reference can set
-   `developer_image = ghcr.io/.../developer:v<N>` in their `terraform.tfvars`
-   instead of the default `:main`.
+   stale layers (Docker Engine invalidates cache for any changed layer
+   input, and a `docker pull` failure degrades to a plain cacheless
+   build). Reproducibility: operators who need a frozen image reference
+   can set `developer_image = ghcr.io/.../developer:v<N>` in their
+   `terraform.tfvars` instead of the default `:main`.
 3. **Must source-build mode remain available?** Yes. External callers
    without GHCR access, local developers running `docker run` by hand, and
    this repo's own feedback workflows all depend on `run-agent` falling
@@ -394,8 +403,13 @@ these workflows run.
 - `AGENTS.md`: update the `DEVELOPER_IMAGE` / `REVIEWER_IMAGE` descriptions
   to reflect Terraform management (today they claim Terraform management
   that does not exist) and link the new `:main` tag publishing cadence.
-  Mention the `type=registry` cache behavior in the "Pinned action SHAs"
-  context (as the reason we did not need to allow-list a buildx action).
+  In the "Pinned action SHAs" / "Both images are published to GHCR"
+  context, describe the `docker pull "${CACHE_REF}" || true` +
+  `docker build --cache-from "${CACHE_REF}"` cache-reuse path for
+  build-mode runs — and explain that this path is why no
+  `docker/setup-buildx-action` (or any other non-GitHub-owned action)
+  needed to be added to the `patterns_allowed` list to deliver the
+  feedback-path speedup.
 - `README.md`: add `developer_image` / `reviewer_image` to the Terraform
   variable list and mention them in the "Reproduce this yourself" section
   for operators who want the pull-mode optimisation locally.
