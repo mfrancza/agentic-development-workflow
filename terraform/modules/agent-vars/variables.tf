@@ -4,8 +4,13 @@ variable "repository" {
 }
 
 variable "agent_allowlist" {
-  description = "GitHub usernames (and agent bot identities like `<developer-agent-app-slug>[bot]`) permitted to trigger agent workflows (grooming, implement, review, etc.). Include the agent bots themselves so they can apply `agent:*` labels — e.g. an agent applying `agent:review` on its own PR to request a code review. Stored as a repository Actions variable so workflow `if` conditions can reference it without hardcoding names in YAML."
+  description = "GitHub identities permitted to trigger agent workflows (grooming, implement, review, etc.). Each entry may be an individual GitHub login (user or bot, such as `mfrancza-developer-agent[bot]`) or an `org/team-slug` reference (such as `Brale-xyz/dev`). Team references are resolved at trigger time by the in-reusable gate step; there is no companion AGENT_ALLOWLIST_RESOLVED variable or scheduled resolver. Include the agent bots themselves so they can apply `agent:*` labels — e.g. an agent applying `agent:review` on its own PR to request a code review. Stored as a repository Actions variable so workflows can reference it without hardcoding identities in YAML."
   type        = list(string)
+
+  validation {
+    condition     = alltrue([for entry in var.agent_allowlist : entry != "" && length(regexall("/", entry)) <= 1])
+    error_message = "Each agent_allowlist entry must be non-empty and contain at most one '/'. Use an individual login or an org/team-slug reference."
+  }
 }
 
 variable "default_model" {
@@ -15,15 +20,25 @@ variable "default_model" {
 }
 
 variable "admin_assignees" {
-  description = "GitHub usernames to assign to issues and PRs that require human action (e.g. when the agent applies the human-required label and needs a human in the loop). Stored as a JSON-encoded repository Actions variable ADMIN_ASSIGNEES so workflows can parse and assign without hardcoding usernames in YAML."
+  description = "GitHub identities to assign to issues and PRs that require human action (e.g. when the agent applies the human-required label and needs a human in the loop). Each entry may be an individual GitHub login (user or bot, such as `mfrancza-developer-agent[bot]`) or an `org/team-slug` reference (such as `Brale-xyz/dev`). Stored as a JSON-encoded repository Actions variable ADMIN_ASSIGNEES so workflows can parse and assign without hardcoding identities in YAML."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for entry in var.admin_assignees : entry != "" && length(regexall("/", entry)) <= 1])
+    error_message = "Each admin_assignees entry must be non-empty and contain at most one '/'. Use an individual login or an org/team-slug reference."
+  }
 }
 
 variable "code_reviewers" {
-  description = "GitHub usernames to request as PR reviewers when human code review is needed (e.g. when the agent opens a PR and wants human sign-off). Stored as a JSON-encoded repository Actions variable CODE_REVIEWERS so workflows can request reviewers without hardcoding usernames in YAML."
+  description = "GitHub identities to request as PR reviewers when human code review is needed (e.g. when the agent opens a PR and wants human sign-off). Each entry may be an individual GitHub login (user or bot, such as `mfrancza-developer-agent[bot]`) or an `org/team-slug` reference (such as `Brale-xyz/dev`). Stored as a JSON-encoded repository Actions variable CODE_REVIEWERS so workflows can request reviewers without hardcoding identities in YAML."
   type        = list(string)
   default     = []
+
+  validation {
+    condition     = alltrue([for entry in var.code_reviewers : entry != "" && length(regexall("/", entry)) <= 1])
+    error_message = "Each code_reviewers entry must be non-empty and contain at most one '/'. Use an individual login or an org/team-slug reference."
+  }
 }
 
 variable "protected_pr_author_logins" {
