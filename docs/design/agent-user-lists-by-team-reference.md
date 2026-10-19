@@ -1195,3 +1195,20 @@ and the groom entrypoint expansion both depend on the expander *and* the
 identity decision (so the credential is available to wire in). The
 documentation task depends on the Terraform task's variable surface and the
 identity decision. End-to-end validation depends on all other tasks.
+
+### Task-breakdown implementation clarifications
+
+For #649 acceptance test **(s)**, "caller `concurrency:` blocks removed"
+means there must be **no `concurrency:` key at either workflow scope or job
+scope** in any of the six caller stubs. This is material for
+`agent-respond-review.yml`, whose existing lock is workflow-scoped: leaving it
+there would allow an unauthorized `authorize` job to enter the protected group
+before failing. The corresponding lock belongs on the reusable `work` job (or
+the `agent-review` wrapper job) only.
+
+For #649 acceptance test **(t)**, the `agent-review` wrapper must retain
+`contents: write` and `pull-requests: write`, and every new `authorize` job
+must have `contents: read` (inherited only where the reusable already grants
+it) plus its own four-step helpers-ref bootstrap before local-composite
+detect/mint/gate steps. The wrapper's nested-worker reference must use
+`uses: $/.github/workflows/agent-review-worker-reusable.yml`, never `./`.
