@@ -35,7 +35,6 @@ jobs:
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
       generation: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION }}
       pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
-      pr-author: ${{ github.event.pull_request.user.login || github.event.workflow_run.pull_requests[0].user.login }}
       head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
       repo: ${{ github.repository }}
       helpers-ref: ${{ github.sha }}

@@ -25,10 +25,6 @@ on:
         description: Pull request number to evaluate.
         required: true
         type: number
-      pr-author:
-        description: Author login from the triggering pull request event.
-        required: true
-        type: string
       head-sha:
         description: Head SHA from the triggering pull request event.
         required: true

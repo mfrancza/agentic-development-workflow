@@ -613,9 +613,8 @@ jobs:
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
       generation: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION }}
-      pr-number: ${{ github.event.pull_request.number }}
-      pr-author: ${{ github.event.pull_request.user.login }}
-      head-sha: ${{ github.event.pull_request.head.sha }}
+      pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+      head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
       repo: ${{ github.repository }}
       helpers-ref: v0
 ```
@@ -1891,10 +1890,11 @@ A caller stub copied from this guide before that release does not pass them.
 **Fix:** Add the two lines to the `with:` block of your caller stub and, if
 missing, the author-inequality line to the `if:` condition:
 
+<!-- prettier-ignore -->
 ```yaml
-with:
-  review-author: ${{ github.event.review.user.login }}
-  pr-author: ${{ github.event.pull_request.user.login }}
+    with:
+      review-author: ${{ github.event.review.user.login }}
+      pr-author: ${{ github.event.pull_request.user.login }}
 ```
 
 The full current stub is in the

@@ -38,7 +38,6 @@ jobs:
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
       generation: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION }}
       pr-number: ${{ matrix.pr.number }}
-      pr-author: ''
       head-sha: ${{ matrix.pr.sha }}
       repo: ${{ github.repository }}
       helpers-ref: ${{ github.sha }}
