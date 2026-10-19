@@ -1,0 +1,318 @@
+# Design: Avoid rebuilding the agent image unnecessarily
+
+**Issue:** [#643](https://github.com/mfrancza/agentic-development-workflow/issues/643)
+
+## Summary
+
+Every agent workflow run spends ~90–150 seconds rebuilding the developer or
+reviewer Docker image. The `run-agent` composite action already supports a
+pull mode, and four caller stubs (`agent-groom`, `agent-design`,
+`agent-implement`, `agent-review`) wire the `DEVELOPER_IMAGE` /
+`REVIEWER_IMAGE` Actions variables through to it — but those variables are
+not managed by Terraform and so default to empty in a greenfield install,
+leaving every workflow in build mode. The four feedback-path caller stubs
+(`agent-fix-checks`, `agent-fix-deployment`, `agent-resolve-conflicts`,
+`agent-respond-review`) deliberately hardcode `image: ''` so they always
+build from source, which lets them pick up in-progress `docker/` changes
+on a PR branch — but they pay the full rebuild cost on every run even when
+`docker/` has not changed.
+
+This design keeps the existing two-mode split intact and reduces the per-run
+image-prep cost of both modes to seconds:
+
+- **Main-path workflows** (groom, design, implement, review) pull a floating
+  `:main` tag that is republished whenever `docker/**` lands on `main`. The
+  underlying `DEVELOPER_IMAGE` / `REVIEWER_IMAGE` Actions variables become
+  Terraform-managed so the pull-mode default survives a `terraform apply`
+  and is reproducible across adopters.
+- **Feedback-path workflows** keep building from source so they still exercise
+  PR-level changes to `docker/`, but the `run-agent` build step uses the
+  same published `:main` image as a BuildKit registry cache source. Unchanged
+  layers (OS install, CLI installs — the slow 60–120 s portion) are reused
+  from the registry; only PR-modified layers are rebuilt.
+
+Source-build without any cache remains the behavior external callers get
+when the registry cache is unreachable, so the escape hatch for local dev
+and private forks is preserved by default.
+
+## Requirements (from issue #643 and grooming Q&A)
+
+Issue [#643](https://github.com/mfrancza/agentic-development-workflow/issues/643)
+describes the problem in one sentence: "The image gets rebuilt each run —
+avoid this to reduce run times." The grooming agent posted four clarifying
+questions that remained unanswered at design-start time; this document
+resolves each ambiguity explicitly rather than waiting on human input, and
+notes the resolution so a reviewer can push back:
+
+1. **Scope — which workflows should stop rebuilding?** All eight
+   agent-container caller stubs, but with two strategies (see the Summary):
+   pull-mode default for the four main-path workflows; cached source-build
+   for the four feedback-path workflows. Resolution: addressing only the
+   four main-path workflows leaves half the runs paying full rebuild cost;
+   addressing all eight with a single pull-only strategy would silently
+   break the "feedback workflows exercise PR-level `docker/` changes"
+   semantic that `agent-fix-checks` and `agent-respond-review` rely on.
+2. **Strategy — pre-built image, GHA cache, or something else?** Pre-built
+   image for pull mode, registry-backed BuildKit cache (`type=registry`,
+   read-only, pointing at the published `:main` tag) for build mode.
+   Freshness guarantee: the main-path pulled image is at most one `main`
+   push behind HEAD (push-to-main republishes `:main` whenever `docker/**`
+   changes); the build-mode cache is advisory and never silently serves
+   stale layers (BuildKit invalidates cache for any changed layer input).
+   Reproducibility: operators who need a frozen image reference can set
+   `developer_image = ghcr.io/.../developer:v<N>` in their `terraform.tfvars`
+   instead of the default `:main`.
+3. **Must source-build mode remain available?** Yes. External callers
+   without GHCR access, local developers running `docker run` by hand, and
+   this repo's own feedback workflows all depend on `run-agent` falling
+   back to a plain `docker build`. The cache source is pointed at a public
+   image; a 404 or network failure degrades silently to a cacheless build,
+   not a hard failure.
+4. **Measurable target.** Baseline: median image-prep step duration across
+   the last 10 runs of each of the eight agent-container workflows (expected
+   ~90–150 s). Target: median <15 s for pull-mode runs and <30 s for cached
+   build-mode runs when `docker/**` is unchanged in the triggering PR. The
+   final sub-issue (end-to-end validation) measures both and posts the
+   comparison back on this design PR.
+
+Repo-conventions requirements the design must respect without re-arguing
+them (see `AGENTS.md`):
+
+- The two-mode split (pull vs. build) and the composite action's `image`
+  input are the ratified mechanism (`AGENTS.md` → "Both images are
+  published to GHCR"); this design extends it, not replace it.
+- Any new third-party action requires a coordinated allowlist entry in
+  `terraform/main.tf`'s `patterns_allowed` (see "Repo-specific security
+  defaults" → "Pinned action SHAs"). This design avoids that cost by using
+  `docker buildx build` with the default BuildKit driver (pre-installed on
+  `ubuntu-24.04`) rather than adding `docker/setup-buildx-action`.
+- Variables added to Terraform follow the existing pattern in
+  [`terraform/modules/agent-vars/main.tf`](../../terraform/modules/agent-vars/main.tf)
+  (one `github_actions_variable` per operator-settable value, matching
+  output, documented default in `terraform.tfvars.example`).
+- The published image path is set by
+  [`.github/workflows/release-images.yml`](../../.github/workflows/release-images.yml);
+  that file is the source of truth for image tagging and must be edited
+  there (per `AGENTS.md` → "Volatile facts live at their sources").
+
+## Design
+
+### Terraform-managed image references
+
+Add two variables to `terraform/variables.tf` and expose them as the
+`DEVELOPER_IMAGE` / `REVIEWER_IMAGE` Actions variables that the caller stubs
+already read:
+
+```hcl
+variable "developer_image" {
+  description = "Pre-built developer image reference consumed by agent-groom, agent-design, and agent-implement via the DEVELOPER_IMAGE Actions variable. Empty string means build from docker/ source (slower but no GHCR dependency). The recommended value after image publishing is wired up is ghcr.io/<owner>/<repo>/developer:main — pinned to the floating major tag (e.g. :v1) for stricter reproducibility."
+  type        = string
+  default     = ""
+}
+
+variable "reviewer_image" {
+  description = "Pre-built reviewer image reference consumed by agent-review via the REVIEWER_IMAGE Actions variable. Same semantics as developer_image but for docker/reviewer."
+  type        = string
+  default     = ""
+}
+```
+
+The defaults remain empty strings so adopters who have not yet published an
+image (or who have no GHCR access) see no behavioral change. This repo's
+own `terraform.tfvars` sets both to the floating `:main` tag published by
+`release-images.yml` (below) in the same sub-issue, so a `terraform apply`
+flips the main-path workflows into pull mode without any workflow YAML
+changes.
+
+**Alternatives considered.** (a) Default the variables to the published
+`:main` tag — rejected because an adopter who sets `repo_owner` to a fork
+would end up pulling an image that does not exist in their org and failing
+loudly before they realise what happened; empty default + explicit opt-in
+in tfvars is the safer pattern (same shape as `REVIEWER_MODELS` and
+`REVIEW_MODEL_PAIRING`). (b) Hard-wire the image reference in the caller
+stubs rather than going through Terraform — rejected because that forces
+every external adopter to fork the caller stubs to repoint `ghcr.io/`.
+
+### Publish a floating `:main` tag on every `docker/**` push to `main`
+
+Extend `release-images.yml` with a second job that fires on push-to-main
+and republishes the `:main` tag whenever the Dockerfiles, prompts, or
+scripts change. The existing tag-triggered job is left intact (continues
+to publish `:v<N>` and `:v<N.M.P>` on `v*` tags).
+
+```yaml
+on:
+  push:
+    tags: ['v*']
+    branches: ['main']
+    paths-ignore: []  # path filter lives on the main-publish job only
+  workflow_dispatch:
+    inputs:
+      tag: ...
+```
+
+A new `publish-main` job gates on `github.ref == 'refs/heads/main'`, uses
+`paths: ['docker/**']` to skip no-op pushes, logs into GHCR with the same
+`GITHUB_TOKEN`, and runs:
+
+```bash
+docker build ./docker          -t "${BASE}/developer:main"
+docker push                       "${BASE}/developer:main"
+docker build ./docker/reviewer -t "${BASE}/reviewer:main"
+docker push                       "${BASE}/reviewer:main"
+```
+
+The two builds run sequentially inside one job (same pattern as the
+existing release job) because the GHCR login step is shared and the push
+is seconds. Freshness guarantee: workflows that pull `:main` are at most
+one post-merge push behind HEAD.
+
+**Alternatives considered.** (a) Publish on every push to main regardless
+of changed paths — rejected as wasteful: ~95% of main pushes do not touch
+`docker/**` and would still rebuild/push the same bytes. (b) Publish on PR
+merge via `pull_request: closed` + `merged == true` — rejected because the
+push-to-main trigger is simpler, equivalently timed, and avoids running on
+force-pushes or direct admin pushes. (c) Use `:latest` as the floating tag
+name — rejected because `:latest` is semantically ambiguous (OCI convention
+treats it as the default pull tag, which invites accidental use); `:main`
+is explicit about which branch the image reflects.
+
+### `run-agent` composite action: BuildKit registry cache for build mode
+
+The pull-mode branch of `run-agent` is unchanged (`docker pull "${_IMAGE}"`).
+The build-mode branch switches from `docker build` to `docker buildx build`
+with a registry-backed cache source:
+
+```bash
+docker buildx build \
+  --cache-from "type=registry,ref=${CACHE_REF}" \
+  -t "${_IMAGE_TAG}" \
+  --load \
+  "${ctx}"
+```
+
+where `CACHE_REF` resolves to
+`ghcr.io/<owner>/<repo>/developer:main` or `.../reviewer:main` based on which
+`build-context` is in use (the composite action already knows this via
+`inputs.build-context` — `docker/reviewer` → reviewer; otherwise →
+developer). `--load` ensures the built image is loaded into the local
+image store so the subsequent `docker run` finds it (buildx's default
+output is OCI format, not loaded).
+
+**Cache behavior.** BuildKit fetches the cache manifest from the registry
+(single HTTP request to GHCR), then selectively pulls only the cached
+layer blobs it needs. Unchanged layers (base image, apt install, npm
+install) deserialise in seconds. Changed layers (modified `COPY scripts/`
+after an edit to a prompt or entrypoint) rebuild as today. If the registry
+is unreachable or `:main` has not yet been published, BuildKit logs a
+warning and falls back to a cacheless build — the same behavior as today,
+only slower on the first run after this change ships.
+
+**Why `type=registry` and not `type=gha` cache.** `type=gha` requires
+`docker/setup-buildx-action` to export `ACTIONS_CACHE_URL` and
+`ACTIONS_RUNTIME_TOKEN`, which pulls in a non-GitHub-owned action and
+forces an actions-policy allowlist update (per `AGENTS.md` → "Pinned
+action SHAs"). `type=registry` uses the registry we already publish to,
+with no new actions and no permission changes (pull is anonymous on a
+public repo; the composite action never writes cache, only reads). This
+also keeps the cache usable by external callers who adopt our reusables
+without having to set up GHA cache themselves.
+
+**Why not `--cache-to`.** Writing cache from every workflow run would
+require `packages: write` on every job that invokes `run-agent` in build
+mode (today only `release-images.yml` has that scope). The published
+`:main` image already contains the layer metadata BuildKit needs as a
+cache source, so there is no gain to writing an additional cache artifact.
+
+**No change to the `docker run` step** that follows the build: the loaded
+image tag is identical, and `--load` guarantees it is addressable through
+the normal docker image store.
+
+### No change to the four feedback-path caller stubs
+
+`agent-fix-checks`, `agent-fix-deployment`, `agent-resolve-conflicts`, and
+`agent-respond-review` continue to pass `image: ''` to their reusables.
+The AGENTS.md comment explaining this ("they continue to build from
+source regardless of this variable") remains accurate: they still build
+from source. They just build faster now because `run-agent` fetches cached
+layers from GHCR. A PR that edits `docker/` still exercises its own
+changes end-to-end — the cache is advisory and BuildKit invalidates any
+layer whose input has changed.
+
+### Documentation updates (bundled with implementation sub-issues)
+
+- `AGENTS.md`: update the `DEVELOPER_IMAGE` / `REVIEWER_IMAGE` descriptions
+  to reflect Terraform management (today they claim Terraform management
+  that does not exist) and link the new `:main` tag publishing cadence.
+  Mention the `type=registry` cache behavior in the "Pinned action SHAs"
+  context (as the reason we did not need to allow-list a buildx action).
+- `README.md`: add `developer_image` / `reviewer_image` to the Terraform
+  variable list and mention them in the "Reproduce this yourself" section
+  for operators who want the pull-mode optimisation locally.
+- `terraform/terraform.tfvars.example`: show both variables with the
+  commented `ghcr.io/<owner>/<repo>/{developer,reviewer}:main` defaults so
+  adopters know the recommended value.
+- `terraform/modules/agent-vars/README.md`: document the two new Actions
+  variables alongside the existing ones.
+- `.github/workflows/release-images.yml` header comment: note that `:main`
+  is a floating pointer republished on every main push to `docker/**`.
+
+The reusable workflow headers already describe the `image` input; no
+changes needed there.
+
+## Out of scope
+
+- **Publishing cache artifacts to the registry (`--cache-to`).** Would need
+  write permissions on every `run-agent` consumer; not worth the surface
+  given `:main` already serves as the cache source.
+- **Changing the two-mode semantics.** Both pull and build modes remain;
+  this design does not consolidate on one.
+- **GHA-cache (`type=gha`) support.** Not pursued because it requires a
+  non-GitHub-owned action (`docker/setup-buildx-action`) and would mean
+  every external caller also needs to allow-list it. If a future need
+  arises (e.g. for workflows that genuinely cannot reach GHCR), the
+  composite action could learn a second cache-source via a new input, but
+  no caller needs it today.
+- **Publishing images per-PR for feedback loop pre-warming.** Would require
+  a `pull_request` trigger with write permissions to GHCR — a larger
+  security surface than this issue justifies.
+- **Removing `release-images.yml`'s v* tag job.** Reproducibility pins
+  still rely on the `:v<N>` tags for operators who want them.
+- **Changing the base image or Dockerfile layering** to make rebuilds
+  cheaper independent of cache. A separate concern (and a trap: changing a
+  passing Dockerfile without runtime failure evidence is forbidden by
+  `AGENTS.md` → "Reverting or replacing code with a passing live-run
+  history").
+- **Making the `developer_image` / `reviewer_image` defaults non-empty.**
+  Explicit opt-in matches the existing pattern for operator-settable
+  variables (REVIEWER_MODELS, REVIEW_MODEL_PAIRING, DESIGN_DEFAULT_MODEL)
+  and avoids pull-404 failures for fork-based adopters.
+
+## Task breakdown
+
+| Issue | Task | Depends on |
+|-------|------|-----------|
+| [#684](https://github.com/mfrancza/agentic-development-workflow/issues/684) | Terraform: add `developer_image` + `reviewer_image` variables and `DEVELOPER_IMAGE` / `REVIEWER_IMAGE` Actions variables (modules/agent-vars + root variables); update tfvars.example and README | — |
+| [#685](https://github.com/mfrancza/agentic-development-workflow/issues/685) | `release-images.yml`: add `publish-main` job that republishes `ghcr.io/<owner>/<repo>/{developer,reviewer}:main` on push to main when `docker/**` changes | — |
+| [#686](https://github.com/mfrancza/agentic-development-workflow/issues/686) | `run-agent` composite action: switch build mode to `docker buildx build --cache-from=type=registry,ref=…:main --load`; resolve the cache ref from `build-context`; add a smoke test covering the ref-resolution logic | — |
+| [#687](https://github.com/mfrancza/agentic-development-workflow/issues/687) | This repo's `terraform.tfvars`: set `developer_image` / `reviewer_image` to the `:main` tags so the main-path workflows switch to pull mode by default | #684, #685 |
+| [#688](https://github.com/mfrancza/agentic-development-workflow/issues/688) | End-to-end validation: measure image-prep baseline across all eight agent-container workflows (last 10 runs each), re-measure after #685/#686/#687 land, post the comparison as a comment on this design PR and on issue #643; confirm cache fall-through on an induced docker/ change in a feedback workflow | #685, #686, #687 |
+
+Issue #684, Issue #685, and Issue #686 are independent and can land in
+any order:
+
+- Issue #684 defaults the new variables to empty strings, so it is a
+  no-op until Issue #687 flips the tfvars.
+- Issue #685 publishes a `:main` image whether or not anything consumes
+  it.
+- Issue #686 uses `type=registry` cache which silently no-ops if `:main`
+  is unpublished, so it is safe to land before Issue #685.
+
+Issue #687 flips this repo into pull mode and depends on both the
+variable plumbing (Issue #684) and the published image (Issue #685).
+Issue #688 validates the end state and depends on all upstream work
+being merged.
+
+Dependencies are recorded natively as GitHub blocked-by relationships
+after sub-issue creation; the table is updated with the real issue numbers
+in the same PR as this design document.
