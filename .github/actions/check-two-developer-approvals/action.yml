@@ -1,0 +1,68 @@
+name: 'Check two developer approvals'
+description: 'Publishes the configurable protected-author approval check run.'
+
+inputs:
+  protected-pr-author-logins:
+    description: 'JSON array of protected pull request author logins'
+    required: true
+  required-approval-count:
+    description: 'Positive number of non-self approvals required for protected authors'
+    required: true
+  enabled:
+    description: 'Whether the approval requirement is enabled (true or false)'
+    required: true
+  generation:
+    description: 'Positive check-context generation number'
+    required: true
+  pr-number:
+    description: 'Pull request number'
+    required: true
+  head-sha:
+    description: 'Advisory pull request head SHA; the activity fetches the live value'
+    required: true
+  repo:
+    description: 'Repository in owner/name format'
+    required: true
+  departed-sha:
+    description: 'Optional SHA a pull request has departed'
+    required: false
+  departed-pr-number:
+    description: 'Optional pull request number to exclude from departed-SHA reconciliation'
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve scripts directory
+      id: scripts-dir
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        echo "dir=$(cd "$ACTION_PATH/../../scripts" && pwd)" >> "$GITHUB_OUTPUT"
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ steps.scripts-dir.outputs.dir }}/package-lock.json
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      run: npm ci
+    - name: Publish approval check
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      env:
+        GITHUB_TOKEN: ${{ github.token }}
+        INPUT_PROTECTED_PR_AUTHOR_LOGINS: ${{ inputs.protected-pr-author-logins }}
+        INPUT_REQUIRED_APPROVAL_COUNT: ${{ inputs.required-approval-count }}
+        INPUT_ENABLED: ${{ inputs.enabled }}
+        INPUT_GENERATION: ${{ inputs.generation }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        INPUT_HEAD_SHA: ${{ inputs.head-sha }}
+        INPUT_REPO: ${{ inputs.repo }}
+        INPUT_DEPARTED_SHA: ${{ inputs.departed-sha }}
+        INPUT_DEPARTED_PR_NUMBER: ${{ inputs.departed-pr-number }}
+      run: npx --no-install tsx src/check-two-developer-approvals.ts
