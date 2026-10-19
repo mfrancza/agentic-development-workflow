@@ -310,12 +310,15 @@ through to the module. External adopters that use the published
 
 ### Decision 4 — Configurable scope and "qualifying approval" semantics
 
-**Decision.** The workflow groups reviews by reviewer login, keeps only
-the **latest** review state per reviewer, and treats the review as
+**Decision.** The workflow groups reviews by reviewer login and keeps the
+latest **opinionated** review state per reviewer: `APPROVED`,
+`CHANGES_REQUESTED`, or `DISMISSED`. It ignores `COMMENTED` and `PENDING`
+reviews when selecting that state, so a later non-opinionated review cannot
+erase an earlier approval or request for changes. The selected review is
 "qualifying" when **all** of the following hold:
 
-1. State is `APPROVED` (not `COMMENTED`, `CHANGES_REQUESTED`, `DISMISSED`,
-   or `PENDING`).
+1. Its selected opinionated state is `APPROVED` (not `CHANGES_REQUESTED` or
+   `DISMISSED`).
 2. Reviewer login is **not** the PR author's login.
 
 The check conclusion is `success` iff the count of qualifying approvals is
@@ -339,7 +342,12 @@ our custom check (see Decision 1), so a developer-agent PR with the opt-in
 on can only merge with ≥1 write-access human approval AND the configured number of non-self
 approvals. In practice this means a reviewer-agent approval alone cannot
 satisfy both gates, which matches the existing [`docs/design/code-review-agent.md`](code-review-agent.md)
-posture.
+posture. This also matches GitHub's `latestOpinionatedReviews` semantics:
+review comments communicate feedback without changing a reviewer's current
+approval decision. It matters in this repository because the review matrix
+can post more than one review from `mfrancza-reviewer-agent[bot]` on the same
+SHA; a later `COMMENTED` result must not discard that login's earlier
+`APPROVED` result.
 
 **Alternatives considered.**
 
@@ -347,7 +355,7 @@ posture.
 |-------------|-----------------|
 | Exclude all bot approvals (any login ending in `[bot]`) from the count | Would make the reviewer agent's `APPROVE` not count. The reviewer agent's approval is already advisory for the base `required_approving_review_count = 1` rule (read-only Contents permission), so excluding it from the custom count too would make the practical merge gate require the configured number of human approvals. This remains a possible future policy flag, but is distinct from configurable author scope and count. |
 | Replicate GitHub's write-access rule exactly (count only approvals from users with write access on the repo) | Requires an extra API call per reviewer to resolve collaborator permissions, adds a failure mode, and still arrives at the same effective merge gate when combined with `required_approving_review_count = 1` (because that rule already enforces the write-access filter). Not worth the extra surface. |
-| Count reviews in all states, not just `APPROVED` | Would conflate `COMMENTED` with approval and double-count stale `CHANGES_REQUESTED` reviews that were later superseded by an `APPROVED` review. GitHub's own count uses latest-per-reviewer `APPROVED`; mirroring that is the least surprising behavior. |
+| Let the chronologically latest review of any state replace the prior review | A later `COMMENTED` or `PENDING` review would erase an earlier `APPROVED` review from the same login. That differs from GitHub's opinionated-review semantics and breaks this repository's multi-reviewer-agent matrix. |
 
 ### Decision 5 — Trigger events, trust model, and workflow shape
 
@@ -613,7 +621,10 @@ draft, then marked ready with no further events, must have a
 `ready_for_review` finishes (Decision 9).
 
 **Workflow permissions.** The publisher declares
-`pull-requests: read, checks: write`. These are honoured because the
+`contents: read, pull-requests: read, checks: write`. `contents: read` is
+required by the reusable's four-step helper-checkout bootstrap; declaring a
+`permissions:` block without it clears the token's Contents permission and
+makes that checkout fail. The remaining permissions are honoured because the
 publisher runs under `pull_request_target` and `workflow_run`, both of
 which issue a write-capable `GITHUB_TOKEN` even for fork-headed PRs. The
 notifier declares `permissions: {}`.
@@ -1058,7 +1069,7 @@ per-SHA lock* and then:
      outcome is `success` (Requirement 6).
    - If PR author **is** in `PROTECTED_PR_AUTHOR_LOGINS`, re-fetches reviews
      via `GET /repos/{owner}/{repo}/pulls/{number}/reviews`, counts
-     latest-per-reviewer `APPROVED` reviews excluding that PR's author,
+     latest-opinionated-per-reviewer `APPROVED` reviews excluding that PR's author,
      and the per-PR outcome is `success` iff count ≥
      `REQUIRED_APPROVAL_COUNT`.
 4. Publishes a single check-run for `liveHeadSha` under the generation
@@ -1194,8 +1205,10 @@ the design adds a **periodic reconciliation sweep workflow**
   reviewer correctly pointed out that under a committed `*/10 * * * *`,
   values below 10 would be silently ignored and the "smaller values
   react faster" promise would be false. The reconcile workflow must
-  declare `permissions: { actions: read, pull-requests: read, checks:
-  write }`: `actions: read` is required for this runs lookup. If that
+  declare `permissions: { contents: read, actions: read, pull-requests:
+  read, checks: write }`: `contents: read` is required by the reusable's
+  helper-checkout bootstrap and `actions: read` is required for this runs
+  lookup. If that
   lookup errors, the activity must **not** early-exit; it logs an error
   and continues with a full reconciliation. If an open-PR listing or
   check publication then fails, it follows the fail-closed publication
@@ -1509,8 +1522,10 @@ end-to-end validation on a scratch PR under Issue #665.
     rather than early-exiting. Verify the reconcile workflow grants
     `actions: read` so the normal lookup succeeds. (Covers Decision 8a.)
 18. **Standard counting cases** — the full matrix listed in Issue #662
-    (0/1/2/3 non-self approvals, self-approval ignored, DISMISSED
-    latest-per-reviewer, etc.).
+    (0/1/2/3 non-self approvals, self-approval ignored, `DISMISSED`
+    latest opinionated review, etc.), including an `APPROVED` review followed
+    by a `COMMENTED` review from the same login: the earlier approval must
+    still count as one qualifying approval.
 
 ### Decision 10 — Documentation surfaces
 
@@ -1673,8 +1688,8 @@ AGENTS.md § "Keeping Documentation Current"):
 | Issue | Task | Depends on |
 |-------|------|-----------|
 | [#661](https://github.com/mfrancza/agentic-development-workflow/issues/661) | Terraform: add `protected_pr_author_logins` (non-empty unique list), `required_approval_count` (positive integer), `enable_protected_approval_gate`, generation, and reconcile-interval variables; expose the first two as JSON `PROTECTED_PR_AUTHOR_LOGINS` and numeric `REQUIRED_APPROVAL_COUNT` Actions variables. Wire all values to the publisher, branch-protection module, examples, and operator documentation. | — |
-| [#662](https://github.com/mfrancza/agentic-development-workflow/issues/662) | TypeScript activity + composite action: implement the approval check. Read `protected-pr-author-logins` and `required-approval-count` inputs, validate the JSON list and positive integer before making any author decision, and fail every PR visibly when invalid. For each protected PR, exclude its own author from latest-per-reviewer `APPROVED` reviews and compare against the configured threshold; non-protected PRs pass immediately. Resolve every shared-SHA candidate by paginating the authoritative open-PR listing (never the lag-prone commit→PR index); on a listing error publish failure when possible and fail loudly, never success from a partial set. Preserve the Decision 8/8a serialization, shared-SHA, departed-SHA, draft, and generation contracts. Unit tests cover two protected identities, custom thresholds, invalid JSON/list/count, API-error fail-closed behavior, and author-specific self-exclusion in addition to Decision 9. | — |
-| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add the publisher, zero-permission named notifier, backfill, reconcile workflow, and paired reusable defined in Decisions 5, 7, 8, and 8a. Publisher stubs pass `vars.PROTECTED_PR_AUTHOR_LOGINS`, `vars.REQUIRED_APPROVAL_COUNT`, `vars.ENABLE_PROTECTED_APPROVAL_GATE`, and generation to the reusable. Preserve the documented trusted-ref, `workflow_run` null guard/fallback, per-PR/per-SHA concurrency, departed-SHA, and per-minute sweep contracts. The reconcile workflow MUST grant `actions: read`, `pull-requests: read`, and `checks: write`; an Actions-runs lookup failure logs and continues a full sweep rather than early-exiting. | Issue #662 |
+| [#662](https://github.com/mfrancza/agentic-development-workflow/issues/662) | TypeScript activity + composite action: implement the approval check. Read `protected-pr-author-logins` and `required-approval-count` inputs, validate the JSON list and positive integer before making any author decision, and fail every PR visibly when invalid. For each protected PR, exclude its own author from latest-opinionated-per-reviewer `APPROVED` reviews and compare against the configured threshold; `COMMENTED` and `PENDING` reviews must not displace the latest `APPROVED`, `CHANGES_REQUESTED`, or `DISMISSED` state for that login. Non-protected PRs pass immediately. Resolve every shared-SHA candidate by paginating the authoritative open-PR listing (never the lag-prone commit→PR index); on a listing error publish failure when possible and fail loudly, never success from a partial set. Preserve the Decision 8/8a serialization, shared-SHA, departed-SHA, draft, and generation contracts. Unit tests cover two protected identities, custom thresholds, invalid JSON/list/count, API-error fail-closed behavior, author-specific self-exclusion, and `APPROVED` followed by `COMMENTED` from one login in addition to Decision 9. | — |
+| [#663](https://github.com/mfrancza/agentic-development-workflow/issues/663) | Workflows + reusables: add the publisher, zero-permission named notifier, backfill, reconcile workflow, and paired reusable defined in Decisions 5, 7, 8, and 8a. Publisher stubs pass `vars.PROTECTED_PR_AUTHOR_LOGINS`, `vars.REQUIRED_APPROVAL_COUNT`, `vars.ENABLE_PROTECTED_APPROVAL_GATE`, and generation to the reusable. Because both publisher and reconcile invoke the reusable's helper-checkout bootstrap, each MUST grant `contents: read`; the publisher also grants `pull-requests: read` and `checks: write`, while reconcile grants `actions: read`, `pull-requests: read`, and `checks: write`. Preserve the documented trusted-ref, `workflow_run` null guard/fallback, per-PR/per-SHA concurrency, departed-SHA, and per-minute sweep contracts. An Actions-runs lookup failure logs and continues a full sweep rather than early-exiting. | Issue #662 |
 | [#664](https://github.com/mfrancza/agentic-development-workflow/issues/664) | Documentation: update `AGENTS.md`, module READMEs, examples, and `docs/adopting.md` for `protected_pr_author_logins` / `PROTECTED_PR_AUTHOR_LOGINS` and `required_approval_count` / `REQUIRED_APPROVAL_COUNT`, including JSON format, threshold validation, and the existing activation, shared-SHA, bypass, and residual-risk contracts. | Issue #661, Issue #663 |
 | [#665](https://github.com/mfrancza/agentic-development-workflow/issues/665) | End-to-end validation: execute Decision 9, including multiple protected authors, a non-default threshold, author-specific self-exclusion, and every invalid configuration path, alongside the fork, spoofing, concurrency, activation, shared-SHA, draft, and departed-SHA cases. | Issues #661, #662, #663, #664 |
 
