@@ -24,9 +24,8 @@ gh pr edit    "<pr-number>"          --repo "$GITHUB_REPO" --add-label "human-re
 
 - If the array is non-empty, make one `gh pr edit --add-reviewer` call per entry. A bad entry must only warn and be skipped: do not let it prevent requests for other entries.
   ```bash
-  set -o pipefail
   for entry in $(jq -r '.[]' <<< "$CODE_REVIEWERS"); do
-    if ! gh pr edit "<pr-number>" --repo "$GITHUB_REPO" --add-reviewer "$entry" 2>&1 | tee /dev/stderr; then
+    if ! gh pr edit "<pr-number>" --repo "$GITHUB_REPO" --add-reviewer "$entry"; then
       echo "WARNING: failed to add CODE_REVIEWERS entry '$entry' — skipping (other entries unaffected)" >&2
     fi
   done
