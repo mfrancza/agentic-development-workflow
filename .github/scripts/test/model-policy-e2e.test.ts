@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resolveModel } from "../src/lib/resolve-model.js";
 import { resolveReviewerSet } from "../src/resolve-reviewer-set.js";
 
 /**
@@ -43,6 +44,11 @@ const agentDesignContent = readFileSync(
   "utf8",
 );
 
+const agentDesignReusableContent = readFileSync(
+  new URL(".github/workflows/agent-design-reusable.yml", repoRoot),
+  "utf8",
+);
+
 const agentReviewContent = readFileSync(
   new URL(".github/workflows/agent-review.yml", repoRoot),
   "utf8",
@@ -78,7 +84,13 @@ vi.mock("@actions/core", () => ({
 }));
 
 const mockPullGet = vi.fn();
-const mockOctokit = { rest: { pulls: { get: mockPullGet } } };
+const mockIssueGet = vi.fn();
+const mockOctokit = {
+  rest: {
+    issues: { get: mockIssueGet },
+    pulls: { get: mockPullGet },
+  },
+};
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const octokit = mockOctokit as any;
 
@@ -86,7 +98,12 @@ function prResponse(labelNames: string[]) {
   return { data: { labels: labelNames.map((name) => ({ name })) } };
 }
 
+function issueResponse(labelNames: string[]) {
+  return { data: { labels: labelNames.map((name) => ({ name })) } };
+}
+
 beforeEach(() => {
+  mockIssueGet.mockReset();
   mockPullGet.mockReset();
 });
 
@@ -160,44 +177,42 @@ describe("Issue #669 policy — (2) design stage uses gpt-5.6-sol by default", (
 // ---------------------------------------------------------------------------
 
 describe("Issue #669 policy — (3) per-design and generic labels override DESIGN_DEFAULT_MODEL", () => {
-  it("per-design label (model:design:sonnet) overrides gpt-5.6-sol via Tier-2 fanout", async () => {
-    // When a PR carries a model:review:sonnet per-review label, Tier 1 of the
-    // reviewer waterfall fires and overrides REVIEWER_MODELS entirely —
-    // demonstrating that explicit labels always win over configured defaults.
-    mockPullGet.mockResolvedValue(prResponse(["model:review:sonnet"]));
+  it("agent-design-reusable.yml resolves issue labels with agent-type: design", () => {
+    expect(agentDesignReusableContent).toMatch(
+      /subject-type: issue[\s\S]*?agent-type: design/,
+    );
+  });
 
-    const result = await resolveReviewerSet(
+  it("per-design label (model:design:sonnet) overrides gpt-5.6-sol", async () => {
+    mockIssueGet.mockResolvedValue(issueResponse(["model:design:sonnet"]));
+
+    const result = await resolveModel(
       octokit,
+      "issue",
       1,
       "owner",
       "repo",
-      ["sonnet", "grok-4.6"],
-      "gpt-5.6-terra",
+      "gpt-5.6-sol",
+      "design",
     );
 
-    // Tier 1 (per-PR label) overrides Tier 2 (REVIEWER_MODELS list).
-    expect(result).toEqual([{ model: "sonnet" }]);
-    expect(result).toHaveLength(1);
+    expect(result).toBe("sonnet");
   });
 
-  it("generic model:* label overrides design default via single-reviewer fallback", async () => {
-    // When no REVIEWER_MODELS and no model:review:* labels, a generic model:*
-    // label on the PR overrides DEFAULT_MODEL in the Tier 3 fallback.
-    // This mirrors the design-agent case: a generic label on the issue would
-    // override DESIGN_DEFAULT_MODEL in the resolve-model waterfall.
-    mockPullGet.mockResolvedValue(prResponse(["model:opus"]));
+  it("generic model:* label overrides gpt-5.6-sol", async () => {
+    mockIssueGet.mockResolvedValue(issueResponse(["model:opus"]));
 
-    const result = await resolveReviewerSet(
+    const result = await resolveModel(
       octokit,
+      "issue",
       2,
       "owner",
       "repo",
-      [],        // no REVIEWER_MODELS — falls to Tier 3
-      "gpt-5.6-terra",
+      "gpt-5.6-sol",
+      "design",
     );
 
-    // generic label (opus) wins over DEFAULT_MODEL (gpt-5.6-terra).
-    expect(result).toEqual([{ model: "opus" }]);
+    expect(result).toBe("opus");
   });
 });
 
@@ -333,11 +348,6 @@ describe("Issue #669 policy — (7) grok-4.6 routes to xAI", () => {
     expect(runAgentContent).toContain(
       "grok-*)                     _key_env=(-e XAI_API_KEY)",
     );
-  });
-
-  it("grok-4.6 matches the grok-* prefix", () => {
-    // A model name starting with "grok-" matches the xAI routing case.
-    expect("grok-4.6".startsWith("grok-")).toBe(true);
   });
 
   it("grok-4.6 is classified as opus class in model-classes.json", () => {
