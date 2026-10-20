@@ -108,5 +108,8 @@ describe("run-agent forwards exactly one provider API key", () => {
     expect(action).toContain(
       '[[ -n "${GITHUB_HEAD_SHA_AT_TRIGGER:-}" ]] && _opt_env+=(-e GITHUB_HEAD_SHA_AT_TRIGGER="${GITHUB_HEAD_SHA_AT_TRIGGER}")',
     );
+    expect(action).toContain(
+      '[[ -n "${FIX_CHECKS_WAIT_SECONDS:-}" ]] && _opt_env+=(-e FIX_CHECKS_WAIT_SECONDS="${FIX_CHECKS_WAIT_SECONDS}")',
+    );
   });
 });

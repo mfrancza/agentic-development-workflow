@@ -207,6 +207,7 @@ runs:
         [[ -n "${CODE_REVIEWERS:-}" ]] && _opt_env+=(-e CODE_REVIEWERS="${CODE_REVIEWERS}")
         [[ -n "${FIX_CHECKS_ALLOW:-}" ]] && _opt_env+=(-e FIX_CHECKS_ALLOW="${FIX_CHECKS_ALLOW}")
         [[ -n "${GITHUB_HEAD_SHA_AT_TRIGGER:-}" ]] && _opt_env+=(-e GITHUB_HEAD_SHA_AT_TRIGGER="${GITHUB_HEAD_SHA_AT_TRIGGER}")
+        [[ -n "${FIX_CHECKS_WAIT_SECONDS:-}" ]] && _opt_env+=(-e FIX_CHECKS_WAIT_SECONDS="${FIX_CHECKS_WAIT_SECONDS}")
 
         # Create and prepare the host output directory if requested; build the
         # volume mount flag. chmod 777 is required because the container's
