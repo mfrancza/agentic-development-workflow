@@ -7,6 +7,7 @@ agent_allowlist = [
   "your-github-username",
   "<developer-agent-app-slug>[bot]",
   "<reviewer-agent-app-slug>[bot]",
+  "<your-github-org>/developers",
 ]
 default_model = "sonnet"
 
@@ -21,16 +22,21 @@ default_model = "sonnet"
 # Humans to assign to issues and PRs when the agent applies the human-required
 # label (e.g. escalations requiring security, billing, or permission decisions).
 # Stored as ADMIN_ASSIGNEES Actions variable; workflows parse it with fromJSON().
-# Leave empty ([]) if you prefer to assign manually.
+# Team references must be from the repository owner's organization and need the
+# allowlist-resolver App secrets (ALLOWLIST_RESOLVER_APP_ID /
+# ALLOWLIST_RESOLVER_APP_PRIVATE_KEY). Leave empty ([]) to assign manually.
 admin_assignees = [
   "your-github-username",
+  "<your-github-org>/maintainers",
 ]
 
 # Humans to request as PR reviewers when the agent opens a PR and wants human
 # code review. Stored as CODE_REVIEWERS Actions variable; workflows parse it
-# with fromJSON(). Leave empty ([]) to skip automatic reviewer requests.
+# with fromJSON(). Team references must be from the repository owner's
+# organization. Leave empty ([]) to skip automatic reviewer requests.
 code_reviewers = [
   "your-github-username",
+  "<your-github-org>/maintainers",
 ]
 
 # Raw Checks API check-run names that may trigger the fix-checks agent. These
