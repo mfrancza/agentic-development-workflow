@@ -27,7 +27,7 @@ function runGuard(options: {
   const mockGh = `#!/bin/bash
 set -euo pipefail
 if [[ "$1" == "pr" && "$2" == "view" ]]; then
-  printf '%s\\n' "${(options.labels ?? []).join("\\n")}";
+  ${(options.labels ?? []).map((label) => `printf '%s\\n' ${JSON.stringify(label)};`).join("\n  ")}
   exit 0
 fi
 if [[ "$1" == "api" ]]; then
@@ -134,6 +134,15 @@ describe("fix-checks freshness guard", () => {
 
   it("skips a PR escalated to human-required before reading checks", () => {
     const { output } = runGuard({ checks: [[failed]], labels: ["human-required"] });
+    expect(output).toContain("human-required");
+    expect(output).toContain("RESULT=skip");
+  });
+
+  it("detects human-required among multiple PR labels", () => {
+    const { output } = runGuard({
+      checks: [[failed]],
+      labels: ["some-other-label", "human-required"],
+    });
     expect(output).toContain("human-required");
     expect(output).toContain("RESULT=skip");
   });
