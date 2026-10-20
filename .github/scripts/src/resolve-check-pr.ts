@@ -1,5 +1,6 @@
 import * as core from "@actions/core";
 import { context } from "@actions/github";
+import { parseAllowedChecks } from "./lib/allowed-checks.js";
 import { getOctokit } from "./lib/octokit.js";
 
 type Octokit = ReturnType<typeof getOctokit>;
@@ -26,26 +27,7 @@ type PayloadRun = {
   pull_requests?: Array<{ number?: unknown }>;
 };
 
-/**
- * Parses the caller-configured check-name allowlist. The boundary is
- * deliberately fail-closed: only a non-empty JSON array containing strings
- * can authorise a fix-checks run.
- */
-export function parseAllowedChecks(input: string): string[] | undefined {
-  try {
-    const value: unknown = JSON.parse(input);
-    if (
-      !Array.isArray(value) ||
-      value.length === 0 ||
-      !value.every((name) => typeof name === "string")
-    ) {
-      return undefined;
-    }
-    return value;
-  } catch {
-    return undefined;
-  }
-}
+export { parseAllowedChecks } from "./lib/allowed-checks.js";
 
 function eventDetails(
   eventName: string,

@@ -1,0 +1,64 @@
+name: agent-fix-checks-poll
+
+# Delivery-independent backstop for check origins whose check_run event may be
+# suppressed. The allowlist below is still the authorization boundary: an
+# empty, missing, or malformed FIX_CHECKS_ALLOW dispatches no agent runs.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+jobs:
+  find-failing-agent-prs:
+    # Do not mint an installation token or invoke the reusable workflow until
+    # the raw Checks API names have passed the universal allowlist policy.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      prs: ${{ steps.find.outputs.prs }}
+    steps:
+      - name: Check out workflow helpers
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Find agent PRs with allowed failing checks
+        id: find
+        uses: ./.github/actions/find-failing-agent-prs
+        with:
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          author: mfrancza-developer-agent[bot]
+          allowed-checks: ${{ vars.FIX_CHECKS_ALLOW }}
+
+  fix-checks:
+    needs: find-failing-agent-prs
+    if: needs.find-failing-agent-prs.outputs.prs != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.find-failing-agent-prs.outputs.prs) }}
+    # Match the event-driven caller so a poll and a check-completion event
+    # cannot run the agent concurrently for the same PR.
+    concurrency:
+      group: agent-fix-checks-pr-${{ matrix.pr.number }}
+      cancel-in-progress: false
+    uses: ./.github/workflows/agent-fix-checks-reusable.yml
+    with:
+      pr-number: ${{ matrix.pr.number }}
+      head-sha-at-trigger: ${{ matrix.pr.head_sha }}
+      agent-login: mfrancza-developer-agent[bot]
+      image: ''
+      helpers-ref: ${{ github.sha }}
+    secrets:
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
