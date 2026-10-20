@@ -139,7 +139,7 @@ provider "github" {
 |------|------|-------------|
 | `agent_allowlist_variable_name` | `string` | Name of the `AGENT_ALLOWLIST` Actions variable (`"AGENT_ALLOWLIST"`). |
 | `default_model_variable_name` | `string` | Name of the `DEFAULT_MODEL` Actions variable (`"DEFAULT_MODEL"`). |
-| `design_default_model_variable_name` | `string` | Name of the `DESIGN_DEFAULT_MODEL` Actions variable (`"DESIGN_DEFAULT_MODEL"`). |
+| `design_default_model_variable_name` | `string \| null` | Name of the `DESIGN_DEFAULT_MODEL` Actions variable (`"DESIGN_DEFAULT_MODEL"`), or `null` when `design_default_model` is empty and the variable is not created. |
 | `admin_assignees_variable_name` | `string` | Name of the `ADMIN_ASSIGNEES` Actions variable (`"ADMIN_ASSIGNEES"`). |
 | `code_reviewers_variable_name` | `string` | Name of the `CODE_REVIEWERS` Actions variable (`"CODE_REVIEWERS"`). |
 | `fix_checks_allow_variable_name` | `string` | Name of the `FIX_CHECKS_ALLOW` Actions variable (`"FIX_CHECKS_ALLOW"`). |
