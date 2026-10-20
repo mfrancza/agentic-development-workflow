@@ -53,6 +53,7 @@ Complete these steps in order before wiring up any reusable workflows.
   - [labels](#labels-module)
   - [agent-vars](#agent-vars-module)
   - [branch-protection](#branch-protection-module)
+  - [Protected approval gate (Terraform)](#protected-approval-gate-terraform)
   - [actions-policy](#actions-policy-module)
   - [security](#security-module)
 - [Reusable workflows](#reusable-workflows)
@@ -456,6 +457,41 @@ module "branch_protection" {
 ```
 
 **Variables and outputs.** See [`terraform/modules/branch-protection/README.md`](../terraform/modules/branch-protection/README.md).
+
+---
+
+### Protected approval gate (Terraform)
+
+The protected-approval gate is opt-in. In your root module's
+`terraform.tfvars`, configure the developer App's **login** and enable the
+gate:
+
+```hcl
+protected_pr_author_logins     = ["<your-developer-app-slug>[bot]"]
+enable_protected_approval_gate = true
+```
+
+Wire these root-module variables through to both the `agent-vars` and
+`branch-protection` modules, as this repository's [`terraform/main.tf`](../terraform/main.tf)
+does. The default threshold is two non-self approvals; set
+`required_approval_count` if your policy needs a different threshold.
+
+With these modules, setting `enable_protected_approval_gate = true` changes
+the `ENABLE_PROTECTED_APPROVAL_GATE` Actions variable and adds the required
+`protected-approval-gate` status check from GitHub Actions
+(`integration_id = 15368`) in one apply. Dispatch
+`protected-approval-gate-backfill.yml` immediately afterwards; open PRs
+without a current result remain blocked until it finishes. See
+[protected-approval-gate reusable workflows](#protected-approval-gate-reusable-workflows)
+for the caller stubs and the enable, disable, and re-enable procedures.
+
+`protected_pr_author_logins` uses the GitHub login form
+`<slug>[bot]`. It is distinct from the `app/<slug>` search-qualifier form of
+the `developer-author` input in
+[`agent-resolve-conflicts-reusable.yml`](../.github/workflows/agent-resolve-conflicts-reusable.yml).
+Keep both configuration surfaces aligned for the same developer App. See
+[`docs/design/protected-approval-gate.md`](design/protected-approval-gate.md)
+for the rationale and scope boundary.
 
 ---
 
