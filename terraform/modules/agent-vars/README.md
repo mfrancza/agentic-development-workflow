@@ -2,13 +2,19 @@
 
 Manages the GitHub Actions repository variables that configure agentic workflow behavior.
 
+`agent_allowlist`, `admin_assignees`, and `code_reviewers` accept mixed lists:
+each entry is either an individual GitHub login (including a bot such as
+`mfrancza-developer-agent[bot]`) or an `<org>/<team-slug>` reference (for
+example, `Brale-xyz/dev`). Team references must belong to the repository
+owner's organization.
+
 | Variable | Type | Purpose |
 |----------|------|---------|
-| `AGENT_ALLOWLIST` | JSON array | Individual GitHub logins (users or bots) permitted to trigger agent workflows. |
+| `AGENT_ALLOWLIST` | JSON array | GitHub logins or `<org>/<team-slug>` references permitted to trigger agent workflows. The runtime gate reads this variable directly and resolves teams at trigger time; there is no cached `AGENT_ALLOWLIST_RESOLVED` companion variable. |
 | `DEFAULT_MODEL` | string | Repo-wide default model for all agent containers. Issue-driven workflows can override per-issue via `model:*` labels. |
 | `DESIGN_DEFAULT_MODEL` | string | Design-agent default model. When non-empty, `agent-design` workflows prefer this value over `DEFAULT_MODEL`. Empty string (the default) means "not configured — fall through to `DEFAULT_MODEL`"; the caller stub uses `vars.DESIGN_DEFAULT_MODEL \|\| vars.DEFAULT_MODEL` so the fallback is transparent. |
-| `ADMIN_ASSIGNEES` | JSON array | Individual GitHub logins assigned to issues/PRs when the agent applies `human-required` and needs a human in the loop. |
-| `CODE_REVIEWERS` | JSON array | Individual GitHub logins requested as PR reviewers when the agent opens a PR and wants human sign-off. |
+| `ADMIN_ASSIGNEES` | JSON array | GitHub logins or `<org>/<team-slug>` references assigned to issues/PRs when the agent applies `human-required` and needs a human in the loop. |
+| `CODE_REVIEWERS` | JSON array | GitHub logins or `<org>/<team-slug>` references requested as PR reviewers when the agent opens a PR and wants human sign-off. |
 | `FIX_CHECKS_ALLOW` | JSON array | Raw Checks API `check_runs[].name` values allowed to trigger the fix-checks agent. Empty (`[]`) disables all fix-checks delivery. |
 | `PROTECTED_PR_AUTHOR_LOGINS` | JSON array | PR author logins subject to the protected approval threshold. Defaults to `["mfrancza-developer-agent[bot]"]`. |
 | `PROTECTED_APPROVAL_REVIEWERS` | JSON array | Logins and `<org>/<team-slug>` references whose approvals count toward `REQUIRED_APPROVAL_COUNT`. Defaults to `[]`, meaning any reviewer other than the PR author counts. Team references need the allowlist-resolver App secrets. |
@@ -27,11 +33,11 @@ Manages the GitHub Actions repository variables that configure agentic workflow 
 module "agent_vars" {
   source              = "./modules/agent-vars"
   repository          = github_repository.this.name
-  agent_allowlist     = ["your-github-username", "<developer-agent-app-slug>[bot]"]
+  agent_allowlist     = ["your-github-username", "<developer-agent-app-slug>[bot]", "<your-github-org>/developers"]
   default_model       = "sonnet"
   # design_default_model = "opus"  # omit or leave "" to fall back to default_model
-  admin_assignees     = ["your-github-username"]
-  code_reviewers      = ["your-github-username"]
+  admin_assignees     = ["your-github-username", "<your-github-org>/maintainers"]
+  code_reviewers      = ["your-github-username", "<your-github-org>/maintainers"]
   # fix_checks_allow = ["ci / Typecheck and test"] # raw Checks API check_runs[].name values; [] disables fix-checks
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
   # protected_approval_reviewers                     = ["<maintainer-login>", "<org>/<team-slug>"]
@@ -61,11 +67,11 @@ module "agent_vars" {
 module "agent_vars" {
   source              = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/agent-vars?ref=<tag>"
   repository          = "<your-repo-name>"
-  agent_allowlist     = ["your-github-username", "<developer-agent-app-slug>[bot]"]
+  agent_allowlist     = ["your-github-username", "<developer-agent-app-slug>[bot]", "<your-github-org>/developers"]
   default_model       = "sonnet"
   # design_default_model = "opus"  # omit or leave "" to fall back to default_model
-  admin_assignees     = ["your-github-username"]
-  code_reviewers      = ["your-github-username"]
+  admin_assignees     = ["your-github-username", "<your-github-org>/maintainers"]
+  code_reviewers      = ["your-github-username", "<your-github-org>/maintainers"]
   # fix_checks_allow = ["ci / Typecheck and test"] # raw Checks API check_runs[].name values; [] disables fix-checks
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
   # protected_approval_reviewers                     = ["<maintainer-login>", "<org>/<team-slug>"]
@@ -112,11 +118,11 @@ provider "github" {
 | Name | Type | Required | Default | Description |
 |------|------|----------|---------|-------------|
 | `repository` | `string` | yes | — | Name of the GitHub repository to manage Actions variables for. |
-| `agent_allowlist` | `list(string)` | yes | — | Individual GitHub logins (users or bots) permitted to trigger agent workflows. |
+| `agent_allowlist` | `list(string)` | yes | — | GitHub logins (users or bots) or `<org>/<team-slug>` references permitted to trigger agent workflows. Runtime reads `AGENT_ALLOWLIST` directly; no cached companion variable exists. |
 | `default_model` | `string` | no | `"sonnet"` | Repo-wide default model for agent containers. |
 | `design_default_model` | `string` | no | `""` | Design-agent default model. When non-empty, `agent-design` uses this instead of `default_model`. Empty (the default) falls through to `default_model`. |
-| `admin_assignees` | `list(string)` | no | `[]` | Individual GitHub logins to assign to escalation issues/PRs. |
-| `code_reviewers` | `list(string)` | no | `[]` | Individual GitHub logins to request as PR reviewers. |
+| `admin_assignees` | `list(string)` | no | `[]` | GitHub logins or `<org>/<team-slug>` references to assign to escalation issues/PRs. |
+| `code_reviewers` | `list(string)` | no | `[]` | GitHub logins or `<org>/<team-slug>` references to request as PR reviewers. |
 | `fix_checks_allow` | `list(string)` | no | `[]` | Raw Checks API `check_runs[].name` values allowed to trigger fix-checks. Empty disables all fix-checks delivery. |
 | `protected_pr_author_logins` | `list(string)` | no | developer-agent bot | Protected PR-author logins, encoded as JSON. |
 | `protected_approval_reviewers` | `list(string)` | no | `[]` | Logins and `<org>/<team-slug>` references whose approvals count; empty counts any non-author reviewer. |
@@ -152,7 +158,9 @@ provider "github" {
 - `AUTO_TRIGGER_AGENTS` must never be absent from the repository — the workflow guard `vars.AUTO_TRIGGER_AGENTS != ''` prevents `fromJSON('')` from throwing a runtime error. All gates default to `false` so behavior is unchanged unless you opt in.
 - `REVIEWER_MODELS` defaults to `[]` (JSON-encoded empty array). Workflows guard with `vars.REVIEWER_MODELS != ''` before calling `fromJSON` — an absent variable evaluates to `''` and `fromJSON('')` would throw a runtime error; the guard fails closed (multi-reviewer disabled) instead. An empty list (`[]`) is the canonical signal that multi-reviewer is disabled.
 - `FIX_CHECKS_ALLOW` defaults to `[]` (JSON-encoded empty array), which disables all fix-checks delivery. Its entries are raw Checks API `check_runs[].name` values — not workflow names or potentially decorated labels in the Checks tab. Discover names with `gh api repos/$OWNER/$REPO/commits/$SHA/check-runs --jq '.check_runs[].name'`.
-- `agent_allowlist`, `admin_assignees`, and `code_reviewers` contain individual GitHub logins. Entries must be non-empty and must not contain `/`; team references (`org/team-slug`) are not supported.
+- `agent_allowlist`, `admin_assignees`, and `code_reviewers` accept case-insensitively unique, non-empty GitHub logins and `<org>/<team-slug>` references. References must use the repository owner's organization; malformed values such as `a/b/c` are rejected.
+- `AGENT_ALLOWLIST` is read directly by the in-reusable runtime gate, which resolves team references at trigger time. There is no `AGENT_ALLOWLIST_RESOLVED` Actions variable and no scheduled resolver, so team-membership changes apply to the next triggering event.
+- Team references in `agent_allowlist` and `admin_assignees` require an allowlist-resolver GitHub App installed on the repository owner's organization with Members: read. Configure its `ALLOWLIST_RESOLVER_APP_ID` and `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` repository secrets. `code_reviewers` team references pass directly to GitHub's reviewer-request API and do not require those secrets.
 - Include the developer-agent and reviewer-agent bot identities (e.g. `mfrancza-developer-agent[bot]`) as explicit `agent_allowlist` entries so that agents can apply `agent:*` labels to route work to one another.
 - The protected-approval variables preserve existing behavior because `ENABLE_PROTECTED_APPROVAL_GATE` defaults to `"false"`. `PROTECTED_PR_AUTHOR_LOGINS` must be non-empty with unique, non-empty logins; both the approval count and reconciliation interval must be positive integers.
 - `REVIEW_MODEL_PAIRING` defaults to `{"enabled":false,...}`. The `enabled = false` default is a fail-safe: a fresh repo behaves exactly as it did before the variable existed (pairing tier is dormant). Set `enabled = true` and choose a `policy` to opt in. Workflows must guard with `vars.REVIEW_MODEL_PAIRING != ''` before calling `fromJSON` — an absent variable evaluates to `''` and `fromJSON('')` would throw a runtime error. `fromJSON(vars.REVIEW_MODEL_PAIRING).enabled` is the primary gate that the agent-review workflow checks before entering the pairing tier.

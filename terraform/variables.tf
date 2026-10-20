@@ -10,8 +10,18 @@ variable "repo_name" {
 }
 
 variable "agent_allowlist" {
-  description = "GitHub usernames (and agent bot identities like `<developer-agent-app-slug>[bot]`) permitted to trigger agent workflows (grooming, implement, review, etc.). Include the agent bots themselves so they can apply `agent:*` labels — e.g. an agent applying `agent:review` on its own PR to request a code review. Stored as a repository Actions variable so workflow `if` conditions can reference it without hardcoding names in YAML."
+  description = "GitHub logins (users or bots, such as `<developer-agent-app-slug>[bot]`) and <org>/<team-slug> references permitted to trigger agent workflows (grooming, implement, review, etc.). Team references must use the repository owner's organization and are resolved at trigger time by the in-reusable gate step; there is no AGENT_ALLOWLIST_RESOLVED companion variable or scheduled resolver. Include agent bots as explicit entries so they can apply `agent:*` labels. Team references require the allowlist-resolver App secrets (ALLOWLIST_RESOLVER_APP_ID and ALLOWLIST_RESOLVER_APP_PRIVATE_KEY)."
   type        = list(string)
+
+  validation {
+    condition = alltrue([
+      for entry in var.agent_allowlist :
+      trimspace(entry) != "" && (!strcontains(entry, "/") || can(regex("^[^/]+/[^/]+$", entry)))
+      ]) && length(distinct([
+        for entry in var.agent_allowlist : lower(entry)
+    ])) == length(var.agent_allowlist)
+    error_message = "agent_allowlist entries must be unique, non-empty logins or <org>/<team-slug> references."
+  }
 }
 
 variable "default_model" {
@@ -21,15 +31,35 @@ variable "default_model" {
 }
 
 variable "admin_assignees" {
-  description = "GitHub usernames to assign to issues and PRs that require human action (e.g. when the agent applies the human-required label and needs a human in the loop). Stored as a JSON-encoded repository Actions variable ADMIN_ASSIGNEES so workflows can parse and assign without hardcoding usernames in YAML."
+  description = "GitHub logins or <org>/<team-slug> references to assign to issues and PRs that require human action. Team references must use the repository owner's organization and are expanded to member logins by the grooming runtime; they require the allowlist-resolver App secrets (ALLOWLIST_RESOLVER_APP_ID and ALLOWLIST_RESOLVER_APP_PRIVATE_KEY). Stored as the JSON-encoded ADMIN_ASSIGNEES Actions variable."
   type        = list(string)
   default     = []
+
+  validation {
+    condition = alltrue([
+      for entry in var.admin_assignees :
+      trimspace(entry) != "" && (!strcontains(entry, "/") || can(regex("^[^/]+/[^/]+$", entry)))
+      ]) && length(distinct([
+        for entry in var.admin_assignees : lower(entry)
+    ])) == length(var.admin_assignees)
+    error_message = "admin_assignees entries must be unique, non-empty logins or <org>/<team-slug> references."
+  }
 }
 
 variable "code_reviewers" {
-  description = "GitHub usernames to request as PR reviewers when human code review is needed (e.g. when the agent opens a PR and wants human sign-off). Stored as a JSON-encoded repository Actions variable CODE_REVIEWERS so workflows can request reviewers without hardcoding usernames in YAML."
+  description = "GitHub logins or <org>/<team-slug> references to request as PR reviewers when human code review is needed. Team references must use the repository owner's organization and pass directly to GitHub for live team-review routing. Stored as the JSON-encoded CODE_REVIEWERS Actions variable."
   type        = list(string)
   default     = []
+
+  validation {
+    condition = alltrue([
+      for entry in var.code_reviewers :
+      trimspace(entry) != "" && (!strcontains(entry, "/") || can(regex("^[^/]+/[^/]+$", entry)))
+      ]) && length(distinct([
+        for entry in var.code_reviewers : lower(entry)
+    ])) == length(var.code_reviewers)
+    error_message = "code_reviewers entries must be unique, non-empty logins or <org>/<team-slug> references."
+  }
 }
 
 variable "fix_checks_allow" {
