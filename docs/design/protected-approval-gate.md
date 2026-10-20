@@ -174,7 +174,7 @@ variable "enable_protected_approval_gate" {
 }
 
 variable "enable_protected_approval_gate_reconcile_minutes" {
-  description = "Minimum interval, in minutes, between sweeps of the Decision 8a pending-replacement safety-net workflow (`protected-approval-gate-reconcile.yml`). Exposed as the ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES Actions variable; sets the maximum staleness window for a shared-SHA block after the blocking dev-agent PR has moved on and the per-event cleanup was dropped by Actions concurrency pending-run replacement. Smaller values react faster but burn more Actions minutes. Defaults to 10, with a floor of 1 (the cron fires every minute). Implementation note: because `on.schedule.cron` is a build-time literal (GitHub Actions does not evaluate `${{ vars.X }}` inside it), the workflow commits to `cron: \"* * * * *\"` so every value of this variable from 1 upward is a real reduction in sweep latency. The activity's own early-exit guard queries this workflow's own recent completed runs via `GET /repos/{owner}/{repo}/actions/workflows/protected-approval-gate-reconcile.yml/runs?status=success&per_page=10`, excludes the current run by `GITHUB_RUN_ID`, and exits early when the most recent successful prior run completed less than `minutes` minutes ago. Values smaller than 1 are not useful; values up to any arbitrary ceiling are supported with no code change."
+  description = "Minimum interval, in minutes, between sweeps of the Decision 8a pending-replacement safety-net workflow (`protected-approval-gate-reconcile.yml`). Exposed as the ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES Actions variable. Defaults to 10, minimum 5: the workflow commits to `cron: \"*/5 * * * *\"`, GitHub's shortest schedule interval (`on.schedule.cron` cannot read Actions variables), and the sweep's early-exit guard skips runs that come less than `minutes` after the last successful one. GitHub may delay scheduled runs further under load."
   type        = number
   default     = 10
 }
@@ -1199,8 +1199,9 @@ the design adds a **periodic reconciliation sweep workflow**
 fan-out and the interval guard so that adopters' reconcile and backfill
 stubs share the same implementation:
 
-- Triggered by `schedule: cron: "* * * * *"` (every minute — a
-  build-time literal because `on.schedule.cron` does not evaluate
+- Triggered by `schedule: cron: "*/5 * * * *"` (every 5 minutes,
+  GitHub's shortest supported schedule interval — a build-time literal
+  because `on.schedule.cron` does not evaluate
   `${{ vars.X }}`), **and** by `workflow_dispatch` for operator-
   initiated reconciliation. The sweep's effective interval is
   tunable via a Terraform-managed Actions variable
@@ -1212,16 +1213,14 @@ stubs share the same implementation:
   a called workflow describes the caller),
   excludes the current run (identified by `GITHUB_RUN_ID`), and
   exits 0 immediately when the most recent prior successful run
-  completed less than `minutes` ago. The committed `* * * * *` cron
-  guarantees that smaller `minutes` values are a real reduction in
-  sweep latency (down to a floor of 1 minute); larger values are
-  honoured because the surplus cron fires early-exit cheaply.
-  Choosing a per-minute cron with early-exit — rather than
-  committing a specific `*/N * * * *` literal and treating the
-  variable as a no-op below the committed N — is intentional: the
-  reviewer correctly pointed out that under a committed `*/10 * * * *`,
-  values below 10 would be silently ignored and the "smaller values
-  react faster" promise would be false. The reconcile workflow must
+  completed less than `minutes` ago. The committed `*/5 * * * *` cron
+  makes every `minutes` value from 5 upward a real setting; larger
+  values are honoured because the surplus cron fires early-exit
+  cheaply. Terraform validation rejects values below 5, which GitHub's
+  scheduler could not honour. An earlier draft committed
+  `* * * * *`, but GitHub does not run schedules more often than every
+  5 minutes, and delays them further under load (observed gaps of
+  15–25 minutes), so the interval is a minimum, not a guarantee. The reconcile workflow must
   declare `permissions: { contents: read, actions: read, pull-requests:
   read, checks: write }`: `contents: read` is required by the reusable's
   helper-checkout bootstrap and `actions: read` is required for this runs
@@ -1313,7 +1312,7 @@ rejected in the Alternatives table below with their reasons.
 | Dispatch a dedicated per-SHA cleanup workflow from inside the triggering publisher run (via `gh workflow run` with the departing SHA) and let it run with its own repository-wide concurrency key | Does not survive the specific pending-replacement scenario the reviewer identified: if the triggering publisher run B is itself replaced in the pending queue by a later notifier-driven run C, B never starts and therefore never calls `gh workflow run` for the cleanup. The dispatch is only as reliable as the triggering run's own lifecycle, which Decision 8 already documents as subject to replacement. The scheduled sweep in the Decision above is independent of any single triggering run's lifecycle. |
 | Widen the per-PR concurrency pending queue (e.g. by partitioning the concurrency group so synchronize and workflow_run do not share a queue) | GitHub Actions `concurrency.group` keys serialize all matching runs regardless of trigger, and splitting across groups re-opens the Decision 8 race (two publishers for the same PR writing non-monotonically). The sweep is a safer invariant layer that does not touch the per-PR serialization boundary. |
 | Rely on an external scheduler (cron on a VM, a GitHub App worker, etc.) | Introduces new infrastructure. A scheduled Actions workflow is already available, costs no extra permissions, and the sweep's work is bounded by the number of open PRs — the same scope as the existing backfill workflow. |
-| Commit the sweep cron to a specific `*/N * * * *` literal (e.g. `*/10 * * * *`) and treat the `_RECONCILE_MINUTES` variable as a tunable floor below that interval | Would make `_RECONCILE_MINUTES` values **smaller** than `N` silently no-op: the variable's "smaller values react faster" promise would be false below `N`. The reviewer correctly flagged this as a contract mismatch between the variable description, Decision 8a's "adopters can lower it", and the fact that `on.schedule.cron` is a build-time literal that cannot read `${{ vars.X }}`. Committing to `cron: "* * * * *"` + an activity-side early-exit guard (specified in Decision 8a) is the only shape where every value of the variable from 1 upward is a real interval. The surplus cron fires are cheap because the early-exit returns immediately. |
+| Commit the sweep cron to `* * * * *` so any `_RECONCILE_MINUTES` value from 1 upward is honoured | Was the first merged version. GitHub does not run schedules more often than every 5 minutes (actionlint flags it), so values below 5 were silently not honoured. The cron is `*/5 * * * *` and Terraform rejects values below 5, so every accepted value is a real setting. |
 
 Decision 9 items 10–12 cover the three same-SHA acceptance cases.
 
@@ -1577,9 +1576,9 @@ AGENTS.md § "Keeping Documentation Current"):
   the one-shot `protected-approval-gate-backfill.yml`
   workflow, the periodic
   `protected-approval-gate-reconcile.yml` sweep workflow
-  (committed `cron: "* * * * *"` + activity-side early-exit guard
+  (committed `cron: "*/5 * * * *"` + activity-side early-exit guard
   reading `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`;
-  default 10 minutes, floor 1) and the fact
+  default 10 minutes, minimum 5) and the fact
   that the sweep is a safety net for pending-run replacement rather
   than the primary mechanism — i.e. the maximum staleness window
   for a shared-SHA block after the blocking dev-agent PR has moved

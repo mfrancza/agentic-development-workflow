@@ -63,7 +63,7 @@ jobs:
       cancel-in-progress: false
     uses: ./.github/workflows/agent-fix-checks-reusable.yml
     with:
-      pr-number: ${{ needs.resolve-pr.outputs.pr_number }}
+      pr-number: ${{ fromJSON(needs.resolve-pr.outputs.pr_number) }}
       head-sha-at-trigger: ${{ needs.resolve-pr.outputs.head_sha }}
       agent-login: mfrancza-developer-agent[bot]
       image: ''

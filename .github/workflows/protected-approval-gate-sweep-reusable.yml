@@ -88,7 +88,7 @@ jobs:
             echo "::error::interval-minutes (ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES) must be a positive integer."
             exit 1
           fi
-          # The cron fires every minute; skip unless the caller workflow's last
+          # The cron fires at most every 5 minutes; skip unless the caller workflow's last
           # successful run is at least `minutes` old.
           workflow_file="${GITHUB_WORKFLOW_REF%@*}"
           workflow_file="${workflow_file##*/}"

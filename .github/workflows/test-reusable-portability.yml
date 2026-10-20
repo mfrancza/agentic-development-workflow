@@ -192,7 +192,7 @@ jobs:
 
           # Smoke-run one activity entry-point from the _agentic-workflow/ scripts
           # directory to confirm tsx module resolution works.
-          OUT="$(cd "$SCRIPTS_DIR" && npx --no-install tsx src/resolve-model.ts 2>&1 || true)"
+          OUT="$(cd "$SCRIPTS_DIR" && { npx --no-install tsx src/resolve-model.ts 2>&1 || true; })"
           if printf '%s' "$OUT" | grep -qE \
             'ERR_PACKAGE_PATH_NOT_EXPORTED|ERR_MODULE_NOT_FOUND|ERR_REQUIRE_ESM|Cannot find module'; then
             echo "::error::resolve-model.ts failed module loading from _agentic-workflow/ scripts path:"
@@ -316,7 +316,7 @@ jobs:
 
             # Check 1: helpers-ref: key exists as an input declaration.
             # The input key ends with ':' and no other value on the same line,
-            # unlike env references such as HELPERS_REF: ${{ inputs.helpers-ref }}.
+            # unlike env references such as HELPERS_REF set from the inputs.helpers-ref expression.
             if ! grep -qE '^\s+helpers-ref:\s*$' "$f"; then
               echo "::error::${f}: missing helpers-ref input declaration. Every helper-consuming reusable workflow must declare helpers-ref as an input."
               STATUS=1
