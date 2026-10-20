@@ -83,6 +83,14 @@ on:
           selector (e.g. v0, v0.0.2, or a full SHA).
         required: true
         type: string
+      sender-login:
+        required: false
+        type: string
+        default: ''
+      event-action:
+        required: false
+        type: string
+        default: ''
     secrets:
       REVIEWER_APP_ID:
         required: true
@@ -99,17 +107,53 @@ on:
         required: false
       XAI_API_KEY:
         required: false
+      ALLOWLIST_RESOLVER_APP_ID: { required: false }
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: { required: false }
 
 # Deny-all at the workflow level; write scopes needed by specific jobs are
 # declared on those jobs so any future job added here starts with no permissions.
 permissions: {}
 
 jobs:
+  authorize:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions: { contents: read }
+    steps:
+      - name: Validate helpers-ref input
+        env: { HELPERS_REF: ${{ inputs.helpers-ref }} }
+        run: 'test -n "$HELPERS_REF"'
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env: { HELPERS_REF: ${{ inputs.helpers-ref }}, GH_TOKEN: ${{ github.token }} }
+        run: 'echo "sha=$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq .sha)" >> "$GITHUB_OUTPUT"'
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with: { repository: mfrancza/agentic-development-workflow, ref: ${{ steps.resolve-ref.outputs.sha }}, path: _agentic-workflow, persist-credentials: false }
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env: { EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }} }
+        run: 'test "$(git -C _agentic-workflow rev-parse HEAD)" = "$EXPECTED_SHA"'
+      - name: Detect team references
+        id: detect
+        env: { ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }} }
+        run: |
+          has=false; [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and test("^[^/]+/[^/]+$"))' <<< "$ALLOWLIST" >/dev/null && has=true || true
+          echo "allowlist_has_team=$has" >> "$GITHUB_OUTPUT"; echo "needs_resolver=$has" >> "$GITHUB_OUTPUT"
+      - name: Mint installation token for allowlist resolver
+        id: allowlist-resolver
+        if: steps.detect.outputs.needs_resolver == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with: { client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}, private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }} }
+      - name: Check agent allowlist
+        uses: ./_agentic-workflow/.github/actions/check-agent-allowlist
+        with: { principal: ${{ inputs.sender-login }}, skip-gate: ${{ inputs.event-action == 'synchronize' }}, resolver-token: ${{ steps.allowlist-resolver.outputs.token }} }
   # Preflight job: resolves the reviewer set once per workflow run and fetches
   # the PR head SHA, then passes both to the matrix review job via outputs.
   # Fails loudly if the resolved set is empty (should not occur — the resolver
   # always yields at least inputs.default-model).
   resolve:
+    needs: authorize
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:

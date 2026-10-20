@@ -1,0 +1,46 @@
+name: Check agent allowlist
+description: Fail-closed authorization gate for agent-triggering identities.
+inputs:
+  principal:
+    description: Login to authorize.
+    required: true
+  additional-trusted-logins:
+    description: JSON array of known trusted logins.
+    required: false
+    default: '[]'
+  skip-gate:
+    description: Intentionally skip this event's sender gate.
+    required: false
+    default: 'false'
+  resolver-token:
+    description: Token used only when AGENT_ALLOWLIST contains team references.
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Resolve scripts directory
+      id: scripts-dir
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: echo "dir=$(cd \"$ACTION_PATH/../../scripts\" && pwd)" >> "$GITHUB_OUTPUT"
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ steps.scripts-dir.outputs.dir }}/package-lock.json
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      run: npm ci
+    - name: Check agent allowlist
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      env:
+        INPUT_PRINCIPAL: ${{ inputs.principal }}
+        INPUT_ADDITIONAL_TRUSTED_LOGINS: ${{ inputs.additional-trusted-logins }}
+        INPUT_SKIP_GATE: ${{ inputs.skip-gate }}
+        INPUT_RESOLVER_TOKEN: ${{ inputs.resolver-token }}
+        AGENT_ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}
+      run: npx --no-install tsx src/check-agent-allowlist.ts

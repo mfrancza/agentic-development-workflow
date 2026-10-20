@@ -8,7 +8,6 @@ export interface ResolutionError {
     | "not_found"
     | "forbidden"
     | "api_error"
-    | "empty_team"
     | "cross_org";
   message?: string;
 }
@@ -84,10 +83,9 @@ export async function expandTeamRefs(
         team_slug,
       });
 
-      if (members.length === 0) {
-        errors.push({ entry, reason: "empty_team" });
-        continue;
-      }
+      // An empty team is a successful lookup which simply grants no logins.
+      // Callers decide authorization after all references have resolved.
+      if (members.length === 0) continue;
 
       for (const member of members) {
         addLogin(member.login);

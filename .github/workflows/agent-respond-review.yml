@@ -8,10 +8,6 @@ permissions:
   contents: read
   pull-requests: read   # for check-reviewer-feedback activity (review threads + inline comments)
 
-concurrency:
-  group: agent-respond-review-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   respond-review:
     # Only respond to submitted reviews on PRs authored by the developer agent,
@@ -47,14 +43,7 @@ jobs:
     # reviews, so no need to repeat that check here.
     if: >
       github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]' &&
-      github.event.review.user.login != github.event.pull_request.user.login &&
-      (
-        contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.review.user.login) ||
-        github.event.review.user.login == 'mfrancza-reviewer-agent[bot]' ||
-        github.event.review.user.login == 'Copilot' ||
-        github.event.review.user.login == 'copilot-pull-request-reviewer[bot]' ||
-        github.event.review.user.login == 'github-copilot[bot]'
-      )
+      github.event.review.user.login != github.event.pull_request.user.login
     uses: ./.github/workflows/agent-respond-review-reusable.yml
     with:
       pr-number: ${{ github.event.pull_request.number }}
@@ -74,3 +63,5 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}

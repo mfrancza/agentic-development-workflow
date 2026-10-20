@@ -58,6 +58,10 @@ on:
           selector (e.g. v0, v0.0.2, or a full SHA).
         required: true
         type: string
+      sender-login:
+        required: false
+        type: string
+        default: ''
     secrets:
       DEVELOPER_APP_ID:
         required: true
@@ -74,12 +78,52 @@ on:
         required: false
       XAI_API_KEY:
         required: false
+      ALLOWLIST_RESOLVER_APP_ID: { required: false }
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: { required: false }
 
 permissions:
   contents: read
 
 jobs:
+  authorize:
+    runs-on: ubuntu-24.04
+    permissions: { contents: read }
+    steps:
+      - name: Validate helpers-ref input
+        env: { HELPERS_REF: ${{ inputs.helpers-ref }} }
+        run: 'test -n "$HELPERS_REF"'
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env: { HELPERS_REF: ${{ inputs.helpers-ref }}, GH_TOKEN: ${{ github.token }} }
+        run: 'echo "sha=$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq .sha)" >> "$GITHUB_OUTPUT"'
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with: { repository: mfrancza/agentic-development-workflow, ref: ${{ steps.resolve-ref.outputs.sha }}, path: _agentic-workflow, persist-credentials: false }
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env: { EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }} }
+        run: 'test "$(git -C _agentic-workflow rev-parse HEAD)" = "$EXPECTED_SHA"'
+      - name: Detect team references
+        id: detect
+        env: { ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}, ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }} }
+        run: |
+          has=false; admin=false
+          [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and test("^[^/]+/[^/]+$"))' <<< "$ALLOWLIST" >/dev/null && has=true || true
+          [[ -n "$ADMIN_ASSIGNEES" ]] && jq -e 'any(.[]; type == "string" and test("^[^/]+/[^/]+$"))' <<< "$ADMIN_ASSIGNEES" >/dev/null && admin=true || true
+          echo "allowlist_has_team=$has" >> "$GITHUB_OUTPUT"; [[ "$has" == true || "$admin" == true ]] && needs=true || needs=false; echo "needs_resolver=$needs" >> "$GITHUB_OUTPUT"
+      - name: Mint installation token for allowlist resolver
+        id: allowlist-resolver
+        if: steps.detect.outputs.needs_resolver == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with: { client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}, private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }} }
+      - name: Check agent allowlist
+        uses: ./_agentic-workflow/.github/actions/check-agent-allowlist
+        with: { principal: ${{ inputs.sender-login }}, resolver-token: ${{ steps.allowlist-resolver.outputs.token }} }
   groom:
+    needs: authorize
+    concurrency:
+      group: agent-groom-issue-${{ inputs.issue-number }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
