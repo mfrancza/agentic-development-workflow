@@ -46,6 +46,10 @@ fix_checks_allow = []
 # result from an earlier ON interval (the reconcile sweep also replaces it
 # within enable_protected_approval_gate_reconcile_minutes).
 # protected_pr_author_logins                         = ["<developer-agent-app-slug>[bot]"]
+# Whose approvals count. Empty ([]) counts any reviewer other than the author;
+# set it on public repositories. Team references need the allowlist-resolver
+# App secrets (ALLOWLIST_RESOLVER_APP_ID / ALLOWLIST_RESOLVER_APP_PRIVATE_KEY).
+# protected_approval_reviewers                       = ["<maintainer-login>", "<reviewer-app-slug>[bot]", "<org>/<team-slug>"]
 # required_approval_count                            = 2
 # enable_protected_approval_gate                     = true
 # enable_protected_approval_gate_reconcile_minutes   = 10

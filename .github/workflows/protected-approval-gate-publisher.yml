@@ -29,10 +29,14 @@ jobs:
   publish:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
     uses: ./.github/workflows/protected-approval-gate-reusable.yml
+    secrets:
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
     with:
       protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
       head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
       repo: ${{ github.repository }}

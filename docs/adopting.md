@@ -240,24 +240,24 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 
 **Secrets inventory per reusable** (source of truth: each reusable's own `secrets:` block)
 
-| Reusable                                       | Required secrets                                                | Optional secrets                                     |
-| ---------------------------------------------- | --------------------------------------------------------------- | ---------------------------------------------------- |
-| `agent-auto-trigger-reusable.yml`              | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | —                                                    |
-| `agent-design-reusable.yml`                    | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-fix-checks-reusable.yml`                | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-fix-deployment-reusable.yml`            | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-groom-reusable.yml`                     | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-implement-reusable.yml`                 | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-pr-merged-reusable.yml`                 | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | —                                                    |
-| `agent-resolve-conflicts-reusable.yml`         | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-respond-review-reusable.yml`            | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `agent-review-reusable.yml`                    | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`                   | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
-| `ci-reusable.yml`                              | —                                                               | —                                                    |
-| `protected-approval-gate-reusable.yml`         | —                                                               | —                                                    |
-| `protected-approval-gate-sweep-reusable.yml`   | —                                                               | —                                                    |
-| `secret-scan-reusable.yml`                     | —                                                               | —                                                    |
-| `terraform-ci-reusable.yml`                    | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | —                                                    |
-| `test-helper-ref-reusable.yml`                 | —                                                               | —                                                    |
+| Reusable                                     | Required secrets                                                | Optional secrets                                                  |
+| -------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------- |
+| `agent-auto-trigger-reusable.yml`            | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | —                                                                 |
+| `agent-design-reusable.yml`                  | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `agent-fix-checks-reusable.yml`              | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `agent-fix-deployment-reusable.yml`          | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `agent-groom-reusable.yml`                   | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `agent-implement-reusable.yml`               | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `agent-pr-merged-reusable.yml`               | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | —                                                                 |
+| `agent-resolve-conflicts-reusable.yml`       | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `agent-respond-review-reusable.yml`          | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `agent-review-reusable.yml`                  | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`                   | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `ci-reusable.yml`                            | —                                                               | —                                                                 |
+| `protected-approval-gate-reusable.yml`       | —                                                               | `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
+| `protected-approval-gate-sweep-reusable.yml` | —                                                               | `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
+| `secret-scan-reusable.yml`                   | —                                                               | —                                                                 |
+| `terraform-ci-reusable.yml`                  | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | —                                                                 |
+| `test-helper-ref-reusable.yml`               | —                                                               | —                                                                 |
 
 > **Note:** `terraform-ci-reusable.yml` is consumer-only for this repo and is not
 > part of the externally published adoption surface in v0 — see the
@@ -1593,8 +1593,13 @@ shows what the gate would decide and is never required.
   `PROTECTED_PR_AUTHOR_LOGINS` (JSON array of logins, for example
   `["<your-developer-app-slug>[bot]"]`), `REQUIRED_APPROVAL_COUNT` (for
   example `2`), `ENABLE_PROTECTED_APPROVAL_GATE` (`true` or `false`), and
-  optionally `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` (default `10`).
-- No secrets. The workflows use the workflow `GITHUB_TOKEN`.
+  optionally `PROTECTED_APPROVAL_REVIEWERS` (see **Which approvals count**
+  below) and `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` (default `10`).
+- Secrets: none, unless `PROTECTED_APPROVAL_REVIEWERS` contains a team
+  reference. Then the `ALLOWLIST_RESOLVER_APP_ID` and
+  `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` secrets of an `allowlist-resolver`
+  GitHub App are required (see below). Everything else uses the workflow
+  `GITHUB_TOKEN`.
 - All four caller workflows below. The backfill and reconcile are what keep
   results current after the gate is re-enabled, so do not skip them.
 
@@ -1633,10 +1638,14 @@ jobs:
   check-protected-approvals:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
     uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-reusable.yml@v0
+    secrets:
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
     with:
       protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
       head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
       repo: ${{ github.repository }}
@@ -1689,10 +1698,14 @@ permissions:
 jobs:
   sweep:
     uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@v0
+    secrets:
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
     with:
       protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       repo: ${{ github.repository }}
       helpers-ref: v0
 ```
@@ -1724,14 +1737,46 @@ concurrency:
 jobs:
   sweep:
     uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@v0
+    secrets:
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
     with:
       protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       repo: ${{ github.repository }}
       helpers-ref: v0
       interval-minutes: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES }}
 ```
+
+**Which approvals count.** By default (`PROTECTED_APPROVAL_REVIEWERS` empty
+or unset), the latest approval from **any** reviewer other than the PR author
+counts toward `REQUIRED_APPROVAL_COUNT`. Your branch protection's own
+required-review rule still demands approval from someone with write access,
+but on a public repository any GitHub account can submit an approving review,
+so the remaining approvals could come from anyone. Set
+`PROTECTED_APPROVAL_REVIEWERS` to a JSON array of the reviewers you trust:
+
+```json
+["<maintainer-login>", "<reviewer-app-slug>[bot]", "<your-org>/<team-slug>"]
+```
+
+- Only approvals from listed logins, or from members of listed teams, then
+  count. The PR author never counts, even if listed.
+- Bot reviewers count only if listed by login (for example
+  `<reviewer-app-slug>[bot]`).
+- Team references must belong to the organization that owns the repository.
+  Expanding them needs organization **Members: Read**, which `GITHUB_TOKEN`
+  does not have, so create an `allowlist-resolver` GitHub App with only
+  `Organization permissions → Members: Read` and `Repository permissions →
+  Metadata: Read`, install it on the organization, and store its client ID
+  and private key as `ALLOWLIST_RESOLVER_APP_ID` and
+  `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY`. A list of logins only needs no App.
+- If a team reference cannot be resolved (missing secrets, unknown team, or a
+  team from another organization), protected PRs fail the check with the
+  reason in the check summary rather than counting every reviewer. PRs from
+  unprotected authors are unaffected.
 
 **Enabling the gate.**
 

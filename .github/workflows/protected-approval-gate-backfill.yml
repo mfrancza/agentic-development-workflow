@@ -15,9 +15,13 @@ permissions:
 jobs:
   sweep:
     uses: ./.github/workflows/protected-approval-gate-sweep-reusable.yml
+    secrets:
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
     with:
       protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       repo: ${{ github.repository }}
       helpers-ref: ${{ github.sha }}

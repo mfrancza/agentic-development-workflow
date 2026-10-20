@@ -28,6 +28,11 @@ output "protected_pr_author_logins_variable_name" {
   value       = github_actions_variable.protected_pr_author_logins.variable_name
 }
 
+output "protected_approval_reviewers_variable_name" {
+  description = "Name of the PROTECTED_APPROVAL_REVIEWERS Actions variable."
+  value       = github_actions_variable.protected_approval_reviewers.variable_name
+}
+
 output "required_approval_count_variable_name" {
   description = "Name of the REQUIRED_APPROVAL_COUNT Actions variable."
   value       = github_actions_variable.required_approval_count.variable_name

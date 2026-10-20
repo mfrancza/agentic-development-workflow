@@ -11,6 +11,7 @@ Manages the GitHub Actions repository variables that configure agentic workflow 
 | `CODE_REVIEWERS` | JSON array | Individual GitHub logins requested as PR reviewers when the agent opens a PR and wants human sign-off. |
 | `FIX_CHECKS_ALLOW` | JSON array | Raw Checks API `check_runs[].name` values allowed to trigger the fix-checks agent. Empty (`[]`) disables all fix-checks delivery. |
 | `PROTECTED_PR_AUTHOR_LOGINS` | JSON array | PR author logins subject to the protected approval threshold. Defaults to `["mfrancza-developer-agent[bot]"]`. |
+| `PROTECTED_APPROVAL_REVIEWERS` | JSON array | Logins and `<org>/<team-slug>` references whose approvals count toward `REQUIRED_APPROVAL_COUNT`. Defaults to `[]`, meaning any reviewer other than the PR author counts. Team references need the allowlist-resolver App secrets. |
 | `REQUIRED_APPROVAL_COUNT` | string integer | Required non-self approvals for protected PRs. Defaults to `"2"`. |
 | `ENABLE_PROTECTED_APPROVAL_GATE` | string (`"true"` / `"false"`) | Enables the opt-in protected-approval gate. Defaults to `"false"`. |
 | `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` | string integer | Minimum interval for reconciliation sweeps. Defaults to `"10"`. |
@@ -33,6 +34,7 @@ module "agent_vars" {
   code_reviewers      = ["your-github-username"]
   # fix_checks_allow = ["ci / Typecheck and test"] # raw Checks API check_runs[].name values; [] disables fix-checks
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
+  # protected_approval_reviewers                     = ["<maintainer-login>", "<org>/<team-slug>"]
   # required_approval_count                          = 2
   # enable_protected_approval_gate                   = true
   # enable_protected_approval_gate_reconcile_minutes = 10
@@ -66,6 +68,7 @@ module "agent_vars" {
   code_reviewers      = ["your-github-username"]
   # fix_checks_allow = ["ci / Typecheck and test"] # raw Checks API check_runs[].name values; [] disables fix-checks
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
+  # protected_approval_reviewers                     = ["<maintainer-login>", "<org>/<team-slug>"]
   # required_approval_count                          = 2
   # enable_protected_approval_gate                   = true
   # enable_protected_approval_gate_reconcile_minutes = 10
@@ -116,6 +119,7 @@ provider "github" {
 | `code_reviewers` | `list(string)` | no | `[]` | Individual GitHub logins to request as PR reviewers. |
 | `fix_checks_allow` | `list(string)` | no | `[]` | Raw Checks API `check_runs[].name` values allowed to trigger fix-checks. Empty disables all fix-checks delivery. |
 | `protected_pr_author_logins` | `list(string)` | no | developer-agent bot | Protected PR-author logins, encoded as JSON. |
+| `protected_approval_reviewers` | `list(string)` | no | `[]` | Logins and `<org>/<team-slug>` references whose approvals count; empty counts any non-author reviewer. |
 | `required_approval_count` | `number` | no | `2` | Non-self approvals required for a protected PR. |
 | `enable_protected_approval_gate` | `bool` | no | `false` | Enables the protected-approval gate. |
 | `enable_protected_approval_gate_reconcile_minutes` | `number` | no | `10` | Reconciliation-sweep interval in minutes. |
@@ -134,6 +138,7 @@ provider "github" {
 | `code_reviewers_variable_name` | `string` | Name of the `CODE_REVIEWERS` Actions variable (`"CODE_REVIEWERS"`). |
 | `fix_checks_allow_variable_name` | `string` | Name of the `FIX_CHECKS_ALLOW` Actions variable (`"FIX_CHECKS_ALLOW"`). |
 | `protected_pr_author_logins_variable_name` | `string` | Name of `PROTECTED_PR_AUTHOR_LOGINS`. |
+| `protected_approval_reviewers_variable_name` | `string` | Name of `PROTECTED_APPROVAL_REVIEWERS`. |
 | `required_approval_count_variable_name` | `string` | Name of `REQUIRED_APPROVAL_COUNT`. |
 | `enable_protected_approval_gate_variable_name` | `string` | Name of `ENABLE_PROTECTED_APPROVAL_GATE`. |
 | `enable_protected_approval_gate_reconcile_minutes_variable_name` | `string` | Name of `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`. |
