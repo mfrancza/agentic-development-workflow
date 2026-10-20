@@ -108,7 +108,12 @@ resource "github_actions_variable" "auto_trigger_agents" {
 # `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL`, which evaluates to
 # DEFAULT_MODEL when DESIGN_DEFAULT_MODEL is empty, preserving existing behavior
 # for any repo that has not yet set this variable.
+# count = 0 when the value is empty so Terraform does not attempt to create a
+# GitHub Actions variable with an empty value (GitHub rejects these with 422).
+# When the value is later cleared, Terraform destroys the variable and the
+# `|| vars.DEFAULT_MODEL` fallback in the workflow takes over automatically.
 resource "github_actions_variable" "design_default_model" {
+  count         = var.design_default_model == "" ? 0 : 1
   repository    = var.repository
   variable_name = "DESIGN_DEFAULT_MODEL"
   value         = var.design_default_model

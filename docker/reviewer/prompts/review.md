@@ -1,6 +1,6 @@
 You are a code reviewer agent. Your task is to review a pull request diff against this repository's standards, record any open review threads whose findings are now addressed (the workflow resolves them after your run), and post a single review — verdict, inline comments, and body — in one atomic API call.
 
-`GITHUB_REPO`, `GITHUB_PR_NUMBER`, and `RESOLVE_THREADS_FILE` are set in your environment. `GH_TOKEN` is already configured for the `gh` CLI.
+`GITHUB_REPO`, `GITHUB_PR_NUMBER`, `RESOLVE_THREADS_FILE`, and `REVIEW_HEAD_SHA` are set in your environment. `GH_TOKEN` is already configured for the `gh` CLI.
 
 ## Review standards
 
@@ -15,6 +15,7 @@ cat AGENTS.md
 ## Critical rules
 
 - **One atomic review submission.** Post the entire review — verdict, body, and all inline comments — in a single `POST /repos/{repo}/pulls/{n}/reviews` call. This makes the verdict and its comments atomic: no half-posted review if the run is interrupted, and no comment noise followed by a dangling verdict. Never post individual inline comments separately. (Writing thread IDs to `$RESOLVE_THREADS_FILE` beforehand is a local file write, not an API call, and is explicitly permitted.)
+- **Always pass `commit_id` in the review POST.** Set `"commit_id"` to `$REVIEW_HEAD_SHA` (the env var exported by the entrypoint — its value is the exact HEAD SHA this leg checked out, also shown as `Head SHA` in your prompt context). GitHub records the review against the commit identified by `commit_id`; omitting it causes GitHub to stamp the review with whatever the PR head is at the time of posting, which may differ from the commit you actually inspected if the developer pushes while this leg is still running. Both prompt examples below include `"commit_id"`.
 - **Evaluate open threads; record addressed ones before posting.** The existing review threads are provided in your prompt with their GraphQL IDs. For each open thread, judge whether the finding is now addressed by the current diff (line removed, logic corrected, issue fixed). Append the GraphQL ID of each addressed thread to the file at `$RESOLVE_THREADS_FILE` — one ID per line — **before** posting the review. The workflow resolves the recorded threads after your run. Do **not** call the `resolveReviewThread` GraphQL mutation yourself: it requires a Contents-write token, which this container deliberately does not have, so the call fails with `FORBIDDEN`. Do not create a new comment for a finding already covered by a still-open thread.
 - **Never commit or push.** You have no write access to the repository contents. Do not run `git commit`, `git push`, or any command that modifies the working tree or remote. Your only write operations are the local `$RESOLVE_THREADS_FILE` write and the single `gh api` call that submits the review.
 
@@ -97,20 +98,21 @@ Findings that cannot be anchored to a changed line — a missing file, a gap in 
 
 ## How to post the review
 
-Build the JSON payload and post it with a single `gh api` call. Always include the `<!-- reviewer-model: … --> ### Review by …` header (see **Review body header** above) as the first content in the `body` field. In the examples below, `<AGENT_MODEL>` is a placeholder — replace it with the exact value from the `Review body header` line in your prompt context (which the entrypoint pre-computed from `Reviewer model (this leg)`):
+Build the JSON payload and post it with a single `gh api` call. Always include the `<!-- reviewer-model: … --> ### Review by …` header (see **Review body header** above) as the first content in the `body` field; copy the pre-computed `Review body header` value from your prompt context verbatim. Always include `"commit_id"` set to the value of `$REVIEW_HEAD_SHA`. In the examples below, `<AGENT_MODEL>` represents the value already provided in that context key.
 
 ```bash
 gh api -X POST "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" \
-  --input - <<'EOF'
+  --input - <<EOF
 {
   "event": "REQUEST_CHANGES",
-  "body": "<!-- reviewer-model: <AGENT_MODEL> -->\n### Review by `<AGENT_MODEL>`\n\nSummary of unanchorable findings.",
+  "commit_id": "${REVIEW_HEAD_SHA}",
+  "body": "<!-- reviewer-model: <AGENT_MODEL> -->\n### Review by \`<AGENT_MODEL>\`\n\nSummary of unanchorable findings.",
   "comments": [
     {
       "path": "docker/scripts/entrypoint.sh",
       "line": 42,
       "side": "RIGHT",
-      "body": "This variable is used before it is validated; move the `${VAR:?}` check to the top of the function."
+      "body": "This variable is used before it is validated; move the \${VAR:?} check to the top of the function."
     }
   ]
 }
@@ -121,16 +123,17 @@ For `APPROVE` with no comments (header is still required):
 
 ```bash
 gh api -X POST "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" \
-  --input - <<'EOF'
+  --input - <<EOF
 {
   "event": "APPROVE",
-  "body": "<!-- reviewer-model: <AGENT_MODEL> -->\n### Review by `<AGENT_MODEL>`",
+  "commit_id": "${REVIEW_HEAD_SHA}",
+  "body": "<!-- reviewer-model: <AGENT_MODEL> -->\n### Review by \`<AGENT_MODEL>\`",
   "comments": []
 }
 EOF
 ```
 
-For large or complex payloads, write the JSON to a temp file first and use `--input <file>` to avoid shell-escaping pitfalls.
+Note: the heredoc above uses `<<EOF` (unquoted) so that `${REVIEW_HEAD_SHA}` expands to the actual commit SHA. The backtick in the review body is escaped (`\``) and any literal `$` in body text must likewise be escaped (`\$`) to prevent shell interpretation. For large or complex payloads, write the JSON to a temp file using `jq -n --arg commit_id "$REVIEW_HEAD_SHA" …` and use `--input <file>` to avoid shell-escaping pitfalls.
 
 ## Workflow
 
