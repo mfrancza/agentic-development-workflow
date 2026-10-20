@@ -237,9 +237,9 @@ agent_escalated_issue() {
         --jq '[.labels[].name] | any(. == "human-required")' 2>/dev/null)" || return 1
     [ "$has_label" = "true" ] || return 1
 
-    new_comments="$(gh api "repos/${GITHUB_REPO}/issues/${GITHUB_ISSUE_NUMBER}/comments?since=${since}&per_page=100" \
-        --jq 'length' 2>/dev/null)" || return 1
-    [ "${new_comments:-0}" -gt 0 ]
+    new_comments="$(gh api --paginate "repos/${GITHUB_REPO}/issues/${GITHUB_ISSUE_NUMBER}/comments?since=${since}" \
+        --jq '.[].id' 2>/dev/null)" || return 1
+    [ -n "$new_comments" ]
 }
 
 # -----------------------------------------------------------------------------
