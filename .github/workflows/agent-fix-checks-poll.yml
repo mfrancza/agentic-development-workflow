@@ -1,0 +1,107 @@
+name: agent-fix-checks-poll
+
+# Delivery-independent backstop for check origins whose check_run event may be
+# suppressed. The allowlist below is still the authorization boundary: an
+# empty, missing, or malformed FIX_CHECKS_ALLOW dispatches no agent runs.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  checks: read
+  pull-requests: read
+
+jobs:
+  find-failing-agent-prs:
+    # Do not mint an installation token or invoke the reusable workflow until
+    # the raw Checks API names have passed the universal allowlist policy.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      prs: ${{ steps.find.outputs.prs }}
+    steps:
+      - name: Find agent PRs with allowed failing checks
+        id: find
+        env:
+          FIX_CHECKS_ALLOW: ${{ vars.FIX_CHECKS_ALLOW }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          AUTHOR: mfrancza-developer-agent[bot]
+        run: |
+          set -euo pipefail
+
+          # This is intentionally fail-closed. Operators must provide a
+          # non-empty JSON array of raw Checks API check_runs[].name values;
+          # workflow names and rendered Checks-tab labels are not canonical.
+          if ! jq -e '
+            type == "array" and length > 0 and
+            all(.[]; type == "string")
+          ' <<<"${FIX_CHECKS_ALLOW:-}" >/dev/null 2>&1; then
+            echo 'FIX_CHECKS_ALLOW is missing, malformed, or empty; polling dispatches nothing.'
+            echo 'prs=[]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          candidates="$(gh pr list \
+            --repo "$REPO" \
+            --state open \
+            --author "$AUTHOR" \
+            --search '-label:human-required' \
+            --limit 1000 \
+            --json number,headRefOid)"
+          selected='[]'
+
+          while IFS= read -r candidate; do
+            number="$(jq -r '.number' <<<"$candidate")"
+            head_sha="$(jq -r '.headRefOid' <<<"$candidate")"
+
+            # --slurp preserves every page: check-runs is paginated, and an
+            # allowed failure must not be hidden beyond GitHub's first page.
+            check_pages="$(gh api --paginate --slurp \
+              "repos/${REPO}/commits/${head_sha}/check-runs?per_page=100")"
+            if jq -e --argjson allow "$FIX_CHECKS_ALLOW" '
+              any(.[]; .check_runs[]? |
+                select(
+                  (.conclusion == "failure" or
+                   .conclusion == "timed_out" or
+                   .conclusion == "action_required") and
+                  (.name as $name | $allow | index($name))
+                )
+              )
+            ' <<<"$check_pages" >/dev/null; then
+              echo "PR #${number} at ${head_sha} has an allowed actionable check."
+              selected="$(jq -c \
+                --argjson candidate "$(jq -cn --argjson number "$number" --arg sha "$head_sha" '{number: $number, head_sha: $sha}')" \
+                '. + [$candidate]' <<<"$selected")"
+            fi
+          done < <(jq -c '.[]' <<<"$candidates")
+
+          echo "prs=${selected}" >> "$GITHUB_OUTPUT"
+
+  fix-checks:
+    needs: find-failing-agent-prs
+    if: needs.find-failing-agent-prs.outputs.prs != '[]'
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.find-failing-agent-prs.outputs.prs) }}
+    # Match the event-driven caller so a poll and a check-completion event
+    # cannot run the agent concurrently for the same PR.
+    concurrency:
+      group: agent-fix-checks-pr-${{ matrix.pr.number }}
+      cancel-in-progress: false
+    uses: ./.github/workflows/agent-fix-checks-reusable.yml
+    with:
+      pr-number: ${{ matrix.pr.number }}
+      head-sha-at-trigger: ${{ matrix.pr.head_sha }}
+      agent-login: mfrancza-developer-agent[bot]
+      image: ''
+      helpers-ref: ${{ github.sha }}
+    secrets:
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
