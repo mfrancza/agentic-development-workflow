@@ -91,9 +91,8 @@ on:
         required: true
         type: string
       sender-login:
-        required: false
+        required: true
         type: string
-        default: ''
     secrets:
       DEVELOPER_APP_ID:
         required: true
@@ -125,15 +124,28 @@ jobs:
       - name: Validate helpers-ref input
         env:
           HELPERS_REF: ${{ inputs.helpers-ref }}
-        run: 'test -n "$HELPERS_REF"'
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
       - name: Resolve helpers-ref to commit SHA
         id: resolve-ref
         env:
           HELPERS_REF: ${{ inputs.helpers-ref }}
           GH_TOKEN: ${{ github.token }}
-        run: 'echo "sha=$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq .sha)" >> "$GITHUB_OUTPUT"'
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
       - name: Check out upstream helper actions
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           repository: mfrancza/agentic-development-workflow
           ref: ${{ steps.resolve-ref.outputs.sha }}
@@ -142,13 +154,20 @@ jobs:
       - name: Verify helper checkout HEAD matches resolved SHA
         env:
           EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
-        run: 'test "$(git -C _agentic-workflow rev-parse HEAD)" = "$EXPECTED_SHA"'
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
       - name: Detect team references
         id: detect
         env:
           ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}
         run: |
-          has=false; [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and test("^[^/]+/[^/]+$"))' <<< "$ALLOWLIST" >/dev/null && has=true || true
+          has=false; [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "$ALLOWLIST" >/dev/null && has=true || true
           echo "allowlist_has_team=$has" >> "$GITHUB_OUTPUT"; echo "needs_resolver=$has" >> "$GITHUB_OUTPUT"
       - name: Mint installation token for allowlist resolver
         id: allowlist-resolver

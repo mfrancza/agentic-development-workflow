@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@actions/core", () => ({
-  getInput: vi.fn(), getBooleanInput: vi.fn(), info: vi.fn(), setFailed: vi.fn(),
+  getInput: vi.fn(), getBooleanInput: vi.fn(), info: vi.fn(), warning: vi.fn(), setFailed: vi.fn(),
 }));
 vi.mock("../src/lib/octokit.js", () => ({ getOctokit: vi.fn() }));
 
@@ -40,6 +40,23 @@ describe("check-agent-allowlist", () => {
   it("denies a login-only nonmember", async () => {
     process.env.AGENT_ALLOWLIST = '["alice"]'; inputs({ principal: "mallory" });
     await run(); expect(core.setFailed).toHaveBeenCalled(); expect(paginate).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a malformed slash-bearing entry accompanies an allowed login", async () => {
+    process.env.AGENT_ALLOWLIST = '["alice","a/b/c"]';
+    inputs({ principal: "alice", resolver_token: "token" });
+    await run();
+    expect(core.setFailed).toHaveBeenCalledWith(expect.stringContaining("a/b/c: malformed"));
+    expect(paginate).not.toHaveBeenCalled();
+  });
+
+  it("allows an explicit login when a referenced team is empty", async () => {
+    process.env.AGENT_ALLOWLIST = '["alice","org/empty"]';
+    inputs({ principal: "alice", resolver_token: "token" });
+    paginate.mockResolvedValue([]);
+    await run();
+    expect(core.setFailed).not.toHaveBeenCalled();
+    expect(core.warning).toHaveBeenCalledWith(expect.stringContaining("empty"));
   });
 
   it("allows a resolved team member, including paginated lookup", async () => {

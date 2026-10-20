@@ -613,13 +613,12 @@ image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
 image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0
 ```
 
-**Security note on allowlist gating.** Each reusable workflow performs
-_operational_ preflight checks (skip if a PR already exists, block on open
-blockers, etc.) but performs **no sender-allowlist check**. The caller stub is
-the security gate: add an `if:` condition that checks
-`contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` before
-the `uses:` line. The caller stubs in this repo's own `.github/workflows/`
-directory are safe references for how to structure those conditions.
+**Security note on allowlist gating.** Gated reusable workflows authorize the
+caller-supplied `sender-login` internally, before entering their concurrency
+group. Caller stubs must pass `github.event.sender.login`, but must not retain
+caller-side `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` or concurrency
+blocks. This is a breaking reusable-workflow contract change: callers upgrading
+to this version must add the required input.
 
 ---
 
@@ -658,11 +657,7 @@ jobs:
   groom:
     if: >
       github.event.label.name == 'agent:groom' &&
-      github.event.issue.state == 'open' &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
-    concurrency:
-      group: agent-groom-issue-${{ github.event.issue.number }}
-      cancel-in-progress: false
+      github.event.issue.state == 'open'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-groom-reusable.yml@v0
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -672,6 +667,7 @@ jobs:
       admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}
       logs-retention-days: 30
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -735,11 +731,7 @@ jobs:
   call-design:
     if: >
       github.event.label.name == 'agent:design' &&
-      github.event.issue.state == 'open' &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
-    concurrency:
-      group: agent-design-issue-${{ github.event.issue.number }}
-      cancel-in-progress: false
+      github.event.issue.state == 'open'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-design-reusable.yml@v0
     with:
       run-design: true
@@ -749,6 +741,7 @@ jobs:
       default-model: ${{ vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
       logs-retention-days: 30
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -769,6 +762,7 @@ jobs:
       pr-head-ref: ${{ github.event.pull_request.head.ref }}
       repo: ${{ github.repository }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -821,11 +815,7 @@ jobs:
   implement:
     if: >
       github.event.label.name == 'agent:developer' &&
-      github.event.issue.state == 'open' &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
-    concurrency:
-      group: agent-implement-issue-${{ github.event.issue.number }}
-      cancel-in-progress: false
+      github.event.issue.state == 'open'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@v0
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -835,6 +825,7 @@ jobs:
       code-reviewers: ${{ vars.CODE_REVIEWERS }}
       logs-retention-days: 30
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -893,14 +884,10 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       (
         (github.event.action == 'labeled' &&
-         github.event.label.name == 'agent:review' &&
-         contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)) ||
+         github.event.label.name == 'agent:review') ||
         (github.event.action == 'synchronize' &&
          contains(github.event.pull_request.labels.*.name, 'agent:review'))
       )
-    concurrency:
-      group: agent-review-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
@@ -912,6 +899,8 @@ jobs:
       default-model: ${{ vars.DEFAULT_MODEL }}
       logs-retention-days: 30
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
+      event-action: ${{ github.event.action }}
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
@@ -1384,13 +1373,13 @@ jobs:
       github.event.action == 'opened' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login) &&
       !contains(github.event.issue.labels.*.name, 'draft')
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
     with:
       transition: auto-groom
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1403,13 +1392,13 @@ jobs:
       github.event.action == 'labeled' &&
       github.event.label.name == 'plan' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
     with:
       transition: auto-design
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1423,13 +1412,13 @@ jobs:
       github.event.label.name == 'do' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login) &&
       !contains(github.event.issue.labels.*.name, 'draft')
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
     with:
       transition: auto-developer-do
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1442,13 +1431,13 @@ jobs:
       github.event.action == 'unlabeled' &&
       github.event.label.name == 'draft' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
     with:
       transition: auto-developer-undraft
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1470,6 +1459,7 @@ jobs:
       transition: auto-review
       pr-number: ${{ github.event.pull_request.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1481,13 +1471,13 @@ jobs:
       github.event_name == 'issues' &&
       github.event.action == 'closed' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
     with:
       transition: auto-developer-unblock
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}

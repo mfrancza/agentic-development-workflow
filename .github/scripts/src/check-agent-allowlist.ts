@@ -2,8 +2,6 @@ import * as core from "@actions/core";
 import { expandTeamRefs } from "./lib/expand-team-refs.js";
 import { getOctokit } from "./lib/octokit.js";
 
-const TEAM_REF = /^[^/]+\/[^/]+$/;
-
 function parseArray(value: string, input: string): string[] {
   try {
     const parsed: unknown = JSON.parse(value);
@@ -58,7 +56,10 @@ export async function run(): Promise<void> {
     return;
   }
 
-  const teamRefs = entries.filter((entry) => TEAM_REF.test(entry));
+  // Send every slash-bearing entry to the shared expander.  Its stricter
+  // validation ensures malformed values such as "org/team/extra" fail closed
+  // rather than disappearing from the login-only path.
+  const teamRefs = entries.filter((entry) => entry.includes("/"));
   const explicitLogins = entries.filter((entry) => !entry.includes("/"));
   if (teamRefs.length === 0) {
     if (includesLogin(explicitLogins, principal)) {
@@ -78,8 +79,17 @@ export async function run(): Promise<void> {
   const expansion = await expandTeamRefs(entries, getOctokit(token), {
     supportedOrg: process.env.GITHUB_REPOSITORY_OWNER ?? "",
   });
-  if (expansion.errors.length > 0) {
-    const details = expansion.errors
+  // A successfully resolved empty team grants no logins, but is not an
+  // allowlist-resolution failure. Keep the shared expander's error signal for
+  // callers that need fail-closed empty-team semantics.
+  const blockingErrors = expansion.errors.filter((error) => error.reason !== "empty_team");
+  for (const error of expansion.errors) {
+    if (error.reason === "empty_team") {
+      core.warning(`Allowlist team ${error.entry} is empty and grants no logins.`);
+    }
+  }
+  if (blockingErrors.length > 0) {
+    const details = blockingErrors
       .map((error) => `${error.entry}: ${error.reason}${error.message ? ` (${error.message})` : ""}`)
       .join("; ");
     fail(`team resolution failed (fail-closed): ${details}`);
