@@ -1,42 +1,23 @@
 name: protected-approval-gate-backfill
 
+# Dispatch after enabling the gate (any OFF → ON change) so every open pull
+# request gets the current result under the enforcing context, replacing any
+# stale result from an earlier enabled period. See docs/adopting.md.
 on:
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read
   pull-requests: read
   checks: write
 
 jobs:
-  find-open-prs:
-    runs-on: ubuntu-24.04
-    outputs:
-      prs: ${{ steps.prs.outputs.value }}
-    steps:
-      - id: prs
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          prs="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 1000 --json number,headRefOid | jq -c 'unique_by(.headRefOid) | map({number, sha: .headRefOid})')"
-          echo "value=${prs}" >> "$GITHUB_OUTPUT"
-  publish:
-    needs: find-open-prs
-    if: needs.find-open-prs.outputs.prs != '[]'
-    strategy:
-      fail-fast: false
-      matrix:
-        pr: ${{ fromJSON(needs.find-open-prs.outputs.prs) }}
-    concurrency:
-      group: protected-approval-gate-sha-${{ matrix.pr.sha }}
-      cancel-in-progress: false
-    uses: ./.github/workflows/protected-approval-gate-reusable.yml
+  sweep:
+    uses: ./.github/workflows/protected-approval-gate-sweep-reusable.yml
     with:
       protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      pr-number: ${{ matrix.pr.number }}
-      head-sha: ${{ matrix.pr.sha }}
       repo: ${{ github.repository }}
       helpers-ref: ${{ github.sha }}

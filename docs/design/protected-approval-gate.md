@@ -813,9 +813,10 @@ and `docs/adopting.md`:
    `ENABLE_PROTECTED_APPROVAL_GATE = true` (for adopters who manage the
    Actions variable manually, set it as a follow-on step).
 2. Dispatch the one-shot reconciliation workflow
-   `protected-approval-gate-backfill.yml` (a trivial
-   `workflow_dispatch`-only wrapper around the publisher activity that
-   fans out across `gh pr list --state open --json number,headRefOid`).
+   `protected-approval-gate-backfill.yml` (a `workflow_dispatch`-only
+   caller of `protected-approval-gate-sweep-reusable.yml`, which fans
+   out across `gh pr list --state open --json number,headRefOid` and
+   runs the publisher activity once per distinct head SHA).
    It publishes the current evaluation under the enforcing context on
    every open PR's live head SHA. That overwrites any `success` left
    from an earlier ON interval (cases (a) and (c)) and posts a result on
@@ -839,6 +840,33 @@ cannot block merges. The publisher stops posting the enforcing
 context going forward (per state 1 of Decision 7). No invalidation
 pass is needed on disable: the next enable re-publishes current
 results through the backfill and the reconcile sweep.
+
+**Without the `branch-protection` module.** An adopter who manages
+branch protection outside this repo's Terraform (their own ruleset,
+an organization ruleset, or classic branch protection) has two
+independent settings: `ENABLE_PROTECTED_APPROVAL_GATE` controls
+whether the enforcing context is **published**, and their branch
+protection rule controls whether it is **enforced**. The two possible
+mismatches are handled as follows:
+
+- *Variable on, check not required.* The enforcing context is
+  published but nothing requires it. This is an accepted state:
+  `docs/adopting.md` states that the gate is not enforced until the
+  branch protection rule requires `protected-approval-gate` with
+  GitHub Actions as its source.
+- *Check required, variable off or unset.* Only the preview context is
+  published, so the required context never appears and every PR to the
+  protected branch is blocked. This is prevented by documented
+  ordering rather than code: enable by turning the variable on,
+  running the backfill, and only then adding the required check;
+  disable by removing the required check before turning the variable
+  off.
+
+`docs/adopting.md` documents both orderings and the manual ruleset and
+classic branch-protection steps, including that the required check's
+source must be GitHub Actions (the module's `integration_id = 15368`
+pin). Without that source restriction anyone with write access could
+satisfy the check by posting a commit status with the same name.
 
 **Alternatives considered.**
 
@@ -1136,7 +1164,10 @@ Decision 8:
 To make reconciliation survive this (and the equivalent case where
 `B` for a `closed` event is dropped by a later notifier-driven C),
 the design adds a **periodic reconciliation sweep workflow**
-`protected-approval-gate-reconcile.yml`:
+`protected-approval-gate-reconcile.yml`. It is a thin caller of
+`protected-approval-gate-sweep-reusable.yml`, which holds the open-PR
+fan-out and the interval guard so that adopters' reconcile and backfill
+stubs share the same implementation:
 
 - Triggered by `schedule: cron: "* * * * *"` (every minute — a
   build-time literal because `on.schedule.cron` does not evaluate
@@ -1145,8 +1176,10 @@ the design adds a **periodic reconciliation sweep workflow**
   tunable via a Terraform-managed Actions variable
   `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` (default
   10 minutes) consumed by the activity's own early-exit guard:
-  before doing any work, the activity calls
-  `GET /repos/{owner}/{repo}/actions/workflows/protected-approval-gate-reconcile.yml/runs?status=success&per_page=10`,
+  before doing any work, the sweep calls
+  `GET /repos/{owner}/{repo}/actions/workflows/<caller workflow file>/runs?status=success&per_page=10`
+  (the caller's file name is taken from `GITHUB_WORKFLOW_REF`, which in
+  a called workflow describes the caller),
   excludes the current run (identified by `GITHUB_RUN_ID`), and
   exits 0 immediately when the most recent prior successful run
   completed less than `minutes` ago. The committed `* * * * *` cron
@@ -1612,15 +1645,19 @@ AGENTS.md § "Keeping Documentation Current"):
   it isn't paired with a human approval. Out of scope — the status quo
   already correctly treats the reviewer agent's approval as non-blocking
   for `required_approving_review_count = 1`.
-- **Scheduled re-posting of the check on long-open PRs *in the common
-  case*.** Event-driven triggers cover every state change that matters
-  in the normal path. The scheduled
-  `protected-approval-gate-reconcile.yml` sweep (added by
-  Decision 8a's pending-replacement safety net) runs for a different
-  reason — it reconciles shared-SHA check-runs when a per-event
-  departed-SHA cleanup was dropped by Actions' concurrency pending-run
-  replacement — and only writes when a shared-SHA state has actually
-  changed. It is not a general "re-run on a timer" pattern.
+- **Relying on scheduled re-posting in the common case.**
+  Event-driven triggers cover every state change that matters in the
+  normal path. The scheduled `protected-approval-gate-reconcile.yml`
+  sweep re-publishes the check on every open PR each interval, but it
+  exists as a safety net: it reconciles shared-SHA check-runs when a
+  per-event departed-SHA cleanup was dropped by Actions' concurrency
+  pending-run replacement (Decision 8a), and it replaces stale results
+  after a re-enable when the backfill is skipped (Decision 7).
+- **Merge queues.** The publisher does not run on `merge_group`
+  events, so a branch that uses a merge queue and requires
+  `protected-approval-gate` would stall queue entries waiting for a
+  check that is never posted. `docs/adopting.md` documents this as
+  unsupported.
 - **GitHub-side "required reviewer teams" or CODEOWNERS integration.** The
   gate operates purely on review counts.
 - **Rulesets scoped to agent branches** (e.g. `agent/*`, `design/*`).

@@ -68,6 +68,7 @@ Complete these steps in order before wiring up any reusable workflows.
   - [agent-auto-trigger](#agent-auto-trigger-reusable-workflow)
   - [ci](#ci-reusable-workflow)
   - [secret-scan](#secret-scan-reusable-workflow)
+  - [protected-approval-gate](#protected-approval-gate-reusable-workflows)
 - [Manual repository settings](#manual-repository-settings)
 - [Adoption gotchas and troubleshooting](#adoption-gotchas-and-troubleshooting)
 
@@ -252,6 +253,7 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 | `agent-review-reusable.yml`                    | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`                   | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
 | `ci-reusable.yml`                              | —                                                               | —                                                    |
 | `protected-approval-gate-reusable.yml`         | —                                                               | —                                                    |
+| `protected-approval-gate-sweep-reusable.yml`   | —                                                               | —                                                    |
 | `secret-scan-reusable.yml`                     | —                                                               | —                                                    |
 | `terraform-ci-reusable.yml`                    | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | —                                                    |
 | `test-helper-ref-reusable.yml`                 | —                                                               | —                                                    |
@@ -564,59 +566,6 @@ All reusable workflows are called via:
 
 ```yaml
 uses: mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@v0
-```
-
-For the protected-approval check, use a trusted publisher plus a zero-
-permission review notifier. Do not run the publisher directly on
-`pull_request` or `pull_request_review`: those events load workflow YAML from
-the PR and cannot publish Checks API results for fork PRs. The publisher runs
-on `pull_request_target` and on completion of the notifier; pass the same
-trusted helpers ref as the reusable workflow ref.
-
-```yaml
-name: protected-approval-gate-publisher
-on:
-  pull_request_target:
-    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
-  workflow_run:
-    workflows: ["protected-approval-gate-notify"]
-    types: [completed]
-permissions:
-  contents: read
-  pull-requests: read
-  checks: write
-concurrency:
-  group: protected-approval-gate-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
-  cancel-in-progress: false
-```
-
-The `workflow_run` publishing job must be guarded with
-`github.event.workflow_run.pull_requests[0] != null`. The notifier is a
-separate workflow with `pull_request_review` types `submitted`, `edited`, and
-`dismissed`, `permissions: {}`, and one `true` step. Give it the matching
-`protected-approval-gate-pr-${{ github.event.pull_request.number }}`
-concurrency group with `cancel-in-progress: false`.
-
-Inside the publisher job, call the reusable and provide the pull request
-metadata from the event:
-
-```yaml
-jobs:
-  check-protected-approvals:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
-    permissions:
-      contents: read
-      pull-requests: read
-      checks: write
-    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-reusable.yml@v0
-    with:
-      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
-      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
-      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
-      head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
-      repo: ${{ github.repository }}
-      helpers-ref: v0
 ```
 
 Pass `image:` to pull the published agent container image from GHCR — this
@@ -1546,6 +1495,233 @@ jobs:
 
 **Trust considerations.** No secrets are used. The gitleaks binary is
 SHA-256-verified before execution to prevent tampered releases from entering CI.
+
+---
+
+### `protected-approval-gate` reusable workflows
+
+**What it does.**  
+An opt-in required status check that blocks merging a pull request authored
+by a protected login (for example your developer-agent App,
+`<your-developer-app-slug>[bot]`) until it has `REQUIRED_APPROVAL_COUNT`
+approvals from someone other than its author. Pull requests from other authors
+pass immediately. Two reusable workflows implement it:
+
+- `protected-approval-gate-reusable.yml` evaluates one pull request. Your
+  publisher calls it on pull request and review events.
+- `protected-approval-gate-sweep-reusable.yml` re-evaluates every open pull
+  request. Your backfill and reconcile workflows call it.
+
+Both publish the result through the Checks API under the name
+`protected-approval-gate` while the gate is enabled, and
+`protected-approval-gate (preview)` while it is disabled. The preview check
+shows what the gate would decide and is never required.
+
+**Prerequisites.**
+
+- Actions variables (via the `agent-vars` module or set manually):
+  `PROTECTED_PR_AUTHOR_LOGINS` (JSON array of logins, for example
+  `["<your-developer-app-slug>[bot]"]`), `REQUIRED_APPROVAL_COUNT` (for
+  example `2`), `ENABLE_PROTECTED_APPROVAL_GATE` (`true` or `false`), and
+  optionally `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` (default `10`).
+- No secrets. The workflows use the workflow `GITHUB_TOKEN`.
+- All four caller workflows below. The backfill and reconcile are what keep
+  results current after the gate is re-enabled, so do not skip them.
+
+**Caller stubs.**
+
+The publisher runs on `pull_request_target` and on completion of the notifier,
+so it always executes trusted base-branch code and can publish results for fork
+pull requests. Do not run it on `pull_request` or `pull_request_review`: those
+events load workflow YAML from the pull request and cannot publish Checks API
+results for forks. The notifier executes nothing; its completion is the signal
+the publisher listens for. Its `name:` must exactly match the publisher's
+`workflow_run.workflows` filter.
+
+`.github/workflows/protected-approval-gate-publisher.yml`:
+
+```yaml
+name: protected-approval-gate-publisher
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, edited, ready_for_review, closed]
+  workflow_run:
+    workflows: ["protected-approval-gate-notify"]
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+concurrency:
+  group: protected-approval-gate-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  check-protected-approvals:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
+    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-reusable.yml@v0
+    with:
+      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
+      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
+      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
+      head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
+      repo: ${{ github.repository }}
+      helpers-ref: v0
+      departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
+      departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
+```
+
+`departed-sha` and `departed-pr-number` re-evaluate the commit a pull request
+just left (after a push or close), so another open pull request sharing that
+commit does not keep a result computed for the departed one.
+
+`.github/workflows/protected-approval-gate-notify.yml`:
+
+```yaml
+name: protected-approval-gate-notify
+
+on:
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+permissions: {}
+
+concurrency:
+  group: protected-approval-gate-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  notify:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: 'true'
+```
+
+`.github/workflows/protected-approval-gate-backfill.yml` (dispatch it by hand
+after enabling the gate):
+
+```yaml
+name: protected-approval-gate-backfill
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  sweep:
+    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@v0
+    with:
+      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
+      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
+      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      repo: ${{ github.repository }}
+      helpers-ref: v0
+```
+
+`.github/workflows/protected-approval-gate-reconcile.yml` (scheduled safety
+net). The cron fires every minute because schedules cannot read Actions
+variables; the sweep skips runs that come sooner than
+`ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` after the last successful
+one:
+
+```yaml
+name: protected-approval-gate-reconcile
+
+on:
+  schedule:
+    - cron: '* * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  checks: write
+
+concurrency:
+  group: protected-approval-gate-reconcile
+  cancel-in-progress: false
+
+jobs:
+  sweep:
+    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@v0
+    with:
+      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
+      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
+      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
+      repo: ${{ github.repository }}
+      helpers-ref: v0
+      interval-minutes: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES }}
+```
+
+**Enabling the gate.**
+
+Publishing and enforcing are separate. Setting `ENABLE_PROTECTED_APPROVAL_GATE`
+to `true` makes the workflows publish the `protected-approval-gate` check, but
+**nothing is enforced until your branch protection rules require that check**.
+Until then the check is informational only.
+
+Enable in this order:
+
+- Set `ENABLE_PROTECTED_APPROVAL_GATE` to `true`, with
+  `PROTECTED_PR_AUTHOR_LOGINS` and `REQUIRED_APPROVAL_COUNT` set.
+- Dispatch `protected-approval-gate-backfill` and wait for it to finish, so
+  every open pull request has a current result.
+- Require the `protected-approval-gate` status check on your default branch,
+  with **GitHub Actions** as its source:
+  - **With this project's `branch-protection` Terraform module:** set
+    `enable_protected_approval_gate = true` (it also sets the Actions variable
+    through `agent-vars`) and apply. The module pins the check's source to
+    GitHub Actions (`integration_id = 15368`). Because the variable and the
+    rule change in one apply, dispatch the backfill immediately afterwards;
+    open pull requests without a current result stay blocked until it
+    finishes.
+  - **With a repository or organization ruleset:** edit the ruleset that
+    targets your default branch, enable **Require status checks to pass**, add
+    the check `protected-approval-gate`, and select **GitHub Actions** as its
+    source.
+  - **With classic branch protection:** edit the rule for your default branch,
+    enable **Require status checks to pass before merging**, add
+    `protected-approval-gate`, and select **GitHub Actions** as its source.
+
+The source matters: if the required check accepts any source, anyone with
+write access can satisfy it by posting a commit status named
+`protected-approval-gate`.
+
+**Disabling the gate.** Remove the required check from your branch protection
+rules first, then set `ENABLE_PROTECTED_APPROVAL_GATE` to `false`. In the other
+order, the workflows stop publishing `protected-approval-gate` (only the
+`(preview)` check is posted) while the rule still requires it, so every pull
+request to the branch is blocked. With the Terraform modules, setting
+`enable_protected_approval_gate = false` changes both in one apply.
+
+**Re-enabling the gate.** Follow the enabling steps again. While the gate was
+disabled, only the preview check was updated, so an open pull request whose
+head has not changed can still carry an enforcing result from the earlier
+enabled period. The backfill replaces it, and the reconcile sweep replaces it
+within `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` if the backfill is
+skipped.
+
+**Limitations.** Merge queues are not supported. The publisher does not run on
+`merge_group` events, so requiring `protected-approval-gate` on a branch that
+uses a merge queue stalls entries waiting for a check that is never posted.
+
+**Trust considerations.** The publisher and sweep run trusted base-branch code
+and never check out pull request content. The required check's GitHub Actions
+source restricts who can satisfy it, but any workflow in your repository with
+`checks: write` could post a check under the same name; see the residual-risk
+discussion in
+[`docs/design/protected-approval-gate.md`](design/protected-approval-gate.md)
+(Decision 5).
 
 ---
 
