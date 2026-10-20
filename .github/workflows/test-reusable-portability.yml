@@ -296,6 +296,7 @@ jobs:
             "secret-scan-reusable.yml"
             "agent-pr-merged-reusable.yml"
             "terraform-ci-reusable.yml"
+            "test-helper-ref-reusable.yml"
           )
 
           for f in .github/workflows/*-reusable.yml; do
@@ -474,6 +475,7 @@ jobs:
             "secret-scan-reusable.yml"
             "agent-pr-merged-reusable.yml"
             "terraform-ci-reusable.yml"
+            "test-helper-ref-reusable.yml"
           )
 
           for f in .github/workflows/*-reusable.yml; do

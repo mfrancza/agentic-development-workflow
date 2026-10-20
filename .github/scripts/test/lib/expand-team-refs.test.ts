@@ -74,7 +74,7 @@ describe("expandTeamRefs", () => {
     expect(result).toEqual({ expanded: ["alice", "bob", "carol"], errors: [] });
   });
 
-  it("reports an empty team without failing other entries", async () => {
+  it("reports an empty team while preserving explicit logins", async () => {
     const result = await expandTeamRefs(
       ["alice", "acme/empty"],
       makeOctokit(vi.fn().mockResolvedValue([])),

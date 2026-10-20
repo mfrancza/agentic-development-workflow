@@ -72,11 +72,16 @@ on:
           selector (e.g. v0, v0.0.2, or a full SHA).
         required: true
         type: string
+      sender-login:
+        type: string
+        required: true
     secrets:
       DEVELOPER_APP_ID:
         required: true
       DEVELOPER_APP_PRIVATE_KEY:
         required: true
+      ALLOWLIST_RESOLVER_APP_ID: { required: false }
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: { required: false }
 
 # Label writes go through the minted App token; the workflow itself only needs
 # contents: read to check out the upstream helper actions.
@@ -84,9 +89,81 @@ permissions:
   contents: read
 
 jobs:
+  authorize:
+    runs-on: ubuntu-24.04
+    permissions: { contents: read }
+    steps:
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+      - name: Detect team references
+        id: detect
+        env:
+          ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}
+        run: |
+          set -euo pipefail
+          has=false
+          if [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "$ALLOWLIST" >/dev/null; then
+            has=true
+          fi
+          echo "allowlist_has_team=$has" >> "$GITHUB_OUTPUT"; echo "needs_resolver=$has" >> "$GITHUB_OUTPUT"
+      - name: Mint installation token for allowlist resolver
+        id: allowlist-resolver
+        if: steps.detect.outputs.needs_resolver == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
+      - name: Check agent allowlist
+        uses: ./_agentic-workflow/.github/actions/check-agent-allowlist
+        with:
+          allowlist: ${{ vars.AGENT_ALLOWLIST }}
+          principal: ${{ inputs.sender-login }}
+          skip-gate: ${{ inputs.transition == 'auto-review' }}
+          resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
   # ── Transition 1 ─────────────────────────────────────────────────────────────
   # issues.opened → agent:groom
   auto-groom:
+    needs: authorize
     if: inputs.transition == 'auto-groom'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -155,6 +232,7 @@ jobs:
   # ── Transition 2 ─────────────────────────────────────────────────────────────
   # issues.labeled (plan) → agent:design
   auto-design:
+    needs: authorize
     if: inputs.transition == 'auto-design'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -223,6 +301,7 @@ jobs:
   # ── Transition 3 ─────────────────────────────────────────────────────────────
   # issues.labeled (do) → agent:developer
   auto-developer-do:
+    needs: authorize
     if: inputs.transition == 'auto-developer-do'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -310,6 +389,7 @@ jobs:
   # ── Transition 4 ─────────────────────────────────────────────────────────────
   # issues.unlabeled (draft) → agent:developer
   auto-developer-undraft:
+    needs: authorize
     if: inputs.transition == 'auto-developer-undraft'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -401,6 +481,7 @@ jobs:
   # executing PR-authored local actions with secrets in scope. See
   # docs/design/auto-trigger-agents.md Decision 3.
   auto-review:
+    needs: authorize
     if: inputs.transition == 'auto-review'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -425,6 +506,7 @@ jobs:
   # ── Transition 6 ─────────────────────────────────────────────────────────────
   # issues.closed → agent:developer (cascade on newly-unblocked issues)
   auto-developer-unblock:
+    needs: authorize
     if: inputs.transition == 'auto-developer-unblock'
     runs-on: ubuntu-24.04
     timeout-minutes: 10

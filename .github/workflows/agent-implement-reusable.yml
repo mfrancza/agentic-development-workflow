@@ -3,9 +3,9 @@ name: agent-implement (reusable)
 # Reusable workflow — call this from agent-implement.yml (or any external
 # caller) to run the developer agent on a specific issue.
 #
-# Security: allowlist gating is the caller's responsibility; this reusable
-# performs no sender check. Keep the allowlist condition in the caller stub.
-# The preflight checks here (skip-if-PR-exists, skip-if-draft,
+# Security: the authorize job checks the caller-provided sender against the
+# configured allowlist before work enters the per-issue concurrency group. The
+# preflight checks here (skip-if-PR-exists, skip-if-draft,
 # block-on-open-blockers) are operational checks, not security gates, so they
 # live in the reusable.
 #
@@ -61,6 +61,10 @@ on:
           selector (e.g. v0, v0.0.2, or a full SHA).
         required: true
         type: string
+      sender-login:
+        description: 'Login of the actor that applied the label.'
+        required: true
+        type: string
     secrets:
       DEVELOPER_APP_ID:
         required: true
@@ -77,12 +81,90 @@ on:
         required: false
       XAI_API_KEY:
         required: false
+      ALLOWLIST_RESOLVER_APP_ID:
+        required: false
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY:
+        required: false
 
 permissions:
   contents: read
 
 jobs:
+  authorize:
+    runs-on: ubuntu-24.04
+    permissions: { contents: read }
+    steps:
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+      - name: Detect team references
+        id: detect
+        env:
+          ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}
+        run: |
+          set -euo pipefail
+          has=false
+          if [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "$ALLOWLIST" >/dev/null; then
+            has=true
+          fi
+          echo "allowlist_has_team=$has" >> "$GITHUB_OUTPUT"; echo "needs_resolver=$has" >> "$GITHUB_OUTPUT"
+      - name: Mint installation token for allowlist resolver
+        id: allowlist-resolver
+        if: steps.detect.outputs.needs_resolver == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
+      - name: Check agent allowlist
+        uses: ./_agentic-workflow/.github/actions/check-agent-allowlist
+        with:
+          allowlist: ${{ vars.AGENT_ALLOWLIST }}
+          principal: ${{ inputs.sender-login }}
+          resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
   implement:
+    needs: authorize
+    concurrency:
+      group: agent-implement-issue-${{ inputs.issue-number }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 

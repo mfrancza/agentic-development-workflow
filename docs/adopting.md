@@ -613,13 +613,12 @@ image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
 image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0
 ```
 
-**Security note on allowlist gating.** Each reusable workflow performs
-_operational_ preflight checks (skip if a PR already exists, block on open
-blockers, etc.) but performs **no sender-allowlist check**. The caller stub is
-the security gate: add an `if:` condition that checks
-`contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)` before
-the `uses:` line. The caller stubs in this repo's own `.github/workflows/`
-directory are safe references for how to structure those conditions.
+**Security note on allowlist gating.** Gated reusable workflows authorize the
+caller-supplied `sender-login` internally, before entering their concurrency
+group. Caller stubs must pass `github.event.sender.login`, but must not retain
+caller-side `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` or concurrency
+blocks. This is a breaking reusable-workflow contract change: callers upgrading
+to this version must add the required input.
 
 ---
 
@@ -658,11 +657,7 @@ jobs:
   groom:
     if: >
       github.event.label.name == 'agent:groom' &&
-      github.event.issue.state == 'open' &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
-    concurrency:
-      group: agent-groom-issue-${{ github.event.issue.number }}
-      cancel-in-progress: false
+      github.event.issue.state == 'open'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-groom-reusable.yml@v0
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -672,12 +667,15 @@ jobs:
       admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}
       logs-retention-days: 30
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 ```
 
 **Trust considerations.** The reusable mints a short-lived developer-agent
@@ -733,11 +731,7 @@ jobs:
   call-design:
     if: >
       github.event.label.name == 'agent:design' &&
-      github.event.issue.state == 'open' &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
-    concurrency:
-      group: agent-design-issue-${{ github.event.issue.number }}
-      cancel-in-progress: false
+      github.event.issue.state == 'open'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-design-reusable.yml@v0
     with:
       run-design: true
@@ -747,12 +741,15 @@ jobs:
       default-model: ${{ vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
       logs-retention-days: 30
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   call-undraft:
     if: >
@@ -765,12 +762,15 @@ jobs:
       pr-head-ref: ${{ github.event.pull_request.head.ref }}
       repo: ${{ github.repository }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 ```
 
 **Trust considerations.** Same as `agent-groom`: short-lived token minted from
@@ -815,11 +815,7 @@ jobs:
   implement:
     if: >
       github.event.label.name == 'agent:developer' &&
-      github.event.issue.state == 'open' &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
-    concurrency:
-      group: agent-implement-issue-${{ github.event.issue.number }}
-      cancel-in-progress: false
+      github.event.issue.state == 'open'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@v0
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -829,12 +825,15 @@ jobs:
       code-reviewers: ${{ vars.CODE_REVIEWERS }}
       logs-retention-days: 30
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 ```
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
@@ -885,14 +884,10 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       (
         (github.event.action == 'labeled' &&
-         github.event.label.name == 'agent:review' &&
-         contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)) ||
+         github.event.label.name == 'agent:review') ||
         (github.event.action == 'synchronize' &&
          contains(github.event.pull_request.labels.*.name, 'agent:review'))
       )
-    concurrency:
-      group: agent-review-pr-${{ github.event.pull_request.number }}
-      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
@@ -904,12 +899,16 @@ jobs:
       default-model: ${{ vars.DEFAULT_MODEL }}
       logs-retention-days: 30
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
+      event-action: ${{ github.event.action }}
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 ```
 
 **Trust considerations.** The reviewer App token has Contents (R) only — the
@@ -960,24 +959,16 @@ permissions:
   contents: read
   pull-requests: read
 
-concurrency:
-  group: agent-respond-review-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   respond-review:
-    # Gate on PR author (developer-agent bot) AND review author (trusted actor).
+    # Gate on the PR author (developer-agent bot).
     # Adjust the PR-author login to match your developer-agent App slug.
     # The second line excludes reviews authored by the PR author itself: the
-    # developer agent is on AGENT_ALLOWLIST, so without it the agent's own
+    # developer agent can be trusted, so without it the agent's own
     # thread replies would re-trigger this workflow indefinitely.
     if: >
       github.event.pull_request.user.login == '<developer-agent-slug>[bot]' &&
-      github.event.review.user.login != github.event.pull_request.user.login &&
-      (
-        contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.review.user.login) ||
-        github.event.review.user.login == '<reviewer-agent-slug>[bot]'
-      )
+      github.event.review.user.login != github.event.pull_request.user.login
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-respond-review-reusable.yml@v0
     with:
       pr-number: ${{ github.event.pull_request.number }}
@@ -995,20 +986,21 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 ```
 
-> **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` and
-> `<reviewer-agent-slug>[bot]` with your actual App slugs. The review-author
-> gate prevents outside actors from driving prompt injection against the
-> developer agent on public repos. Keep the `review.user.login !=
-> pull_request.user.login` line and the `review-author` / `pr-author` inputs
-> exactly as shown: together they are the two layers of the self-trigger
-> guard, and the reusable rejects the call if either input is absent.
+> **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` with
+> your actual App slug. Keep the `review.user.login != pull_request.user.login`
+> line and the `review-author` / `pr-author` inputs exactly as shown: together
+> they are the two layers of the self-trigger guard. The reusable authorizes
+> `review-author` against `AGENT_ALLOWLIST` before it enters its per-PR lock.
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
 Workflows (R/W) to push the response commits. The review body and inline
 comments are attacker-controlled text that flows into a Claude prompt; the
-review-author gate limits the prompt injection surface to actors you trust.
+reusable's review-author gate limits the prompt injection surface to actors
+you trust.
 
 ---
 
@@ -1372,16 +1364,18 @@ jobs:
       github.event.action == 'opened' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login) &&
       !contains(github.event.issue.labels.*.name, 'draft')
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
     with:
       transition: auto-groom
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   auto-design:
     if: >
@@ -1389,16 +1383,18 @@ jobs:
       github.event.action == 'labeled' &&
       github.event.label.name == 'plan' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
     with:
       transition: auto-design
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   auto-developer-do:
     if: >
@@ -1407,16 +1403,18 @@ jobs:
       github.event.label.name == 'do' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login) &&
       !contains(github.event.issue.labels.*.name, 'draft')
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
     with:
       transition: auto-developer-do
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   auto-developer-undraft:
     if: >
@@ -1424,16 +1422,18 @@ jobs:
       github.event.action == 'unlabeled' &&
       github.event.label.name == 'draft' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
     with:
       transition: auto-developer-undraft
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   auto-review:
     if: >
@@ -1450,25 +1450,30 @@ jobs:
       transition: auto-review
       pr-number: ${{ github.event.pull_request.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   auto-developer-unblock:
     if: >
       github.event_name == 'issues' &&
       github.event.action == 'closed' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
     with:
       transition: auto-developer-unblock
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: v0
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 ```
 
 > **Adapt the `auto-review` `if:` condition.** Replace `<developer-agent-slug>[bot]`
@@ -1955,10 +1960,9 @@ After the run completes, verify unauthenticated pullability for all four tags
 **Symptom:** You apply the `agent:groom` or `agent:developer` label but no
 workflow run appears (or runs appear as skipped with no error message).
 
-**Cause A — Sender not in allowlist.** The workflow gates on
-`contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)`. If the
-label was applied by a user whose login is not in `AGENT_ALLOWLIST`, the job
-skips silently.
+**Cause A — Sender not in allowlist.** The reusable workflow checks the
+labeler's login against `AGENT_ALLOWLIST` before it acquires its work lock. If
+the labeler is not authorized, the run is denied by that gate.
 
 **Fix A:** Add the labeler's GitHub login to `agent_allowlist` in Terraform and
 re-apply.
@@ -1967,7 +1971,7 @@ re-apply.
 `auto_trigger_agents.groom = true`, the auto-trigger workflow applies the label
 using the developer-agent bot identity (e.g.
 `my-developer-agent[bot]`). If that bot identity is not in `AGENT_ALLOWLIST`,
-the downstream groom workflow silently skips.
+the downstream groom workflow is denied by its allowlist gate.
 
 **Fix B:** Add the bot identity to `agent_allowlist`. Finding the exact slug:
 look at the first comment posted by the bot after App installation — the login

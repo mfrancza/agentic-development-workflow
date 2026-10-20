@@ -168,7 +168,9 @@ describe("docs/adopting.md caller stubs match their reusable workflow contracts"
     for (const f of reusableFiles) {
       // terraform-ci-reusable.yml is consumer-only (documented gotcha) and
       // test-*-reusable.yml are this repo's own regression harnesses.
-      if (f === "terraform-ci-reusable.yml" || f.startsWith("test-")) continue;
+      // The review worker is an internal nested reusable, invoked only by the
+      // lock-holding public agent-review reusable; it has no adopter stub.
+      if (f === "terraform-ci-reusable.yml" || f === "agent-review-worker-reusable.yml" || f.startsWith("test-")) continue;
       expect(covered, `guide has a stub for ${f}`).toContain(f);
     }
   });

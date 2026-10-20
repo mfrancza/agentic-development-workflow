@@ -8,8 +8,8 @@ export interface ResolutionError {
     | "not_found"
     | "forbidden"
     | "api_error"
-    | "empty_team"
-    | "cross_org";
+    | "cross_org"
+    | "empty_team";
   message?: string;
 }
 

@@ -49,16 +49,18 @@ jobs:
       github.event.action == 'opened' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login) &&
       !contains(github.event.issue.labels.*.name, 'draft')
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-groom
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   # ── Transition 2 ─────────────────────────────────────────────────────────────
   # issues.labeled (plan) → agent:design
@@ -72,16 +74,18 @@ jobs:
       github.event.action == 'labeled' &&
       github.event.label.name == 'plan' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-design
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   # ── Transition 3 ─────────────────────────────────────────────────────────────
   # issues.labeled (do) → agent:developer
@@ -104,16 +108,18 @@ jobs:
       github.event.label.name == 'do' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login) &&
       !contains(github.event.issue.labels.*.name, 'draft')
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-developer-do
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   # ── Transition 4 ─────────────────────────────────────────────────────────────
   # issues.unlabeled (draft) → agent:developer
@@ -128,16 +134,18 @@ jobs:
       github.event.action == 'unlabeled' &&
       github.event.label.name == 'draft' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-developer-undraft
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   # ── Transition 5 ─────────────────────────────────────────────────────────────
   # pull_request.opened on an agent/… or design/… branch, or authored by the
@@ -171,9 +179,12 @@ jobs:
       transition: auto-review
       pr-number: ${{ github.event.pull_request.number }}
       helpers-ref: ${{ github.sha }}
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   # ── Transition 6 ─────────────────────────────────────────────────────────────
   # issues.closed → agent:developer (cascade on newly-unblocked issues)
@@ -205,13 +216,15 @@ jobs:
       github.event_name == 'issues' &&
       github.event.action == 'closed' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-developer-unblock
       issue-number: ${{ github.event.issue.number }}
       helpers-ref: ${{ github.sha }}
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}

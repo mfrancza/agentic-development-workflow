@@ -15,16 +15,12 @@ jobs:
     # as a Terraform parameter (vars.AGENT_ALLOWLIST) so usernames are not
     # hardcoded in YAML — run `terraform apply` to update it.
     #
-    # Security: the allowlist check lives here in the caller stub, not in the
-    # reusable, so external callers cannot accidentally skip it by calling the
-    # reusable directly without gating.
+    # Security: the reusable's authorize job checks the sender allowlist before
+    # it enters its concurrency group. Keep this caller limited to event and
+    # state predicates so team-reference allowlist members can reach that gate.
     if: >
       github.event.label.name == 'agent:groom' &&
-      github.event.issue.state == 'open' &&
-      contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)
-    concurrency:
-      group: agent-groom-issue-${{ github.event.issue.number }}
-      cancel-in-progress: false
+      github.event.issue.state == 'open'
     uses: ./.github/workflows/agent-groom-reusable.yml
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -34,9 +30,12 @@ jobs:
       admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}
       logs-retention-days: 30
       helpers-ref: ${{ github.sha }}
+      sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
