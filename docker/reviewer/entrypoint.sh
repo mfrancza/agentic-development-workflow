@@ -328,6 +328,13 @@ BRANCH_NAME="$(git rev-parse --abbrev-ref HEAD)"
 # landed between `gh pr view` and `gh pr checkout` are reflected accurately.
 HEAD_SHA="$(git rev-parse HEAD)"
 log "Head SHA (from git): ${HEAD_SHA}"
+# Export the exact SHA this leg reviewed so the agent can pass it as
+# `commit_id` in the review POST. GitHub stamps the review with the PR head
+# at post time when commit_id is absent; exporting it here means the agent
+# always records the review against the commit it actually inspected, even if
+# the developer pushes while this leg is still running (Issue #697).
+REVIEW_HEAD_SHA="$HEAD_SHA"
+export REVIEW_HEAD_SHA
 
 # --- Resolve merge-base against the PR's base branch. `origin/${BASE_REF}` is
 #     populated by the full clone above; we do one explicit fetch to ensure the
@@ -453,9 +460,12 @@ log "Building review prompt context in ${CONTEXT_FILE}"
     printf 'Head SHA: %s\n' "${HEAD_SHA}"
     printf 'Reviewer identity (this bot): %s\n' "${REVIEWER_LOGIN}"
     printf 'Reviewer model (this leg): %s\n\n' "${AGENT_MODEL}"
-    printf 'Post the review against Head SHA %s. Submit it as a single\n' "${HEAD_SHA}"
-    printf 'POST /repos/%s/pulls/%s/reviews call so the\n' "${GITHUB_REPO}" "${GITHUB_PR_NUMBER}"
-    printf 'verdict and its inline comments land atomically.\n\n'
+    printf 'Post the review against Head SHA %s. Include "commit_id": "%s"\n' "${HEAD_SHA}" "${HEAD_SHA}"
+    printf '(also available as $REVIEW_HEAD_SHA) in the review POST so GitHub records\n'
+    printf 'the review against the commit this leg actually inspected (not the PR head\n'
+    printf 'at post time, which may differ if the developer pushes while this leg runs).\n'
+    printf 'Submit the review as a single POST /repos/%s/pulls/%s/reviews call\n' "${GITHUB_REPO}" "${GITHUB_PR_NUMBER}"
+    printf 'so the verdict and its inline comments land atomically.\n\n'
     printf 'PR body:\n%s\n\n' "${PR_BODY}"
     printf 'Commits on this PR since base:\n'
 } > "$CONTEXT_FILE"
@@ -492,24 +502,32 @@ log "Threads recorded for resolution: ${RESOLVE_COUNT:-0}"
 # Verify the review was posted (design decision 1)
 # -----------------------------------------------------------------------------
 #
-# Look for at least one review authored by this bot against the PR head SHA.
-# Filtering on commit_id (rather than just \"any review by us\") means a stale
-# review from an earlier head — e.g. if the workflow re-runs after new commits
-# but before the agent posts — does not falsely satisfy the check.
+# Look for at least one review authored by this bot against the PR head SHA
+# *for this specific leg's model*. The three-pronged filter prevents false
+# passes that were observed in Issue #697:
+#   - commit_id == HEAD_SHA: a stale review from an earlier head (posted
+#     without commit_id so GitHub stamped it with the new head) does not
+#     satisfy the check.
+#   - body contains "<!-- reviewer-model: <AGENT_MODEL> -->": a sibling
+#     matrix leg's review (different model, same bot identity, same SHA)
+#     does not count as this leg's review.
+# `jq --arg` is used for AGENT_MODEL so special characters (e.g. dots in
+# version strings like "grok-4.6") are treated as literals, not regex.
 
-log "Verifying a review by ${REVIEWER_LOGIN} exists on ${HEAD_SHA}"
+log "Verifying a review by ${REVIEWER_LOGIN} for model ${AGENT_MODEL} exists on ${HEAD_SHA}"
 # Use `jq -s` to aggregate across all pages rather than applying `--jq` once
 # per page: `--jq` + `--paginate` emits one number per page, which breaks the
 # `-eq 0` numeric comparison when there are multiple pages of reviews.
 # `jq -s` slurps all pages into a single outer array and counts matches once.
 REVIEW_MATCHES="$(gh api --paginate "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" \
-    | jq -s "[.[][] | select(.user.login == \"${REVIEWER_LOGIN}\" and .commit_id == \"${HEAD_SHA}\")] | length")"
+    | jq -s --arg model "${AGENT_MODEL}" \
+    "[.[][] | select(.user.login == \"${REVIEWER_LOGIN}\" and .commit_id == \"${HEAD_SHA}\" and (.body | contains(\"<!-- reviewer-model: \" + \$model + \" -->\" )))] | length")"
 
 if [ "${REVIEW_MATCHES:-0}" -eq 0 ]; then
-    log "ERROR: no review by ${REVIEWER_LOGIN} found on ${HEAD_SHA} for PR #${GITHUB_PR_NUMBER} — agent did not complete the review"
+    log "ERROR: no review by ${REVIEWER_LOGIN} for model ${AGENT_MODEL} found on ${HEAD_SHA} for PR #${GITHUB_PR_NUMBER} — agent did not complete the review"
     exit 1
 fi
 
-log "Verified: ${REVIEW_MATCHES} review(s) by ${REVIEWER_LOGIN} on ${HEAD_SHA}"
+log "Verified: ${REVIEW_MATCHES} review(s) by ${REVIEWER_LOGIN} for model ${AGENT_MODEL} on ${HEAD_SHA}"
 log "Reviewer agent finished successfully"
 exit 0
