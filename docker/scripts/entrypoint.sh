@@ -17,6 +17,10 @@ ESCALATION_ASSIGNEE="${ESCALATION_ASSIGNEE:-}"
 SCRIPTS_DIR="/opt/agent"
 WORK_DIR="/home/agent/work"
 
+# Post-lock freshness logic for fix-checks.  It has no action side effects and
+# is sourced so its API/state-machine behaviour is directly testable.
+source "${SCRIPTS_DIR}/lib/fix-checks-guard.sh"
+
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
@@ -420,6 +424,10 @@ action_fix_checks() {
     log "Checking out PR #${GITHUB_PR_NUMBER}"
     gh pr checkout "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO"
     BRANCH_NAME="$(git rev-parse --abbrev-ref HEAD)"
+
+    if ! fix_checks_should_run; then
+        return 0
+    fi
 
     log "Fetching check failure details"
     FAILURE_DETAILS="$(gh pr checks "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" 2>/dev/null || echo "No details available")"

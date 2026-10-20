@@ -185,6 +185,8 @@ jobs:
           # an absent policy) remains disabled inside the freshness guard.
           FIX_CHECKS_ALLOW: ${{ vars.FIX_CHECKS_ALLOW }}
           GITHUB_HEAD_SHA_AT_TRIGGER: ${{ inputs.head-sha-at-trigger }}
+          # Optional override for the 15-minute stale-replacement wait.
+          FIX_CHECKS_WAIT_SECONDS: ${{ vars.FIX_CHECKS_WAIT_SECONDS }}
         with:
           image: ${{ inputs.image }}
           gh-token: ${{ steps.setup.outputs.token }}
