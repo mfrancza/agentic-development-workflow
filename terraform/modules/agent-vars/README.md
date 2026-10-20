@@ -5,7 +5,7 @@ Manages the GitHub Actions repository variables that configure agentic workflow 
 `agent_allowlist`, `admin_assignees`, and `code_reviewers` accept mixed lists:
 each entry is either an individual GitHub login (including a bot such as
 `mfrancza-developer-agent[bot]`) or an `<org>/<team-slug>` reference (for
-example, `Brale-xyz/dev`). Team references must belong to the repository
+example, `<your-github-org>/developers`). Team references must belong to the repository
 owner's organization.
 
 | Variable | Type | Purpose |
