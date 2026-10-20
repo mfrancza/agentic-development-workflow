@@ -77,7 +77,6 @@ module "agent_vars" {
   protected_pr_author_logins                       = var.protected_pr_author_logins
   required_approval_count                          = var.required_approval_count
   enable_protected_approval_gate                   = var.enable_protected_approval_gate
-  enable_protected_approval_gate_check_generation  = var.enable_protected_approval_gate_check_generation
   enable_protected_approval_gate_reconcile_minutes = var.enable_protected_approval_gate_reconcile_minutes
   auto_trigger_agents                              = var.auto_trigger_agents
   reviewer_models                                  = var.reviewer_models
@@ -85,10 +84,9 @@ module "agent_vars" {
 }
 
 module "branch_protection" {
-  source                                          = "./modules/branch-protection"
-  repository                                      = github_repository.this.name
-  enable_protected_approval_gate                  = var.enable_protected_approval_gate
-  enable_protected_approval_gate_check_generation = var.enable_protected_approval_gate_check_generation
+  source                         = "./modules/branch-protection"
+  repository                     = github_repository.this.name
+  enable_protected_approval_gate = var.enable_protected_approval_gate
 }
 
 module "labels" {

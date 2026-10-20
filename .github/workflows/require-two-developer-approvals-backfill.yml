@@ -36,7 +36,6 @@ jobs:
       protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      generation: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION }}
       pr-number: ${{ matrix.pr.number }}
       head-sha: ${{ matrix.pr.sha }}
       repo: ${{ github.repository }}

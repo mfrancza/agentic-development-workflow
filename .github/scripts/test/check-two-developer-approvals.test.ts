@@ -12,7 +12,7 @@ import { run } from "../src/check-two-developer-approvals.js";
 
 function mockInputs(overrides: Record<string, string> = {}) {
   const inputs: Record<string, string> = {
-    protected_pr_author_logins: '["developer[bot]", "other[bot]"]', required_approval_count: "2", enabled: "true", generation: "7",
+    protected_pr_author_logins: '["developer[bot]", "other[bot]"]', required_approval_count: "2", enabled: "true",
     pr_number: "42", pr_author: "ignored", head_sha: "event-sha", repo: "owner/repo", departed_sha: "", departed_pr_number: "", ...overrides,
   };
   vi.mocked(core.getInput).mockImplementation((name: string) => inputs[name] ?? "");
@@ -29,17 +29,17 @@ describe("check-two-developer-approvals", () => {
     listReviews.mockResolvedValue({ data: [] }); createCheck.mockResolvedValue({});
   });
 
-  it("uses a generation-suffixed enforcing context and the live, not event, head SHA", async () => {
+  it("uses the fixed enforcing context and the live, not event, head SHA", async () => {
     await run();
-    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals-g7", head_sha: "live-sha", conclusion: "failure" }));
+    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals", head_sha: "live-sha", conclusion: "failure" }));
     expect(getPull).toHaveBeenCalledWith({ owner: "owner", repo: "repo", pull_number: 42 });
   });
 
   it("does not publish the enforcing context when disabled", async () => {
     mockInputs({ enabled: "false" }); listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
     await run();
-    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals-g7 (preview)", conclusion: "success" }));
-    expect(createCheck).not.toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals-g7" }));
+    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals (preview)", conclusion: "success" }));
+    expect(createCheck).not.toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals" }));
   });
 
   it.each([
@@ -64,7 +64,7 @@ describe("check-two-developer-approvals", () => {
     ["zero threshold", { required_approval_count: "0" }], ["non-integer threshold", { required_approval_count: "1.5" }],
   ])("fails every PR visibly for %s", async (_name, inputs) => {
     mockInputs(inputs); await expect(run()).rejects.toThrow();
-    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals-g7", conclusion: "failure", head_sha: "live-sha" }));
+    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals", conclusion: "failure", head_sha: "live-sha" }));
     expect(core.error).toHaveBeenCalled();
   });
 

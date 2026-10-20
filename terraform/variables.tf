@@ -60,17 +60,6 @@ variable "enable_protected_approval_gate" {
   default     = false
 }
 
-variable "enable_protected_approval_gate_check_generation" {
-  description = "Generation suffix for the protected-approval check context. Bump it on every ON → OFF → ON cycle to invalidate stale check-runs. Stored as ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION."
-  type        = number
-  default     = 1
-
-  validation {
-    condition     = var.enable_protected_approval_gate_check_generation >= 1 && floor(var.enable_protected_approval_gate_check_generation) == var.enable_protected_approval_gate_check_generation
-    error_message = "enable_protected_approval_gate_check_generation must be a positive integer."
-  }
-}
-
 variable "enable_protected_approval_gate_reconcile_minutes" {
   description = "Minimum interval in minutes between protected-approval reconciliation sweeps. Stored as ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES."
   type        = number

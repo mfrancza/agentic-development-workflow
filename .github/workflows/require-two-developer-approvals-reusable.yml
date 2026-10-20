@@ -17,10 +17,6 @@ on:
         description: Whether the protected-approval gate is enabled.
         required: true
         type: string
-      generation:
-        description: Positive generation number for the published check context.
-        required: true
-        type: string
       pr-number:
         description: Pull request number to evaluate.
         required: true
@@ -111,7 +107,6 @@ jobs:
           protected-pr-author-logins: ${{ inputs.protected-pr-author-logins }}
           required-approval-count: ${{ inputs.required-approval-count }}
           enabled: ${{ inputs.enabled }}
-          generation: ${{ inputs.generation }}
           pr-number: ${{ inputs.pr-number }}
           head-sha: ${{ inputs.head-sha }}
           repo: ${{ inputs.repo }}

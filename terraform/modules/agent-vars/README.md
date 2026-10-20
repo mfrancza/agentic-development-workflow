@@ -12,7 +12,6 @@ Manages the GitHub Actions repository variables that configure agentic workflow 
 | `PROTECTED_PR_AUTHOR_LOGINS` | JSON array | PR author logins subject to the protected approval threshold. Defaults to `["mfrancza-developer-agent[bot]"]`. |
 | `REQUIRED_APPROVAL_COUNT` | string integer | Required non-self approvals for protected PRs. Defaults to `"2"`. |
 | `ENABLE_PROTECTED_APPROVAL_GATE` | string (`"true"` / `"false"`) | Enables the opt-in protected-approval gate. Defaults to `"false"`. |
-| `ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION` | string integer | Generation suffix for the required check context. Defaults to `"1"`. |
 | `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` | string integer | Minimum interval for reconciliation sweeps. Defaults to `"10"`. |
 | `AUTO_TRIGGER_AGENTS` | JSON object | Per-stage gates (`groom`, `design`, `developer`, `review`) that auto-advance the SDLC pipeline without manual labeling. All default to `false` (opt-in). |
 | `REVIEWER_MODELS` | JSON array | Ordered list of model identifiers for the multi-reviewer feature. Empty array (`[]`) disables multi-reviewer. Workflow guards use `vars.REVIEWER_MODELS != ''` before `fromJSON`. |
@@ -34,7 +33,6 @@ module "agent_vars" {
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
   # required_approval_count                          = 2
   # enable_protected_approval_gate                   = true
-  # enable_protected_approval_gate_check_generation  = 1
   # enable_protected_approval_gate_reconcile_minutes = 10
   auto_trigger_agents = {
     groom     = false
@@ -67,7 +65,6 @@ module "agent_vars" {
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
   # required_approval_count                          = 2
   # enable_protected_approval_gate                   = true
-  # enable_protected_approval_gate_check_generation  = 1
   # enable_protected_approval_gate_reconcile_minutes = 10
   auto_trigger_agents = {
     groom     = false
@@ -117,7 +114,6 @@ provider "github" {
 | `protected_pr_author_logins` | `list(string)` | no | developer-agent bot | Protected PR-author logins, encoded as JSON. |
 | `required_approval_count` | `number` | no | `2` | Non-self approvals required for a protected PR. |
 | `enable_protected_approval_gate` | `bool` | no | `false` | Enables the protected-approval gate. |
-| `enable_protected_approval_gate_check_generation` | `number` | no | `1` | Required-check context generation. |
 | `enable_protected_approval_gate_reconcile_minutes` | `number` | no | `10` | Reconciliation-sweep interval in minutes. |
 | `auto_trigger_agents` | `object({groom,design,developer,review: bool})` | no | all `false` | Per-stage auto-trigger gates. |
 | `reviewer_models` | `list(string)` | no | `[]` | Ordered list of model identifiers for the multi-reviewer feature. Empty disables multi-reviewer. |
@@ -135,7 +131,6 @@ provider "github" {
 | `protected_pr_author_logins_variable_name` | `string` | Name of `PROTECTED_PR_AUTHOR_LOGINS`. |
 | `required_approval_count_variable_name` | `string` | Name of `REQUIRED_APPROVAL_COUNT`. |
 | `enable_protected_approval_gate_variable_name` | `string` | Name of `ENABLE_PROTECTED_APPROVAL_GATE`. |
-| `enable_protected_approval_gate_check_generation_variable_name` | `string` | Name of `ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION`. |
 | `enable_protected_approval_gate_reconcile_minutes_variable_name` | `string` | Name of `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`. |
 | `auto_trigger_agents_variable_name` | `string` | Name of the `AUTO_TRIGGER_AGENTS` Actions variable (`"AUTO_TRIGGER_AGENTS"`). |
 | `reviewer_models_variable_name` | `string` | Name of the `REVIEWER_MODELS` Actions variable (`"REVIEWER_MODELS"`). |
