@@ -140,6 +140,7 @@ jobs:
         env:
           ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}
         run: |
+          set -euo pipefail
           has=false
           if [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "$ALLOWLIST" >/dev/null; then
             has=true

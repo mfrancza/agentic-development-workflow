@@ -135,12 +135,22 @@ jobs:
           ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}
           ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }}
         run: |
-          has=false; admin=false
+          set -euo pipefail
+          has=false
+          admin=false
           if [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "$ALLOWLIST" >/dev/null; then
             has=true
           fi
-          [[ -n "$ADMIN_ASSIGNEES" ]] && jq -e 'any(.[]; type == "string" and test("^[^/]+/[^/]+$"))' <<< "$ADMIN_ASSIGNEES" >/dev/null && admin=true || true
-          echo "allowlist_has_team=$has" >> "$GITHUB_OUTPUT"; [[ "$has" == true || "$admin" == true ]] && needs=true || needs=false; echo "needs_resolver=$needs" >> "$GITHUB_OUTPUT"
+          if [[ -n "$ADMIN_ASSIGNEES" ]] && jq -e 'any(.[]; type == "string" and test("^[^/]+/[^/]+$"))' <<< "$ADMIN_ASSIGNEES" >/dev/null; then
+            admin=true
+          fi
+          echo "allowlist_has_team=$has" >> "$GITHUB_OUTPUT"
+          if [[ "$has" == true || "$admin" == true ]]; then
+            needs=true
+          else
+            needs=false
+          fi
+          echo "needs_resolver=$needs" >> "$GITHUB_OUTPUT"
       - name: Mint installation token for allowlist resolver
         id: allowlist-resolver
         if: steps.detect.outputs.needs_resolver == 'true'
