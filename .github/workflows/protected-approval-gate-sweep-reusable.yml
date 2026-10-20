@@ -1,0 +1,163 @@
+name: protected-approval-gate-sweep (reusable)
+
+# Re-publishes the protected-approval-gate check on every open pull request,
+# once per distinct head SHA. Called by the backfill (dispatched after the gate
+# is enabled) and reconcile (scheduled safety net) caller stubs, in this repo
+# and in adopting repos. In a called workflow, github.event_name and
+# GITHUB_WORKFLOW_REF describe the caller, which the interval guard relies on.
+on:
+  workflow_call:
+    inputs:
+      protected-pr-author-logins:
+        description: JSON array of protected PR author logins.
+        required: true
+        type: string
+      required-approval-count:
+        description: Positive number of qualifying approvals required.
+        required: true
+        type: string
+      enabled:
+        description: Whether the protected-approval gate is enabled.
+        required: true
+        type: string
+      repo:
+        description: Repository in owner/name format.
+        required: true
+        type: string
+      helpers-ref:
+        description: >
+          Git ref of mfrancza/agentic-development-workflow to check out for
+          helper actions. Must not be empty.
+        required: true
+        type: string
+      interval-minutes:
+        description: >
+          Minimum minutes between sweeps when the caller was triggered by
+          schedule (ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES). Empty
+          means 10. Ignored for other trigger events, so a dispatched
+          backfill always sweeps.
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  find-open-prs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      run: ${{ steps.interval.outputs.run }}
+      prs: ${{ steps.prs.outputs.value }}
+    steps:
+      - id: interval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MINUTES: ${{ inputs.interval-minutes }}
+          REPO: ${{ inputs.repo }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != "schedule" ]]; then
+            echo 'run=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          minutes="${MINUTES:-10}"
+          if ! [[ "$minutes" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::interval-minutes (ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES) must be a positive integer."
+            exit 1
+          fi
+          # The cron fires every minute; skip unless the caller workflow's last
+          # successful run is at least `minutes` old.
+          workflow_file="${GITHUB_WORKFLOW_REF%@*}"
+          workflow_file="${workflow_file##*/}"
+          if completed="$(gh api "repos/${REPO}/actions/workflows/${workflow_file}/runs?status=success&per_page=10" 2>/dev/null)"; then
+            previous="$(jq -r --arg id "$GITHUB_RUN_ID" '[.workflow_runs[] | select((.id | tostring) != $id) | .updated_at] | max // empty' <<<"$completed")"
+            if [[ -n "$previous" ]] && (( $(date +%s) - $(date -d "$previous" +%s) < minutes * 60 )); then
+              echo 'run=false' >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            echo "::warning::Could not read prior runs of ${workflow_file}; continuing with a full sweep."
+          fi
+          echo 'run=true' >> "$GITHUB_OUTPUT"
+      - id: prs
+        if: steps.interval.outputs.run == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ inputs.repo }}
+        run: |
+          set -euo pipefail
+          prs="$(gh pr list --repo "$REPO" --state open --limit 1000 --json number,headRefOid | jq -c 'unique_by(.headRefOid) | map({number, sha: .headRefOid})')"
+          echo "value=${prs}" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: find-open-prs
+    if: needs.find-open-prs.outputs.run == 'true' && needs.find-open-prs.outputs.prs != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        pr: ${{ fromJSON(needs.find-open-prs.outputs.prs) }}
+    concurrency:
+      group: protected-approval-gate-sha-${{ matrix.pr.sha }}
+      cancel-in-progress: false
+    steps:
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+
+      - name: Publish protected-approval-gate check
+        uses: ./_agentic-workflow/.github/actions/check-protected-approval-gate
+        with:
+          protected-pr-author-logins: ${{ inputs.protected-pr-author-logins }}
+          required-approval-count: ${{ inputs.required-approval-count }}
+          enabled: ${{ inputs.enabled }}
+          pr-number: ${{ matrix.pr.number }}
+          head-sha: ${{ matrix.pr.sha }}
+          repo: ${{ inputs.repo }}
