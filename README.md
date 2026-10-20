@@ -131,7 +131,7 @@ The steps below describe how to wire up the same workflow in your own GitHub rep
 
 ### 1. Create the agent GitHub Apps (one-time, manual)
 
-Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **Settings → Developer settings → GitHub Apps → New GitHub App**. Create three Apps:
+Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **Settings → Developer settings → GitHub Apps → New GitHub App**. Create the developer-agent, reviewer-agent, and terraform-ci Apps, plus the allowlist-resolver App when an agent user list uses a team reference:
 
 **developer-agent**
 - Repository permissions: Contents (R/W), Issues (R/W), Pull requests (R/W), Workflows (R/W), Metadata (R), Checks (R), Deployments (R)
@@ -151,7 +151,15 @@ Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **S
 - Webhook: **uncheck "Active"** (same reason as above).
 - After creation: note the **Client ID** (the `Iv23.xxx` string) and download the private key.
 
-Then install each App on this repository (sidebar → **Install App** → **Install** next to your username → **Only select repositories** → pick `agentic-development-workflow`). That per-repo selection is what scopes the App to this repo; Terraform deliberately does not manage App installations (the GitHub API endpoints for it reject OAuth user tokens, which is what `gh auth token` issues).
+**allowlist-resolver**
+- Organization permissions: Members (R).
+- Repository permissions: Metadata (R).
+- Subscribe to events: none.
+- Webhook: **uncheck "Active"**.
+- Install the App on the organization that owns the repository.
+- After creation: note the Client ID and download the private key.
+
+Then install the developer-agent, reviewer-agent, and terraform-ci Apps on this repository (sidebar → **Install App** → **Install** next to your username → **Only select repositories** → pick `agentic-development-workflow`). Install allowlist-resolver on the repository-owning organization so it can read that organization's team membership. Terraform deliberately does not manage App installations (the GitHub API endpoints for it reject OAuth user tokens, which is what `gh auth token` issues).
 
 ### 2. Run Terraform
 
@@ -261,6 +269,10 @@ gh secret set REVIEWER_APP_PRIVATE_KEY < ~/.config/agentic-agents/reviewer-agent
 gh secret set TERRAFORM_APP_ID         --body "<terraform-ci App Client ID>"  # the Iv23.xxx Client ID, not the numeric App ID
 gh secret set TERRAFORM_APP_PRIVATE_KEY < ~/.config/agentic-agents/terraform-ci.pem
 
+# Required when any agent user list contains an org/team-slug reference
+gh secret set ALLOWLIST_RESOLVER_APP_ID --body "<allowlist-resolver App Client ID>"
+gh secret set ALLOWLIST_RESOLVER_APP_PRIVATE_KEY < ~/.config/agentic-agents/allowlist-resolver.pem
+
 # Required for HCP Terraform remote state backend (used by terraform-ci.yml and local terraform init)
 gh secret set TF_API_TOKEN             --body "<hcp-terraform-api-token>"  # generate in HCP UI: User Settings → Tokens
 ```
@@ -274,6 +286,16 @@ gh secret list --repo <owner>/<repo>
 ```
 
 For the Terraform CI pipeline specifically, confirm that `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, and `TF_API_TOKEN` all appear in the output. If any are missing, re-run the corresponding `gh secret set` command above. A missing secret causes `startup_failure` on the Terraform CI workflow before any job starts — `gh secret list` is the fastest way to identify which secret is absent.
+
+### GitHub team references
+
+- `agent_allowlist`, `admin_assignees`, and `code_reviewers` each accept individual GitHub logins and same-organization `org/team-slug` references in the same list.
+- `AGENT_ALLOWLIST` team membership is resolved on every triggering event with no cache or staleness window.
+- The dedicated `allowlist-resolver` App reads team membership with organization `Members: Read` and repository `Metadata: Read` permissions.
+- Set `ALLOWLIST_RESOLVER_APP_ID` and `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` when any of the three lists contains a team reference.
+- Team references must belong to the organization that owns the repository; cross-organization references are rejected.
+- Bot identities cannot be team members, so keep every bot login as an explicit list entry.
+- The reviewer bots trusted by `agent-respond-review` are hardcoded trusted logins in its reusable workflow and do not belong in `AGENT_ALLOWLIST`.
 
 ### 4. Build the developer agent container
 
