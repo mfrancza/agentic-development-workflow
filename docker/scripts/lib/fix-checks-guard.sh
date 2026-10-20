@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Freshness guard for action_fix_checks().  Keep this separate from the
 # entrypoint so the post-lock behaviour can be exercised without starting an
