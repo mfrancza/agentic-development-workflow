@@ -220,6 +220,34 @@ jobs:
           fi
           echo "Helper checkout HEAD verified: ${actual_sha}"
 
+      - name: Detect team references for grooming assignees
+        id: detect-team-refs
+        env:
+          ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}
+          ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }}
+        run: |
+          set -euo pipefail
+          allowlist_has_team=false
+          assignees_has_team=false
+          if [[ -n "${ALLOWLIST}" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "${ALLOWLIST}" >/dev/null; then
+            allowlist_has_team=true
+          fi
+          if [[ -n "${ADMIN_ASSIGNEES}" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "${ADMIN_ASSIGNEES}" >/dev/null; then
+            assignees_has_team=true
+          fi
+          echo "allowlist_has_team=${allowlist_has_team}" >> "$GITHUB_OUTPUT"
+          echo "assignees_has_team=${assignees_has_team}" >> "$GITHUB_OUTPUT"
+          echo "assignees_needs_resolver=${assignees_has_team}" >> "$GITHUB_OUTPUT"
+
+      - name: Mint installation token for grooming assignee resolver
+        id: assignee-resolver
+        if: steps.detect-team-refs.outputs.assignees_needs_resolver == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
+
       - name: Mint installation token for developer-agent
         id: setup
         uses: ./_agentic-workflow/.github/actions/agent-token
@@ -248,6 +276,7 @@ jobs:
         uses: ./_agentic-workflow/.github/actions/run-agent
         env:
           ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }}
+          ALLOWLIST_RESOLVER_TOKEN: ${{ steps.assignee-resolver.outputs.token }}
         with:
           image: ${{ inputs.image }}
           gh-token: ${{ steps.setup.outputs.token }}

@@ -5,7 +5,7 @@ description: >
   key selected from the model name, GITHUB_REPO, AGENT_MODEL) and any optional
   per-workflow identifiers (AGENT_ACTION, GITHUB_ISSUE_NUMBER, GITHUB_PR_NUMBER,
   GITHUB_RUN_ID, ESCALATION_ASSIGNEE, RESOLVE_THREADS_FILE, ADMIN_ASSIGNEES,
-  CODE_REVIEWERS, FIX_CHECKS_ALLOW, GITHUB_HEAD_SHA_AT_TRIGGER). Also creates and mounts an output directory when
+  CODE_REVIEWERS, ALLOWLIST_RESOLVER_TOKEN, FIX_CHECKS_ALLOW, GITHUB_HEAD_SHA_AT_TRIGGER). Also creates and mounts an output directory when
   output-dir and output-mount are supplied (used by agent-review for the
   RESOLVE_THREADS_FILE hand-off).
   Pull mode (image non-empty): pulls the specified image and skips the build.
@@ -205,6 +205,7 @@ runs:
         # container env clean.
         [[ -n "${ADMIN_ASSIGNEES:-}" ]] && _opt_env+=(-e ADMIN_ASSIGNEES="${ADMIN_ASSIGNEES}")
         [[ -n "${CODE_REVIEWERS:-}" ]] && _opt_env+=(-e CODE_REVIEWERS="${CODE_REVIEWERS}")
+        [[ -n "${ALLOWLIST_RESOLVER_TOKEN:-}" ]] && _opt_env+=(-e ALLOWLIST_RESOLVER_TOKEN)
         [[ -n "${FIX_CHECKS_ALLOW:-}" ]] && _opt_env+=(-e FIX_CHECKS_ALLOW="${FIX_CHECKS_ALLOW}")
         [[ -n "${GITHUB_HEAD_SHA_AT_TRIGGER:-}" ]] && _opt_env+=(-e GITHUB_HEAD_SHA_AT_TRIGGER="${GITHUB_HEAD_SHA_AT_TRIGGER}")
         [[ -n "${FIX_CHECKS_WAIT_SECONDS:-}" ]] && _opt_env+=(-e FIX_CHECKS_WAIT_SECONDS="${FIX_CHECKS_WAIT_SECONDS}")
