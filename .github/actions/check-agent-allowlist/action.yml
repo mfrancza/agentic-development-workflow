@@ -40,7 +40,9 @@ runs:
     - name: Install dependencies
       shell: bash
       working-directory: ${{ steps.scripts-dir.outputs.dir }}
-      run: npm ci
+      run: |
+        set -euo pipefail
+        npm ci
     - name: Check agent allowlist
       shell: bash
       working-directory: ${{ steps.scripts-dir.outputs.dir }}
@@ -50,4 +52,6 @@ runs:
         INPUT_SKIP_GATE: ${{ inputs.skip-gate }}
         INPUT_RESOLVER_TOKEN: ${{ inputs.resolver-token }}
         INPUT_ALLOWLIST: ${{ inputs.allowlist }}
-      run: npx --no-install tsx src/check-agent-allowlist.ts
+      run: |
+        set -euo pipefail
+        npx --no-install tsx src/check-agent-allowlist.ts
