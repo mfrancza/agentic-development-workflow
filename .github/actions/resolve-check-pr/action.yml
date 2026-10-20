@@ -1,0 +1,61 @@
+name: 'Resolve failing check to PR'
+description: >
+  Resolves workflow_run and check_run events to a pull request, then verifies
+  the current Checks API state contains an allowed actionable failing check.
+
+inputs:
+  event-name:
+    description: 'GitHub event name: workflow_run or check_run.'
+    required: true
+  token:
+    description: 'GitHub token with pull-requests: read and checks: read.'
+    required: true
+  repository:
+    description: 'Repository in owner/repo format; call sites pass github.repository.'
+    required: true
+  allowed-checks:
+    description: 'JSON array of canonical Checks API check-run names.'
+    required: true
+
+outputs:
+  proceed:
+    description: '"true" when an allowed actionable check is currently failing.'
+    value: ${{ steps.run.outputs.proceed }}
+  pr_number:
+    description: 'Resolved pull request number.'
+    value: ${{ steps.run.outputs.pr_number }}
+  head_sha:
+    description: 'Head SHA observed in the triggering event.'
+    value: ${{ steps.run.outputs.head_sha }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve scripts directory
+      id: scripts-dir
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        echo "dir=$(cd "$ACTION_PATH/../../scripts" && pwd)" >> "$GITHUB_OUTPUT"
+    - name: Set up Node.js
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ steps.scripts-dir.outputs.dir }}/package-lock.json
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      run: npm ci
+    - name: Resolve failing check PR
+      id: run
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      env:
+        INPUT_EVENT_NAME: ${{ inputs.event-name }}
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_ALLOWED_CHECKS: ${{ inputs.allowed-checks }}
+      run: npx --no-install tsx src/resolve-check-pr.ts
