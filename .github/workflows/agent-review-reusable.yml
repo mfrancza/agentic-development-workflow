@@ -11,9 +11,15 @@ on:
       default-model: { required: false, type: string, default: '' }
       reviewer-models: { required: false, type: string, default: '' }
       logs-retention-days: { required: false, type: number, default: 30 }
-      helpers-ref: { required: true, type: string }
-      sender-login: { required: true, type: string }
-      event-action: { required: true, type: string }
+      helpers-ref:
+        required: true
+        type: string
+      sender-login:
+        required: true
+        type: string
+      event-action:
+        required: true
+        type: string
     secrets:
       REVIEWER_APP_ID: { required: true }
       REVIEWER_APP_PRIVATE_KEY: { required: true }

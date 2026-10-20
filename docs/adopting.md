@@ -959,24 +959,16 @@ permissions:
   contents: read
   pull-requests: read
 
-concurrency:
-  group: agent-respond-review-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   respond-review:
-    # Gate on PR author (developer-agent bot) AND review author (trusted actor).
+    # Gate on the PR author (developer-agent bot).
     # Adjust the PR-author login to match your developer-agent App slug.
     # The second line excludes reviews authored by the PR author itself: the
-    # developer agent is on AGENT_ALLOWLIST, so without it the agent's own
+    # developer agent can be trusted, so without it the agent's own
     # thread replies would re-trigger this workflow indefinitely.
     if: >
       github.event.pull_request.user.login == '<developer-agent-slug>[bot]' &&
-      github.event.review.user.login != github.event.pull_request.user.login &&
-      (
-        contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.review.user.login) ||
-        github.event.review.user.login == '<reviewer-agent-slug>[bot]'
-      )
+      github.event.review.user.login != github.event.pull_request.user.login
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-respond-review-reusable.yml@v0
     with:
       pr-number: ${{ github.event.pull_request.number }}
@@ -998,18 +990,17 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 ```
 
-> **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` and
-> `<reviewer-agent-slug>[bot]` with your actual App slugs. The review-author
-> gate prevents outside actors from driving prompt injection against the
-> developer agent on public repos. Keep the `review.user.login !=
-> pull_request.user.login` line and the `review-author` / `pr-author` inputs
-> exactly as shown: together they are the two layers of the self-trigger
-> guard, and the reusable rejects the call if either input is absent.
+> **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` with
+> your actual App slug. Keep the `review.user.login != pull_request.user.login`
+> line and the `review-author` / `pr-author` inputs exactly as shown: together
+> they are the two layers of the self-trigger guard. The reusable authorizes
+> `review-author` against `AGENT_ALLOWLIST` before it enters its per-PR lock.
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
 Workflows (R/W) to push the response commits. The review body and inline
 comments are attacker-controlled text that flows into a Claude prompt; the
-review-author gate limits the prompt injection surface to actors you trust.
+reusable's review-author gate limits the prompt injection surface to actors
+you trust.
 
 ---
 
@@ -1968,10 +1959,9 @@ After the run completes, verify unauthenticated pullability for all four tags
 **Symptom:** You apply the `agent:groom` or `agent:developer` label but no
 workflow run appears (or runs appear as skipped with no error message).
 
-**Cause A — Sender not in allowlist.** The workflow gates on
-`contains(fromJSON(vars.AGENT_ALLOWLIST), github.event.sender.login)`. If the
-label was applied by a user whose login is not in `AGENT_ALLOWLIST`, the job
-skips silently.
+**Cause A — Sender not in allowlist.** The reusable workflow checks the
+labeler's login against `AGENT_ALLOWLIST` before it acquires its work lock. If
+the labeler is not authorized, the run is denied by that gate.
 
 **Fix A:** Add the labeler's GitHub login to `agent_allowlist` in Terraform and
 re-apply.
@@ -1980,7 +1970,7 @@ re-apply.
 `auto_trigger_agents.groom = true`, the auto-trigger workflow applies the label
 using the developer-agent bot identity (e.g.
 `my-developer-agent[bot]`). If that bot identity is not in `AGENT_ALLOWLIST`,
-the downstream groom workflow silently skips.
+the downstream groom workflow is denied by its allowlist gate.
 
 **Fix B:** Add the bot identity to `agent_allowlist`. Finding the exact slug:
 look at the first comment posted by the bot after App installation — the login
