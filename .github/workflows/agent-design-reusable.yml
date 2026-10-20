@@ -9,10 +9,11 @@ name: agent-design (reusable)
 # run-design and run-undraft inputs.  The caller stub sets exactly one of those
 # to true per invocation.
 #
-# Security: allowlist gating is the caller's responsibility; this reusable
-# performs no sender check.  The preflight checks in the design job
-# (skip-if-PR-exists, block-on-open-blockers) are operational checks, not
-# security gates, so they live in the reusable.
+# Security: the design path's authorize job validates sender-login against the
+# allowlist before the design job enters its concurrency group. The preflight
+# checks in the design job (skip-if-PR-exists, block-on-open-blockers) are
+# operational checks, not security gates. The undraft cleanup path is separate
+# and preserves its no-checkout security posture described below.
 #
 # The undraft-sub-issues job deliberately has NO checkout step (see inline
 # comment) — this is a preserved security decision (Decision 8 in

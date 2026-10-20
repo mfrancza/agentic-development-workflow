@@ -15,9 +15,9 @@ jobs:
     # GitHub has no per-label permission model and `repository_owner` doesn't
     # work in org repos (it's the org login, not a user).
     #
-    # Security: the allowlist check lives here in the caller stub, not in the
-    # reusable, so external callers cannot accidentally skip it by calling the
-    # reusable directly without gating.
+    # Security: the reusable's authorize job checks the sender allowlist before
+    # it enters its concurrency group. Keep this caller limited to event and
+    # state predicates so team-reference allowlist members can reach that gate.
     if: >
       github.event.label.name == 'agent:developer' &&
       github.event.issue.state == 'open'

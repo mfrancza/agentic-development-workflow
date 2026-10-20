@@ -22,9 +22,9 @@ jobs:
     # as a Terraform parameter (vars.AGENT_ALLOWLIST) so usernames are not
     # hardcoded in YAML — run `terraform apply` to update it.
     #
-    # Security: the allowlist check lives here in the caller stub, not in the
-    # reusable, so external callers cannot accidentally skip it by calling the
-    # reusable directly without gating.
+    # Security: the reusable's authorize job checks the sender allowlist before
+    # it enters its concurrency group. Keep this caller limited to event and
+    # state predicates so team-reference allowlist members can reach that gate.
     if: >
       github.event.label.name == 'agent:design' &&
       github.event.issue.state == 'open'
@@ -50,7 +50,9 @@ jobs:
   call-undraft:
     # Fires only when a design-branch PR is merged — not just closed without
     # merging.  pull_request.branches filters the *base* branch, so the
-    # head-branch check must live in the `if` condition instead.
+    # head-branch check must live in the `if` condition instead. This cleanup
+    # path does not use the design-run authorize job; sender-login is passed to
+    # satisfy the reusable's shared workflow-call contract.
     if: >
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.head.ref, 'design/issue-') &&

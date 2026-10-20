@@ -3,8 +3,9 @@ name: agent-groom (reusable)
 # Reusable workflow — call this from agent-groom.yml (or any external caller)
 # to run the grooming agent on a specific issue.
 #
-# Security: allowlist gating is the caller's responsibility; this reusable
-# performs no sender check. Keep the allowlist condition in the caller stub.
+# Security: this reusable's authorize job validates sender-login against the
+# allowlist before the groom job enters its concurrency group. Caller stubs
+# should keep only event and state predicates, then pass sender-login through.
 #
 # External consumers: pass `image` to use a published developer image and
 # skip the Docker build, e.g.:

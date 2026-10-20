@@ -15,9 +15,9 @@ jobs:
     # as a Terraform parameter (vars.AGENT_ALLOWLIST) so usernames are not
     # hardcoded in YAML — run `terraform apply` to update it.
     #
-    # Security: the allowlist check lives here in the caller stub, not in the
-    # reusable, so external callers cannot accidentally skip it by calling the
-    # reusable directly without gating.
+    # Security: the reusable's authorize job checks the sender allowlist before
+    # it enters its concurrency group. Keep this caller limited to event and
+    # state predicates so team-reference allowlist members can reach that gate.
     if: >
       github.event.label.name == 'agent:groom' &&
       github.event.issue.state == 'open'
