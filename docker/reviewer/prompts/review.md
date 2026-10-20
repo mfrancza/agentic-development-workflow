@@ -20,7 +20,9 @@ cat AGENTS.md
 
 ## Review body header
 
-Every review body — `APPROVE`, `COMMENT`, or `REQUEST_CHANGES` — **must** open with the following two lines, substituting the value of `Reviewer model (this leg)` from your prompt context for `<AGENT_MODEL>`:
+Every review body — `APPROVE`, `COMMENT`, or `REQUEST_CHANGES` — **must** open with the two-line header supplied in your prompt context under the key `Review body header`. Copy that block verbatim — it contains the correct model name for this leg. Do not substitute a different model name, do not use an example value from this file, and do not omit the header.
+
+Template (where `<AGENT_MODEL>` is the `Reviewer model (this leg)` value from your prompt context):
 
 ```
 <!-- reviewer-model: <AGENT_MODEL> -->
@@ -29,18 +31,18 @@ Every review body — `APPROVE`, `COMMENT`, or `REQUEST_CHANGES` — **must** op
 
 The HTML comment (`<!-- reviewer-model: … -->`) is machine-parseable metadata consumed by downstream automation. The visible `### Review by` heading disambiguates the review in the GitHub PR UI when multiple reviewer legs post against the same head SHA under the same reviewer bot identity.
 
-For an `APPROVE` with no other body content:
+For an `APPROVE` with no other body content (substitute `<AGENT_MODEL>` with the exact value of `Reviewer model (this leg)` from your prompt context):
 
 ```
-<!-- reviewer-model: claude-sonnet-4-5 -->
-### Review by `claude-sonnet-4-5`
+<!-- reviewer-model: <AGENT_MODEL> -->
+### Review by `<AGENT_MODEL>`
 ```
 
 For a `REQUEST_CHANGES` or `COMMENT`, the header precedes the rest of the body text:
 
 ```
-<!-- reviewer-model: claude-sonnet-4-5 -->
-### Review by `claude-sonnet-4-5`
+<!-- reviewer-model: <AGENT_MODEL> -->
+### Review by `<AGENT_MODEL>`
 
 Summary of unanchorable findings here.
 ```
@@ -95,14 +97,14 @@ Findings that cannot be anchored to a changed line — a missing file, a gap in 
 
 ## How to post the review
 
-Build the JSON payload and post it with a single `gh api` call. Always include the `<!-- reviewer-model: … --> ### Review by …` header (see **Review body header** above) as the first content in the `body` field:
+Build the JSON payload and post it with a single `gh api` call. Always include the `<!-- reviewer-model: … --> ### Review by …` header (see **Review body header** above) as the first content in the `body` field. In the examples below, `<AGENT_MODEL>` is a placeholder — replace it with the exact value from the `Review body header` line in your prompt context (which the entrypoint pre-computed from `Reviewer model (this leg)`):
 
 ```bash
 gh api -X POST "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" \
   --input - <<'EOF'
 {
   "event": "REQUEST_CHANGES",
-  "body": "<!-- reviewer-model: claude-sonnet-4-5 -->\n### Review by `claude-sonnet-4-5`\n\nSummary of unanchorable findings.",
+  "body": "<!-- reviewer-model: <AGENT_MODEL> -->\n### Review by `<AGENT_MODEL>`\n\nSummary of unanchorable findings.",
   "comments": [
     {
       "path": "docker/scripts/entrypoint.sh",
@@ -122,7 +124,7 @@ gh api -X POST "repos/${GITHUB_REPO}/pulls/${GITHUB_PR_NUMBER}/reviews" \
   --input - <<'EOF'
 {
   "event": "APPROVE",
-  "body": "<!-- reviewer-model: claude-sonnet-4-5 -->\n### Review by `claude-sonnet-4-5`",
+  "body": "<!-- reviewer-model: <AGENT_MODEL> -->\n### Review by `<AGENT_MODEL>`",
   "comments": []
 }
 EOF
