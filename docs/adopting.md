@@ -29,7 +29,7 @@ Complete these steps in order before wiring up any reusable workflows.
    named `my-developer-agent` gets the login `my-developer-agent[bot]`. You must
    add these to `AGENT_ALLOWLIST` so agents can apply `agent:*` labels. The exact
    slug is shown in the first comment posted by the bot after installation.
-5. **Install each App on your repository** (App settings → Install App).
+5. **Install each App.** Install developer-agent and reviewer-agent on your repository; install allowlist-resolver on the repository-owning organization when you use team references.
 6. **Set repository secrets** — see [Secrets](#secrets). You only need to set the
    LLM API keys for the providers you actually use; the agent container validates
    at runtime that the key for the selected model is present.
@@ -103,6 +103,7 @@ agent. No implementation, review, or CI integration.
 - [ ] [`labels` Terraform module](#labels-module)
 - [ ] [`agent-vars` Terraform module](#agent-vars-module) (sets `AGENT_ALLOWLIST`, `DEFAULT_MODEL`)
 - [ ] GitHub App: **developer-agent** (see [Common prerequisites](#common-prerequisites))
+- [ ] GitHub App: **allowlist-resolver** when `AGENT_ALLOWLIST` or `ADMIN_ASSIGNEES` contains an `org/team-slug` reference
 - [ ] Secrets: `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`
 - [ ] [`agent-groom` reusable workflow](#agent-groom-reusable-workflow)
 
@@ -118,6 +119,7 @@ resolves threads it marks addressed.
 - [ ] [`labels` Terraform module](#labels-module)
 - [ ] [`agent-vars` Terraform module](#agent-vars-module)
 - [ ] GitHub App: **reviewer-agent** (see [Common prerequisites](#common-prerequisites))
+- [ ] GitHub App: **allowlist-resolver** when `AGENT_ALLOWLIST` contains an `org/team-slug` reference
 - [ ] Secrets: `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`
 - [ ] [`agent-review` reusable workflow](#agent-review-reusable-workflow)
 - [ ] (Optional) [`agent-respond-review` reusable workflow](#agent-respond-review-reusable-workflow) — if you also use the developer agent and want it to respond to reviewer feedback
@@ -137,6 +139,7 @@ Every component.
 - [ ] [`actions-policy` Terraform module](#actions-policy-module)
 - [ ] [`security` Terraform module](#security-module)
 - [ ] GitHub Apps: **developer-agent** and **reviewer-agent** (see [Common prerequisites](#common-prerequisites))
+- [ ] GitHub App: **allowlist-resolver** when any agent user list contains an `org/team-slug` reference
 - [ ] All secrets (see [Common prerequisites](#common-prerequisites))
 - [ ] All reusable workflows (see [Reusable workflows](#reusable-workflows))
 - [ ] [Manual repository settings](#manual-repository-settings)
@@ -148,7 +151,8 @@ Every component.
 ### GitHub App identities
 
 Two GitHub App identities are required for the full pipeline (subsets need only
-the App(s) relevant to their profile). Create them once in **Settings →
+the App(s) relevant to their profile). Add the optional `allowlist-resolver`
+App when any agent user list uses a team reference. Create them once in **Settings →
 Developer settings → GitHub Apps → New GitHub App**.
 
 **developer-agent**
@@ -174,6 +178,15 @@ Developer settings → GitHub Apps → New GitHub App**.
 - After creation: note the **Client ID** and download a private key.
 - Install the App on your repository (same steps as above).
 
+**allowlist-resolver** (required only for `org/team-slug` references)
+
+- Organization permissions: Members (R)
+- Repository permissions: Metadata (R)
+- Subscribe to events: none
+- Webhook: **uncheck "Active"**
+- Install the App on the organization that owns the repository.
+- After creation: note the **Client ID** and download a private key.
+
 > **Note on the Client ID:** Despite the `_APP_ID` suffix used in secret
 > names, these secrets hold the GitHub App **Client ID** (the `Iv23.xxx`
 > string visible in the App's General settings) — not the numeric "App ID"
@@ -192,6 +205,10 @@ gh secret set DEVELOPER_APP_PRIVATE_KEY < developer-agent.pem
 # Reviewer-agent (required for agent-review)
 gh secret set REVIEWER_APP_ID           --body "<reviewer Client ID>"
 gh secret set REVIEWER_APP_PRIVATE_KEY  < reviewer-agent.pem
+
+# Allowlist resolver (required only when an agent user list uses org/team-slug)
+gh secret set ALLOWLIST_RESOLVER_APP_ID          --body "<allowlist-resolver Client ID>"
+gh secret set ALLOWLIST_RESOLVER_APP_PRIVATE_KEY < allowlist-resolver.pem
 
 # LLM provider keys — set only the ones you use.
 # The agent container validates at runtime that the key for the selected model
@@ -220,6 +237,8 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 >   ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 >   OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 >   XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+>   ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+>   ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 > ```
 >
 > **Do not replace the explicit `secrets:` blocks with `secrets: inherit`** — it
@@ -242,16 +261,16 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 
 | Reusable                                     | Required secrets                                                | Optional secrets                                                  |
 | -------------------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------- |
-| `agent-auto-trigger-reusable.yml`            | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | —                                                                 |
-| `agent-design-reusable.yml`                  | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `agent-auto-trigger-reusable.yml`            | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
+| `agent-design-reusable.yml`                  | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
 | `agent-fix-checks-reusable.yml`              | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
 | `agent-fix-deployment-reusable.yml`          | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
-| `agent-groom-reusable.yml`                   | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
-| `agent-implement-reusable.yml`               | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `agent-groom-reusable.yml`                   | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
+| `agent-implement-reusable.yml`               | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
 | `agent-pr-merged-reusable.yml`               | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | —                                                                 |
 | `agent-resolve-conflicts-reusable.yml`       | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
-| `agent-respond-review-reusable.yml`          | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
-| `agent-review-reusable.yml`                  | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`                   | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`              |
+| `agent-respond-review-reusable.yml`          | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
+| `agent-review-reusable.yml`                  | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`                   | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
 | `ci-reusable.yml`                            | —                                                               | —                                                                 |
 | `protected-approval-gate-reusable.yml`       | —                                                               | `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
 | `protected-approval-gate-sweep-reusable.yml` | —                                                               | `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
@@ -387,12 +406,13 @@ terraform import 'module.labels.github_issue_label.automation["question"]'    "$
 
 **What it does.**  
 Creates the five GitHub Actions repository variables that configure all agent
-workflow behavior: `AGENT_ALLOWLIST` (JSON array of GitHub usernames and bot
-identities that may trigger agent workflows), `DEFAULT_MODEL` (repo-wide
-default LLM for all agent containers), `ADMIN_ASSIGNEES` (JSON array of
-usernames or same-organization `org/team` references assigned to escalation
-issues), `CODE_REVIEWERS` (JSON array of
-usernames requested as PR reviewers), and `AUTO_TRIGGER_AGENTS` (JSON object
+workflow behavior: `AGENT_ALLOWLIST` (JSON array of GitHub logins, bot
+identities, and same-organization `org/team-slug` references that may trigger
+agent workflows), `DEFAULT_MODEL` (repo-wide default LLM for all agent
+containers), `ADMIN_ASSIGNEES` (JSON array of GitHub logins or
+same-organization `org/team-slug` references assigned to escalation issues),
+`CODE_REVIEWERS` (JSON array of GitHub logins or `org/team-slug` references
+requested as PR reviewers), and `AUTO_TRIGGER_AGENTS` (JSON object
 with per-stage boolean gates: `groom`, `design`, `developer`, `review`). All
 workflow `if:` conditions read from these variables, so they decouple runtime
 behavior from the YAML.
@@ -407,12 +427,14 @@ behavior from the YAML.
 - `AUTO_TRIGGER_AGENTS` must always be present in the repository. The guard
   `vars.AUTO_TRIGGER_AGENTS != ''` prevents `fromJSON('')` from throwing at
   runtime. All gates default to `false` — opt in explicitly.
+- Team references in `AGENT_ALLOWLIST` are resolved at each triggering event.
 - Team references in `ADMIN_ASSIGNEES` are expanded by the groom workflow.
-  They require the optional `allowlist-resolver` App credential pair
+- Team references in `CODE_REVIEWERS` pass through to GitHub for native team review requests.
+- Team references require the optional `allowlist-resolver` App credential pair
   (`ALLOWLIST_RESOLVER_APP_ID` and `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY`) with
-  organization Members: Read access. Without those secrets, grooming still
-  runs and assigns explicit logins, while warning that team entries were
-  skipped.
+  organization Members: Read access.
+- Without those secrets, allowlist-gated workflows fail closed for team entries.
+- Without those secrets, grooming still assigns explicit logins and warns that team entries were skipped.
 
 **Wiring snippet.**
 
@@ -626,12 +648,18 @@ image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
 image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0
 ```
 
-**Security note on allowlist gating.** Gated reusable workflows authorize the
-caller-supplied `sender-login` internally, before entering their concurrency
-group. Caller stubs must pass `github.event.sender.login`, but must not retain
-caller-side `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` or concurrency
-blocks. This is a breaking reusable-workflow contract change: callers upgrading
-to this version must add the required input.
+**Security note on allowlist gating.** The reusable's first authorization step
+owns membership authorization and runs before its work job enters the shared
+concurrency group. The gate receives a `principal` appropriate to the event:
+label-driven callers pass the event sender, while `agent-respond-review` passes
+the review author. The `agent-review` `synchronize` path and the
+`agent-auto-trigger` `auto-review` transition set `skip-gate: true`; their
+same-repository and agent-authorship checks are the policy boundary. The
+review-response gate additionally supplies `additional-trusted-logins` for the
+known reviewer bots. Caller stubs retain only event, label, and trust-model
+predicates; they must not retain caller-side
+`contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` checks or workflow/job
+`concurrency:` blocks for these gated workflows.
 
 ---
 
@@ -910,6 +938,7 @@ jobs:
       repo: ${{ github.repository }}
       image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0
       default-model: ${{ vars.DEFAULT_MODEL }}
+      reviewer-models: ${{ vars.REVIEWER_MODELS }}
       logs-retention-days: 30
       helpers-ref: v0
       sender-login: ${{ github.event.sender.login }}
@@ -991,6 +1020,8 @@ jobs:
       review-author: ${{ github.event.review.user.login }}
       pr-author: ${{ github.event.pull_request.user.login }}
       repo-name: ${{ github.event.repository.name }}
+      head-sha: ${{ github.event.pull_request.head.sha }}
+      review-commit-id: ${{ github.event.review.commit_id }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0
     secrets:
