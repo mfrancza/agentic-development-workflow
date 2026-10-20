@@ -8,6 +8,7 @@
 # of the grooming run.
 expand_admin_assignees() {
     local supported_org entries_file members_file entry team_org team_slug member
+    local members_added
     local -a expanded=()
     local -A seen=()
 
@@ -70,14 +71,19 @@ expand_admin_assignees() {
             members_file=''
             continue
         fi
+        members_added=0
         while IFS= read -r member || [ -n "${member}" ]; do
             [[ -z "${member}" ]] && continue
             local member_key="${member,,}"
             if [[ -z "${seen[${member_key}]:-}" ]]; then
                 seen["${member_key}"]=1
                 expanded+=("${member}")
+                members_added=1
             fi
         done < "${members_file}"
+        if [[ "${members_added}" -eq 0 ]]; then
+            log "WARNING: team entry '${entry}' resolved empty or added no new members — skipping"
+        fi
         rm -f "${members_file}"
         members_file=''
     done < "${entries_file}"

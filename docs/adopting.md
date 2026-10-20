@@ -390,7 +390,8 @@ Creates the five GitHub Actions repository variables that configure all agent
 workflow behavior: `AGENT_ALLOWLIST` (JSON array of GitHub usernames and bot
 identities that may trigger agent workflows), `DEFAULT_MODEL` (repo-wide
 default LLM for all agent containers), `ADMIN_ASSIGNEES` (JSON array of
-usernames assigned to escalation issues), `CODE_REVIEWERS` (JSON array of
+usernames or same-organization `org/team` references assigned to escalation
+issues), `CODE_REVIEWERS` (JSON array of
 usernames requested as PR reviewers), and `AUTO_TRIGGER_AGENTS` (JSON object
 with per-stage boolean gates: `groom`, `design`, `developer`, `review`). All
 workflow `if:` conditions read from these variables, so they decouple runtime
@@ -406,6 +407,12 @@ behavior from the YAML.
 - `AUTO_TRIGGER_AGENTS` must always be present in the repository. The guard
   `vars.AUTO_TRIGGER_AGENTS != ''` prevents `fromJSON('')` from throwing at
   runtime. All gates default to `false` — opt in explicitly.
+- Team references in `ADMIN_ASSIGNEES` are expanded by the groom workflow.
+  They require the optional `allowlist-resolver` App credential pair
+  (`ALLOWLIST_RESOLVER_APP_ID` and `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY`) with
+  organization Members: Read access. Without those secrets, grooming still
+  runs and assigns explicit logins, while warning that team entries were
+  skipped.
 
 **Wiring snippet.**
 

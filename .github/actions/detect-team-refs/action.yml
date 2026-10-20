@@ -1,0 +1,29 @@
+name: Detect team references
+description: Reports whether a JSON array contains org/team references.
+inputs:
+  assignees:
+    description: JSON array of assignee logins and optional org/team references.
+    required: false
+outputs:
+  assignees_has_team:
+    description: Whether assignees contains an entry with a slash.
+    value: ${{ steps.detect.outputs.assignees_has_team }}
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: 22
+        cache: npm
+        cache-dependency-path: ${{ github.action_path }}/../../scripts/package-lock.json
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ github.action_path }}/../../scripts
+      run: npm ci
+    - id: detect
+      name: Detect team references
+      shell: bash
+      working-directory: ${{ github.action_path }}/../../scripts
+      env:
+        INPUT_ASSIGNEES: ${{ inputs.assignees }}
+      run: npx --no-install tsx src/detect-team-refs.ts

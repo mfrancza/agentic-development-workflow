@@ -23,12 +23,16 @@ const runAgent = readFileSync(
   "utf8",
 );
 
-function runExpansion(adminAssignees: string, resolverToken = "resolver-token") {
+function runExpansion(
+  adminAssignees: string,
+  resolverToken = "resolver-token",
+  resolverMembers = "Member1 ALICE member2",
+) {
   const dir = mkdtempSync(join(tmpdir(), "expand-team-refs-"));
   const gh = join(dir, "gh");
   writeFileSync(
     gh,
-    `#!/bin/bash\necho "gh $*" >&2\nprintf '%s\\n' Member1 ALICE member2\n`,
+    `#!/bin/bash\necho "gh $*" >&2\nprintf '%s\\n' ${resolverMembers}\n`,
     { mode: 0o755 },
   );
 
@@ -77,6 +81,12 @@ describe("groom ADMIN_ASSIGNEES team expansion", () => {
     expect(result.stderr).toContain("resolver credential unavailable — skipping team entry 'test-org/test-team'");
     expect(result.stderr).not.toContain("gh api");
   });
+
+  it("warns when a resolved team adds no members", () => {
+    const result = runExpansion('["alice","test-org/test-team"]', "resolver-token", "");
+
+    expect(result.stderr).toContain("team entry 'test-org/test-team' resolved empty or added no new members — skipping");
+  });
 });
 
 describe("groom resolver token forwarding contract", () => {
@@ -86,7 +96,7 @@ describe("groom resolver token forwarding contract", () => {
     expect(reusable).toContain("ALLOWLIST_RESOLVER_APP_ID: { required: false }");
     expect(reusable).toContain("ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: { required: false }");
     expect(reusable).toContain("id: assignee-resolver");
-    expect(reusable).toContain("if: steps.detect-team-refs.outputs.assignees_needs_resolver == 'true'");
+    expect(reusable).toContain("if: steps.detect-team-refs.outputs.assignees_has_team == 'true'");
     expect(reusable).toContain("continue-on-error: true");
     expect(reusable).toContain("ALLOWLIST_RESOLVER_TOKEN: ${{ steps.assignee-resolver.outputs.token }}");
     expect(runAgent).toContain('[[ -n "${ALLOWLIST_RESOLVER_TOKEN:-}" ]] && _opt_env+=(-e ALLOWLIST_RESOLVER_TOKEN)');
