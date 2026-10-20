@@ -1,4 +1,4 @@
-name: require-two-developer-approvals-notify
+name: protected-approval-gate-notify
 
 # This intentionally executes no application code. Its completion is the
 # untrusted-event signal consumed by the trusted publisher workflow_run leg.
@@ -9,7 +9,7 @@ on:
 permissions: {}
 
 concurrency:
-  group: require-two-developer-approvals-pr-${{ github.event.pull_request.number }}
+  group: protected-approval-gate-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:

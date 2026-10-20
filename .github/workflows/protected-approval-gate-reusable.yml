@@ -1,4 +1,4 @@
-name: require-two-developer-approvals (reusable)
+name: protected-approval-gate (reusable)
 
 # The caller supplies PR event data explicitly because github.event in a
 # reusable workflow contains the workflow_call event, not its caller's event.
@@ -101,8 +101,8 @@ jobs:
           fi
           echo "Helper checkout HEAD verified: ${actual_sha}"
 
-      - name: Publish two-developer-approvals check
-        uses: ./_agentic-workflow/.github/actions/check-two-developer-approvals
+      - name: Publish protected-approval-gate check
+        uses: ./_agentic-workflow/.github/actions/check-protected-approval-gate
         with:
           protected-pr-author-logins: ${{ inputs.protected-pr-author-logins }}
           required-approval-count: ${{ inputs.required-approval-count }}

@@ -1,4 +1,4 @@
-# Design: Optionally require two approving reviews on developer-agent pull requests
+# Design: Protected approval gate — require a configurable number of approvals on protected authors' pull requests
 
 **Issue:** [#628](https://github.com/mfrancza/agentic-development-workflow/issues/628)
 
@@ -38,7 +38,7 @@ adds another workflow with `checks: write`) to post a spoofed
 check-run under the GitHub Actions App ID, and the baseline-review +
 PR-diff-visibility layers that bound that risk.
 
-The context name is fixed (`require-two-developer-approvals`). An
+The context name is fixed (`protected-approval-gate`). An
 ON → OFF → ON cycle in which approvals change while the gate is OFF
 cannot leave a stale `success` check-run from the previous ON interval
 in force: the backfill run on enable, and the reconcile sweep within one
@@ -174,7 +174,7 @@ variable "enable_protected_approval_gate" {
 }
 
 variable "enable_protected_approval_gate_reconcile_minutes" {
-  description = "Minimum interval, in minutes, between sweeps of the Decision 8a pending-replacement safety-net workflow (`require-two-developer-approvals-reconcile.yml`). Exposed as the ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES Actions variable; sets the maximum staleness window for a shared-SHA block after the blocking dev-agent PR has moved on and the per-event cleanup was dropped by Actions concurrency pending-run replacement. Smaller values react faster but burn more Actions minutes. Defaults to 10, with a floor of 1 (the cron fires every minute). Implementation note: because `on.schedule.cron` is a build-time literal (GitHub Actions does not evaluate `${{ vars.X }}` inside it), the workflow commits to `cron: \"* * * * *\"` so every value of this variable from 1 upward is a real reduction in sweep latency. The activity's own early-exit guard queries this workflow's own recent completed runs via `GET /repos/{owner}/{repo}/actions/workflows/require-two-developer-approvals-reconcile.yml/runs?status=success&per_page=10`, excludes the current run by `GITHUB_RUN_ID`, and exits early when the most recent successful prior run completed less than `minutes` minutes ago. Values smaller than 1 are not useful; values up to any arbitrary ceiling are supported with no code change."
+  description = "Minimum interval, in minutes, between sweeps of the Decision 8a pending-replacement safety-net workflow (`protected-approval-gate-reconcile.yml`). Exposed as the ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES Actions variable; sets the maximum staleness window for a shared-SHA block after the blocking dev-agent PR has moved on and the per-event cleanup was dropped by Actions concurrency pending-run replacement. Smaller values react faster but burn more Actions minutes. Defaults to 10, with a floor of 1 (the cron fires every minute). Implementation note: because `on.schedule.cron` is a build-time literal (GitHub Actions does not evaluate `${{ vars.X }}` inside it), the workflow commits to `cron: \"* * * * *\"` so every value of this variable from 1 upward is a real reduction in sweep latency. The activity's own early-exit guard queries this workflow's own recent completed runs via `GET /repos/{owner}/{repo}/actions/workflows/protected-approval-gate-reconcile.yml/runs?status=success&per_page=10`, excludes the current run by `GITHUB_RUN_ID`, and exits early when the most recent successful prior run completed less than `minutes` minutes ago. Values smaller than 1 are not useful; values up to any arbitrary ceiling are supported with no code change."
   type        = number
   default     = 10
 }
@@ -186,7 +186,7 @@ All four variables are wired through `terraform/main.tf` →
 and `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`. The
 branch-protection module gains a new input
 `enable_protected_approval_gate_check_context` (defaulting to the
-fixed context name `require-two-developer-approvals` defined by
+fixed context name `protected-approval-gate` defined by
 Decision 6) that is referenced only when the opt-in is on.
 
 **Alternatives considered.**
@@ -194,7 +194,7 @@ Decision 6) that is referenced only when the opt-in is on.
 | Alternative | Reason rejected |
 |-------------|-----------------|
 | Reuse `developer-author` (which stores one `app/<slug>`) | It cannot represent a configurable list, and it is a reusable-workflow input rather than an Actions variable available to this independent workflow. A JSON Actions variable is the natural fit. |
-| Add a boolean key inside an existing JSON Actions variable (e.g. a new `two_developer_approvals` key in `AUTO_TRIGGER_AGENTS`) | `AUTO_TRIGGER_AGENTS` is about applying `agent:*` labels at SDLC transitions — a different domain. Overloading it would make its contract less cohesive and complicate the `fromJSON(vars.AUTO_TRIGGER_AGENTS)` consumers in `agent-auto-trigger.yml`. A dedicated boolean is clearer. |
+| Add a boolean key inside an existing JSON Actions variable (e.g. a new `protected_approval_gate` key in `AUTO_TRIGGER_AGENTS`) | `AUTO_TRIGGER_AGENTS` is about applying `agent:*` labels at SDLC transitions — a different domain. Overloading it would make its contract less cohesive and complicate the `fromJSON(vars.AUTO_TRIGGER_AGENTS)` consumers in `agent-auto-trigger.yml`. A dedicated boolean is clearer. |
 | Expose only a module-level input on the branch-protection module and skip the Actions variable | The workflow needs to know, independently of the ruleset, whether to compute the check result at all. Without the Actions variable, the workflow would run against every PR, make API calls, and emit either `success` or `failure` — but there would be nothing in the ruleset referencing it, so a `failure` would be ignored. That is wasteful and surprising. Having both the Actions variable (consumed by the workflow) and the module input (consumed by the ruleset) keeps the two sides in step and makes the opt-in reversible in a single `terraform apply`. |
 | Hardcode one protected identity or threshold in the workflow | It prevents adopters from protecting multiple identities or selecting their policy without editing trusted workflow code. |
 
@@ -219,7 +219,7 @@ locals {
   # `enable_protected_approval_gate_check_context`.
   enable_protected_approval_gate_check_context_final = coalesce(
     var.enable_protected_approval_gate_check_context,
-    "require-two-developer-approvals",
+    "protected-approval-gate",
   )
 }
 
@@ -257,7 +257,7 @@ variable "enable_protected_approval_gate" {
 }
 
 variable "enable_protected_approval_gate_check_context" {
-  description = "Status-check context name produced by the two-approvals workflow. Only used when enable_protected_approval_gate is true. Defaults to require-two-developer-approvals, the context published by this repo's require-two-developer-approvals-publisher.yml via the Checks API (see Decision 6 and Decision 7). Override only when publishing under a different name."
+  description = "Status-check context name produced by the two-approvals workflow. Only used when enable_protected_approval_gate is true. Defaults to protected-approval-gate, the context published by this repo's protected-approval-gate-publisher.yml via the Checks API (see Decision 6 and Decision 7). Override only when publishing under a different name."
   type        = string
   default     = null  # Falls back to the fixed name; see locals in main.tf
 }
@@ -348,13 +348,13 @@ SHA; a later `COMMENTED` result must not discard that login's earlier
 always executes trusted base-branch code with a write-capable token, even
 for pull requests from forks:
 
-1. **Publisher** — `require-two-developer-approvals-publisher.yml`
+1. **Publisher** — `protected-approval-gate-publisher.yml`
    Triggered by `pull_request_target` (for the pull-request-side events)
    and by `workflow_run` (for the review-side events, chained through
    workflow 2). This is the workflow that actually calls the Checks API
    to publish the required-context conclusion.
 
-2. **Review notifier** — `require-two-developer-approvals-notify.yml`
+2. **Review notifier** — `protected-approval-gate-notify.yml`
    Triggered by `pull_request_review`. Carries **zero permissions**, runs
    no application code (an empty job that always succeeds), and exists
    solely so that its completion fires a `workflow_run` event the
@@ -362,7 +362,7 @@ for pull requests from forks:
    definition.
 
 ```yaml
-# require-two-developer-approvals-publisher.yml (trusted; runs base-branch code)
+# protected-approval-gate-publisher.yml (trusted; runs base-branch code)
 on:
   pull_request_target:
     # - opened/reopened/synchronize/edited: standard state transitions
@@ -374,20 +374,20 @@ on:
     #   recomputed when its sibling leaves (closed or merged).
     types: [opened, reopened, synchronize, edited, ready_for_review, closed]
   workflow_run:
-    workflows: ["require-two-developer-approvals-notify"]
+    workflows: ["protected-approval-gate-notify"]
     types: [completed]
 ```
 
 ```yaml
-# require-two-developer-approvals-notify.yml (untrusted; empty on purpose)
+# protected-approval-gate-notify.yml (untrusted; empty on purpose)
 #
 # IMPORTANT: `name:` is required here. GitHub's `on.workflow_run.workflows`
 # filter matches the workflow's `name:` field; when `name:` is omitted,
 # GitHub derives the workflow name from the relative path
-# (`.github/workflows/require-two-developer-approvals-notify.yml`), which
+# (`.github/workflows/protected-approval-gate-notify.yml`), which
 # does NOT match the filename stem the publisher's filter uses. Without
 # an explicit `name:` matching the filter string in the publisher sketch
-# above (`workflows: ["require-two-developer-approvals-notify"]`), review
+# above (`workflows: ["protected-approval-gate-notify"]`), review
 # `submitted` / `edited` / `dismissed` events would never start the
 # publisher; a developer-agent PR would get the initial `failure` on
 # `opened` and then stay failed forever even after two qualifying
@@ -395,7 +395,7 @@ on:
 # `ci.yml` sets `name: CI` so `agent-fix-checks.yml` can filter
 # `workflows: ["CI"]`. The publisher's filter string and this `name:`
 # MUST stay in lockstep.
-name: require-two-developer-approvals-notify
+name: protected-approval-gate-notify
 
 on:
   pull_request_review:
@@ -482,7 +482,7 @@ jobs:
 Making the checked-in notifier empty does **not** make a PR-modified
 notifier empty. Because `pull_request_review` loads workflow YAML from
 the PR head commit, a same-repository PR can edit
-`require-two-developer-approvals-notify.yml` to declare
+`protected-approval-gate-notify.yml` to declare
 `permissions: write-all` and add a `curl` step that POSTs a fake
 `conclusion: success` check-run under the enforcing context name. Any
 such run authenticates as the GitHub Actions App (integration_id 15368),
@@ -505,7 +505,7 @@ documented together here:
 2. **PR-visible blast radius (social mitigation, not an enforced
    gate).** Any attack of this shape requires editing a file under
    `.github/workflows/` (either
-   `require-two-developer-approvals-notify.yml`, or any other
+   `protected-approval-gate-notify.yml`, or any other
    workflow granting `checks: write`), which is highly visible in the
    PR diff and reviewable by the single human approver. The
    repository's existing `agent-review` posture already flags
@@ -588,7 +588,7 @@ structural fix listed in "Out of scope" to land first.
   the Decision 8a departed-SHA reconciliation path against the closed
   PR's `pr.head.sha`, so any sibling PRs that still share that commit
   get their check-run recomputed without the closed PR's contribution.
-- `workflow_run (require-two-developer-approvals-notify)` — fires after
+- `workflow_run (protected-approval-gate-notify)` — fires after
   every `pull_request_review: submitted|edited|dismissed`. The publisher
   reads the triggering PR from `github.event.workflow_run.pull_requests[0]`
   (same shape agent-fix-checks already uses) and recomputes.
@@ -649,7 +649,7 @@ reusable is never invoked with an empty `pr-number`:
 jobs:
   publish:
     if: github.event.workflow_run.pull_requests[0] != null
-    uses: ./.github/workflows/require-two-developer-approvals-publisher-reusable.yml
+    uses: ./.github/workflows/protected-approval-gate-publisher-reusable.yml
     with:
       pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
       event-head-sha: ${{ github.event.workflow_run.pull_requests[0].head.sha }}
@@ -682,9 +682,13 @@ single reference implementation to follow.
 
 **Decision.** The activity publishes the check conclusion using the
 Checks API (`POST /repos/{owner}/{repo}/check-runs`) with the fixed
-`name` `require-two-developer-approvals`.
+`name` `protected-approval-gate`. The name (like the workflow files,
+activity, and Terraform/Actions variables) uses the `protected-approval-gate`
+stem rather than a count or a specific author, because both the threshold
+(`REQUIRED_APPROVAL_COUNT`) and the protected authors
+(`PROTECTED_PR_AUTHOR_LOGINS`) are configurable.
 When the opt-in is OFF, the preview context is
-`require-two-developer-approvals (preview)` (see
+`protected-approval-gate (preview)` (see
 Decision 7 for why the enforcing context is not published in OFF
 mode). The ruleset's `required_status_checks` block references the
 same enforcing context **and pins its `integration_id` to
@@ -739,7 +743,7 @@ non-matching App and confirms the required check is **not** satisfied.
 
 | Alternative | Reason rejected |
 |-------------|-----------------|
-| Rely on the job's pass/fail outcome as the required check context | Context name becomes "require-two-developer-approvals / check" where the parts come from the workflow name and job id as GitHub assembles them. Renaming either side silently breaks the ruleset reference. The Checks API approach decouples the published name from the YAML surface, and lets both the publisher and `workflow_run` paths produce the same context. |
+| Rely on the job's pass/fail outcome as the required check context | Context name becomes "protected-approval-gate / check" where the parts come from the workflow name and job id as GitHub assembles them. Renaming either side silently breaks the ruleset reference. The Checks API approach decouples the published name from the YAML surface, and lets both the publisher and `workflow_run` paths produce the same context. |
 | Omit `integration_id` on the required_check entry | Leaves the required context satisfiable by any identity with check-publication permission (see "Why `integration_id` must be pinned" above). |
 | Use the Commit Statuses API (`POST /statuses/{sha}`) | Deprecated in favour of the Checks API for new integrations. Checks API is better integrated with the ruleset UI (shows per-check conclusions, logs, re-run button). |
 | Publish once per workflow run but let GitHub infer success-on-missing-failure | Rulesets block merge until the named check is present with `conclusion = success`. "Infer success" is not an option; the check has to be posted. |
@@ -751,9 +755,9 @@ handles each with a specific publication posture:
 
 1. **Opt-in OFF (default).** The publisher **does not publish anything
    under the enforcing context**
-   (`require-two-developer-approvals`). It
+   (`protected-approval-gate`). It
    optionally publishes a diagnostic context named
-   `require-two-developer-approvals (preview)` that
+   `protected-approval-gate (preview)` that
    reflects what the gate *would* say if enabled. The ruleset never lists
    the preview context as required, so the preview has no gating effect;
    its purpose is to let maintainers see what enabling the opt-in would do
@@ -809,7 +813,7 @@ and `docs/adopting.md`:
    `ENABLE_PROTECTED_APPROVAL_GATE = true` (for adopters who manage the
    Actions variable manually, set it as a follow-on step).
 2. Dispatch the one-shot reconciliation workflow
-   `require-two-developer-approvals-backfill.yml` (a trivial
+   `protected-approval-gate-backfill.yml` (a trivial
    `workflow_dispatch`-only wrapper around the publisher activity that
    fans out across `gh pr list --state open --json number,headRefOid`).
    It publishes the current evaluation under the enforcing context on
@@ -818,7 +822,7 @@ and `docs/adopting.md`:
    PRs that had none (case (b), fail-closed until then).
 
 **Automatic catch-up.** If the operator skips step 2, the Decision 8a
-reconcile sweep (`require-two-developer-approvals-reconcile.yml`)
+reconcile sweep (`protected-approval-gate-reconcile.yml`)
 re-publishes the enforcing context on every open PR once every
 `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` (default 10) while
 the gate is ON. A stale `success` from a prior ON interval is therefore
@@ -845,7 +849,7 @@ results through the backfill and the reconcile sweep.
 | Fail open (treat invalid scope as "no PRs match → always success") when the opt-in is on | Silently defeats the whole feature. |
 | Fail closed on only the protected-author path when scope is invalid | Insufficient: without a valid list the publisher cannot tell which subset to block. Blocking every PR with an error is the correct behaviour because the misconfiguration prevents the gate from working on *any* PR. |
 | Enable in a single step (flip both Terraform and the Actions variable in the same `terraform apply`) | Also acceptable because the fail-closed posture holds between the two apply operations — Terraform sequences the ruleset change before the Actions-variable change within one apply only when the dependency graph requires it, and in this repo they are independent resources. The two-step document still recommends the backfill because the ruleset flip alone does not re-post anything on existing open PRs, so the backfill is where the operator confirms activation worked. |
-| Generation-suffixed context name (`require-two-developer-approvals-g<N>`) bumped on every re-enable | Was the design as first merged (#666), removed by #702. A bump made earlier check-runs invisible to the ruleset, but only if the operator remembered to bump on every re-enable, and the ruleset context and a separate `ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION` Actions variable had to change in lockstep. Forgetting the bump reintroduced the stale-`success` defect; a ruleset/variable mismatch either blocked every protected PR or reintroduced it. The fixed name with backfill and the existing reconcile sweep gives the same protection with less configuration, and bounds the exposure to one reconcile interval when the backfill is skipped. |
+| Generation-suffixed context name (`require-two-developer-approvals-g<N>`, the name used before this design adopted `protected-approval-gate`) bumped on every re-enable | Was the design as first merged (#666), removed by #702. A bump made earlier check-runs invisible to the ruleset, but only if the operator remembered to bump on every re-enable, and the ruleset context and a separate `ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION` Actions variable had to change in lockstep. Forgetting the bump reintroduced the stale-`success` defect; a ruleset/variable mismatch either blocked every protected PR or reintroduced it. The fixed name with backfill and the existing reconcile sweep gives the same protection with less configuration, and bounds the exposure to one reconcile interval when the backfill is skipped. |
 
 ### Decision 8 — Per-PR serialization and stale-write guard
 
@@ -862,7 +866,7 @@ notifier caller stub set a `concurrency` block keyed on the PR number:
 ```yaml
 # publisher (pull_request_target leg)
 concurrency:
-  group: require-two-developer-approvals-pr-${{ github.event.pull_request.number }}
+  group: protected-approval-gate-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 # publisher (workflow_run leg)
@@ -871,7 +875,7 @@ concurrency:
 # associate the triggering run with a PR — the documented case is
 # fork-headed PRs (GitHub Docs, "Events that trigger workflows >
 # workflow_run"), where `pull_requests` is omitted entirely. Without a
-# fallback the group key collapses to `require-two-developer-approvals-pr-`
+# fallback the group key collapses to `protected-approval-gate-pr-`
 # for every fork-headed trigger, serializing unrelated events across all
 # fork PRs. `agent-fix-checks.yml` already uses the correct shape — this
 # sketch must copy both the `|| github.event.workflow_run.id` fallback in
@@ -886,7 +890,7 @@ concurrency:
 # share a head SHA is handled correctly in the activity even though
 # `workflow_run.pull_requests[0]` only names one of them.
 concurrency:
-  group: require-two-developer-approvals-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  group: protected-approval-gate-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
   cancel-in-progress: false
 ```
 
@@ -1032,7 +1036,7 @@ per-SHA lock* and then:
 The per-PR concurrency group from Decision 8 is extended on the
 publisher side to **additionally** take a shared lock on the head SHA
 via a secondary concurrency group
-`require-two-developer-approvals-sha-${liveHeadSha}` on a dedicated
+`protected-approval-gate-sha-${liveHeadSha}` on a dedicated
 sibling job that runs the per-SHA publication; the per-PR job
 computes and hands off, and the per-SHA job serializes publications
 on the SHA. This prevents two different PRs' publishers from racing
@@ -1067,7 +1071,7 @@ against each departing SHA (with the departing PR filtered out):
    genuinely leaves a SHA.
 
 For each departing SHA, under the per-SHA concurrency lock
-`require-two-developer-approvals-sha-${departingSha}` (a sibling job
+`protected-approval-gate-sha-${departingSha}` (a sibling job
 to the live-head publication, so the same workflow run holds both
 locks), the activity:
 
@@ -1132,7 +1136,7 @@ Decision 8:
 To make reconciliation survive this (and the equivalent case where
 `B` for a `closed` event is dropped by a later notifier-driven C),
 the design adds a **periodic reconciliation sweep workflow**
-`require-two-developer-approvals-reconcile.yml`:
+`protected-approval-gate-reconcile.yml`:
 
 - Triggered by `schedule: cron: "* * * * *"` (every minute — a
   build-time literal because `on.schedule.cron` does not evaluate
@@ -1142,7 +1146,7 @@ the design adds a **periodic reconciliation sweep workflow**
   `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` (default
   10 minutes) consumed by the activity's own early-exit guard:
   before doing any work, the activity calls
-  `GET /repos/{owner}/{repo}/actions/workflows/require-two-developer-approvals-reconcile.yml/runs?status=success&per_page=10`,
+  `GET /repos/{owner}/{repo}/actions/workflows/protected-approval-gate-reconcile.yml/runs?status=success&per_page=10`,
   excludes the current run (identified by `GITHUB_RUN_ID`), and
   exits 0 immediately when the most recent prior successful run
   completed less than `minutes` ago. The committed `* * * * *` cron
@@ -1165,7 +1169,7 @@ the design adds a **periodic reconciliation sweep workflow**
   rule above and fails the job loudly, rather than reporting a successful
   sweep that silently left a stale result in place.
 - Takes its own repository-wide concurrency group
-  `require-two-developer-approvals-reconcile` with
+  `protected-approval-gate-reconcile` with
   `cancel-in-progress: false`, so it does not share concurrency
   with any per-PR publisher run and cannot be dropped by pending-run
   replacement there.
@@ -1235,7 +1239,7 @@ rejected in the Alternatives table below with their reasons.
 
 | Alternative | Reason rejected |
 |-------------|-----------------|
-| Give each PR its own context name (e.g. `require-two-developer-approvals-pr-${number}`) | GitHub rulesets require a literal context name on the `required_check` entry — there is no templating. One context per possible PR number is operationally impossible. |
+| Give each PR its own context name (e.g. `protected-approval-gate-pr-${number}`) | GitHub rulesets require a literal context name on the `required_check` entry — there is no templating. One context per possible PR number is operationally impossible. |
 | Publish per-PR check-runs with distinct names and have the ruleset accept any one matching a pattern | No "any of" matching exists in rulesets. Required checks are named individually. |
 | Trust the per-PR concurrency group alone and ignore the SHA-sharing case | The reviewer's concrete scenario — a human-opened PR's `success` satisfying a shared-SHA dev-agent PR's enforcement — is a real merge-gate bypass. Not acceptable. |
 | Only publish from the dev-agent-author PR when a conflict exists | Requires the publisher to know, from the non-dev PR's run, that a dev PR exists and defer to its publication order. The strictest-wins intersection in the Decision above achieves the same outcome symmetrically without ordering fragility. |
@@ -1267,12 +1271,12 @@ end-to-end validation on a scratch PR under Issue #665.
    exercises the `pull_request_target` write-capable token path.
 3. **Trust-anchor test (same-repo PR modifies the gate)** — open a
    same-repository PR whose diff **simultaneously** edits:
-   - the publisher workflow (`require-two-developer-approvals-publisher.yml`),
+   - the publisher workflow (`protected-approval-gate-publisher.yml`),
    - the reusable it calls,
    - the composite action and the TypeScript activity (so that any
      non-base-branch execution path would publish unconditional
      `success`),
-   - the notifier (`require-two-developer-approvals-notify.yml`) to
+   - the notifier (`protected-approval-gate-notify.yml`) to
      escalate `permissions:` to `write-all` and add a `curl` step
      POSTing a spoofed `conclusion: success` check-run under the
      enforcing context name, and
@@ -1451,7 +1455,7 @@ end-to-end validation on a scratch PR under Issue #665.
       correctly, but **never** processes `departingSha = H1`.
     - **With no further activity on either PR**, assert that
       within the sweep interval (default 10 minutes), the scheduled
-      `require-two-developer-approvals-reconcile.yml` sweep
+      `protected-approval-gate-reconcile.yml` sweep
       republishes the check-run on H1 as `success` and the human PR
       becomes mergeable.
 
@@ -1492,10 +1496,10 @@ AGENTS.md § "Keeping Documentation Current"):
     from `true` to `false` must be justified in the PR body (same pattern as
     "lowers `required_approving_review_count` below 1").
   - List the four new workflows
-    (`require-two-developer-approvals-publisher.yml`,
-    `require-two-developer-approvals-notify.yml`,
-    `require-two-developer-approvals-backfill.yml`,
-    `require-two-developer-approvals-reconcile.yml`) in the Repository
+    (`protected-approval-gate-publisher.yml`,
+    `protected-approval-gate-notify.yml`,
+    `protected-approval-gate-backfill.yml`,
+    `protected-approval-gate-reconcile.yml`) in the Repository
     Layout section.
 - `terraform/modules/branch-protection/README.md`: document the three
   new module variables (`enable_protected_approval_gate`,
@@ -1507,9 +1511,9 @@ AGENTS.md § "Keeping Documentation Current"):
   with `bypass_mode = "pull_request"` can bypass the two-approval
   check when merging a PR — this is explicit, documented, and
   auditable). Also document the two-step enable/disable procedure,
-  the one-shot `require-two-developer-approvals-backfill.yml`
+  the one-shot `protected-approval-gate-backfill.yml`
   workflow, the periodic
-  `require-two-developer-approvals-reconcile.yml` sweep workflow
+  `protected-approval-gate-reconcile.yml` sweep workflow
   (committed `cron: "* * * * *"` + activity-side early-exit guard
   reading `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`;
   default 10 minutes, floor 1) and the fact
@@ -1611,7 +1615,7 @@ AGENTS.md § "Keeping Documentation Current"):
 - **Scheduled re-posting of the check on long-open PRs *in the common
   case*.** Event-driven triggers cover every state change that matters
   in the normal path. The scheduled
-  `require-two-developer-approvals-reconcile.yml` sweep (added by
+  `protected-approval-gate-reconcile.yml` sweep (added by
   Decision 8a's pending-replacement safety net) runs for a different
   reason — it reconciles shared-SHA check-runs when a per-event
   departed-SHA cleanup was dropped by Actions' concurrency pending-run
@@ -1642,8 +1646,8 @@ AGENTS.md § "Keeping Documentation Current"):
 Issues #661 and #662 are independent and can proceed in parallel — the
 contract (variable names `PROTECTED_PR_AUTHOR_LOGINS`,
 `REQUIRED_APPROVAL_COUNT`, and `ENABLE_PROTECTED_APPROVAL_GATE`;
-enforcing check-context name `require-two-developer-approvals`;
-preview context name `require-two-developer-approvals (preview)`;
+enforcing check-context name `protected-approval-gate`;
+preview context name `protected-approval-gate (preview)`;
 `integration_id = 15368`; activity input names) is established by
 this document. Issue #663 depends on Issue #662 because the reusable
 invokes the composite action from #662. Issue #664 can be drafted in

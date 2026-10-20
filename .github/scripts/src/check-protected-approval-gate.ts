@@ -39,7 +39,7 @@ function splitRepository(repository: string): [string, string] {
 
 // Fixed context name. Stale results from an earlier ON interval are replaced by
 // the backfill on enable and by the reconcile sweep (see Decision 7).
-const CHECK_NAME = "require-two-developer-approvals";
+const CHECK_NAME = "protected-approval-gate";
 
 function checkName(preview: boolean): string {
   return `${CHECK_NAME}${preview ? " (preview)" : ""}`;

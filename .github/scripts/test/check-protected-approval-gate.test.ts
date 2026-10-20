@@ -8,7 +8,7 @@ vi.mock("@actions/github", () => ({ getOctokit: vi.fn().mockReturnValue({ rest: 
 
 import * as core from "@actions/core";
 import * as github from "@actions/github";
-import { run } from "../src/check-two-developer-approvals.js";
+import { run } from "../src/check-protected-approval-gate.js";
 
 function mockInputs(overrides: Record<string, string> = {}) {
   const inputs: Record<string, string> = {
@@ -21,7 +21,7 @@ function pr(number: number, author: string, sha = "live-sha", state = "open") { 
 function review(login: string, state: string) { return { user: { login }, state }; }
 function callsFor(sha: string) { return createCheck.mock.calls.filter(([input]) => input.head_sha === sha).map(([input]) => input); }
 
-describe("check-two-developer-approvals", () => {
+describe("check-protected-approval-gate", () => {
   beforeEach(() => {
     vi.clearAllMocks(); vi.stubEnv("GITHUB_TOKEN", "test-token"); mockInputs();
     getPull.mockResolvedValue({ data: pr(42, "developer[bot]") });
@@ -31,15 +31,15 @@ describe("check-two-developer-approvals", () => {
 
   it("uses the fixed enforcing context and the live, not event, head SHA", async () => {
     await run();
-    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals", head_sha: "live-sha", conclusion: "failure" }));
+    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "protected-approval-gate", head_sha: "live-sha", conclusion: "failure" }));
     expect(getPull).toHaveBeenCalledWith({ owner: "owner", repo: "repo", pull_number: 42 });
   });
 
   it("does not publish the enforcing context when disabled", async () => {
     mockInputs({ enabled: "false" }); listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
     await run();
-    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals (preview)", conclusion: "success" }));
-    expect(createCheck).not.toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals" }));
+    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "protected-approval-gate (preview)", conclusion: "success" }));
+    expect(createCheck).not.toHaveBeenCalledWith(expect.objectContaining({ name: "protected-approval-gate" }));
   });
 
   it.each([
@@ -64,7 +64,7 @@ describe("check-two-developer-approvals", () => {
     ["zero threshold", { required_approval_count: "0" }], ["non-integer threshold", { required_approval_count: "1.5" }],
   ])("fails every PR visibly for %s", async (_name, inputs) => {
     mockInputs(inputs); await expect(run()).rejects.toThrow();
-    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "require-two-developer-approvals", conclusion: "failure", head_sha: "live-sha" }));
+    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "protected-approval-gate", conclusion: "failure", head_sha: "live-sha" }));
     expect(core.error).toHaveBeenCalled();
   });
 

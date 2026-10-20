@@ -1,4 +1,4 @@
-name: require-two-developer-approvals-backfill
+name: protected-approval-gate-backfill
 
 on:
   workflow_dispatch:
@@ -29,9 +29,9 @@ jobs:
       matrix:
         pr: ${{ fromJSON(needs.find-open-prs.outputs.prs) }}
     concurrency:
-      group: require-two-developer-approvals-sha-${{ matrix.pr.sha }}
+      group: protected-approval-gate-sha-${{ matrix.pr.sha }}
       cancel-in-progress: false
-    uses: ./.github/workflows/require-two-developer-approvals-reusable.yml
+    uses: ./.github/workflows/protected-approval-gate-reusable.yml
     with:
       protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}

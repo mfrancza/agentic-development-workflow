@@ -35,7 +35,7 @@ code_reviewers = [
 
 # Opt-in protected-approval gate. The default protects the developer-agent bot
 # and requires two non-self approvals. After every OFF → ON change, dispatch
-# require-two-developer-approvals-backfill.yml so no open PR keeps a stale
+# protected-approval-gate-backfill.yml so no open PR keeps a stale
 # result from an earlier ON interval (the reconcile sweep also replaces it
 # within enable_protected_approval_gate_reconcile_minutes).
 # protected_pr_author_logins                         = ["<developer-agent-app-slug>[bot]"]

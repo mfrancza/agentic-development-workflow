@@ -1,4 +1,4 @@
-name: 'Check two developer approvals'
+name: 'Check protected approval gate'
 description: 'Publishes the configurable protected-author approval check run.'
 
 inputs:
@@ -61,4 +61,4 @@ runs:
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_DEPARTED_SHA: ${{ inputs.departed-sha }}
         INPUT_DEPARTED_PR_NUMBER: ${{ inputs.departed-pr-number }}
-      run: npx --no-install tsx src/check-two-developer-approvals.ts
+      run: npx --no-install tsx src/check-protected-approval-gate.ts

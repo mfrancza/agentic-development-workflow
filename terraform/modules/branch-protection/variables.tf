@@ -16,7 +16,7 @@ variable "enable_protected_approval_gate" {
 }
 
 variable "enable_protected_approval_gate_check_context" {
-  description = "Optional override for the protected-approval status-check context. Defaults to require-two-developer-approvals."
+  description = "Optional override for the protected-approval status-check context. Defaults to protected-approval-gate."
   type        = string
   default     = null
   nullable    = true
