@@ -53,6 +53,12 @@ variable "protected_pr_author_logins" {
   default     = ["mfrancza-developer-agent[bot]"]
 }
 
+variable "protected_approval_reviewers" {
+  description = "Logins and <org>/<team-slug> references whose approvals count on protected PRs. Empty means any non-author reviewer counts. Stored as the JSON-encoded PROTECTED_APPROVAL_REVIEWERS Actions variable."
+  type        = list(string)
+  default     = []
+}
+
 variable "required_approval_count" {
   description = "Number of non-self approvals required for a protected PR. Stored as REQUIRED_APPROVAL_COUNT."
   type        = number

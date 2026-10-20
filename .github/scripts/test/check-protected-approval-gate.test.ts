@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { listReviews, listPulls, getPull, createCheck } = vi.hoisted(() => ({
-  listReviews: vi.fn(), listPulls: vi.fn(), getPull: vi.fn(), createCheck: vi.fn(),
+const { listReviews, listPulls, getPull, createCheck, paginate, listMembersInOrg } = vi.hoisted(() => ({
+  listReviews: vi.fn(), listPulls: vi.fn(), getPull: vi.fn(), createCheck: vi.fn(), paginate: vi.fn(), listMembersInOrg: vi.fn(),
 }));
 vi.mock("@actions/core", () => ({ getInput: vi.fn().mockReturnValue(""), error: vi.fn(), setFailed: vi.fn() }));
-vi.mock("@actions/github", () => ({ getOctokit: vi.fn().mockReturnValue({ rest: { pulls: { listReviews, list: listPulls, get: getPull }, checks: { create: createCheck } } }) }));
+vi.mock("@actions/github", () => ({ getOctokit: vi.fn().mockReturnValue({ paginate, rest: { pulls: { listReviews, list: listPulls, get: getPull }, checks: { create: createCheck }, teams: { listMembersInOrg } } }) }));
 
 import * as core from "@actions/core";
 import * as github from "@actions/github";
@@ -27,6 +27,7 @@ describe("check-protected-approval-gate", () => {
     getPull.mockResolvedValue({ data: pr(42, "developer[bot]") });
     listPulls.mockResolvedValue({ data: [pr(42, "developer[bot]")] });
     listReviews.mockResolvedValue({ data: [] }); createCheck.mockResolvedValue({});
+    paginate.mockResolvedValue([]);
   });
 
   it("uses the fixed enforcing context and the live, not event, head SHA", async () => {
@@ -86,6 +87,64 @@ describe("check-protected-approval-gate", () => {
     getPull.mockImplementation(async ({ pull_number }: { pull_number: number }) => ({ data: pull_number === 42 ? pr(42, "developer[bot]", "live-sha") : pr(43, "human", "old-sha") }));
     listPulls.mockImplementation(async ({ page }: { page: number }) => ({ data: page === 1 ? [pr(42, "developer[bot]", "live-sha"), pr(43, "human", "old-sha")] : [] }));
     await run(); expect(callsFor("old-sha")[0]).toEqual(expect.objectContaining({ conclusion: "success" }));
+  });
+
+  describe("qualifying reviewers", () => {
+    const twoApprovals = [review("alice", "APPROVED"), review("Bob", "APPROVED")];
+
+    it("counts only approvals from listed logins, case-insensitively", async () => {
+      mockInputs({ qualifying_reviewers: '["alice"]' }); listReviews.mockResolvedValue({ data: twoApprovals });
+      await run(); expect(callsFor("live-sha")[0]).toEqual(expect.objectContaining({ conclusion: "failure" }));
+      mockInputs({ qualifying_reviewers: '["alice", "bob"]' });
+      await run(); expect(callsFor("live-sha")[1]).toEqual(expect.objectContaining({ conclusion: "success" }));
+    });
+
+    it("never counts the PR author, even when listed", async () => {
+      mockInputs({ qualifying_reviewers: '["developer[bot]", "alice"]' });
+      listReviews.mockResolvedValue({ data: [review("developer[bot]", "APPROVED"), review("alice", "APPROVED")] });
+      await run(); expect(callsFor("live-sha")[0].conclusion).toBe("failure");
+    });
+
+    it("expands team references with the resolver token for the repository owner's organization", async () => {
+      mockInputs({ qualifying_reviewers: '["owner/maintainers"]', resolver_token: "resolver-token" });
+      paginate.mockResolvedValue([{ login: "alice" }, { login: "bob" }]);
+      listReviews.mockResolvedValue({ data: twoApprovals });
+      await run();
+      expect(vi.mocked(github.getOctokit)).toHaveBeenCalledWith("resolver-token");
+      expect(paginate).toHaveBeenCalledWith(listMembersInOrg, { org: "owner", team_slug: "maintainers" });
+      expect(callsFor("live-sha")[0].conclusion).toBe("success");
+    });
+
+    it.each([
+      ["no resolver token", { qualifying_reviewers: '["owner/maintainers"]' }, "no allowlist-resolver token"],
+      ["a cross-organization team", { qualifying_reviewers: '["other-org/maintainers"]', resolver_token: "resolver-token" }, "other-org/maintainers"],
+    ])("fails protected PRs closed with %s", async (_name, inputs, message) => {
+      mockInputs(inputs); listReviews.mockResolvedValue({ data: twoApprovals });
+      await run();
+      expect(callsFor("live-sha")[0]).toEqual(expect.objectContaining({ conclusion: "failure", output: expect.objectContaining({ summary: expect.stringContaining(message) }) }));
+      expect(core.error).toHaveBeenCalledWith(expect.stringContaining(message));
+    });
+
+    it("fails protected PRs closed when a team lookup fails", async () => {
+      mockInputs({ qualifying_reviewers: '["owner/maintainers"]', resolver_token: "resolver-token" });
+      paginate.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
+      listReviews.mockResolvedValue({ data: twoApprovals });
+      await run(); expect(callsFor("live-sha")[0].conclusion).toBe("failure");
+    });
+
+    it("does not affect PRs from unprotected authors when the list cannot be resolved", async () => {
+      mockInputs({ qualifying_reviewers: '["owner/maintainers"]' });
+      getPull.mockResolvedValue({ data: pr(42, "human") }); listPulls.mockResolvedValue({ data: [pr(42, "human")] });
+      await run(); expect(callsFor("live-sha")[0].conclusion).toBe("success");
+    });
+
+    it.each([
+      ["malformed JSON", "nope"], ["a non-array", '"alice"'], ["an empty entry", '["alice", " "]'],
+      ["a malformed team reference", '["owner/team/extra"]'], ["a duplicate entry", '["alice", "ALICE"]'],
+    ])("fails every PR visibly for %s", async (_name, list) => {
+      mockInputs({ qualifying_reviewers: list }); await expect(run()).rejects.toThrow();
+      expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "protected-approval-gate", conclusion: "failure" }));
+    });
   });
 
   it("uses the GitHub token and Checks API", async () => {

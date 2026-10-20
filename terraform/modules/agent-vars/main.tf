@@ -63,6 +63,12 @@ resource "github_actions_variable" "protected_pr_author_logins" {
   value         = jsonencode(var.protected_pr_author_logins)
 }
 
+resource "github_actions_variable" "protected_approval_reviewers" {
+  repository    = var.repository
+  variable_name = "PROTECTED_APPROVAL_REVIEWERS"
+  value         = jsonencode(var.protected_approval_reviewers)
+}
+
 resource "github_actions_variable" "required_approval_count" {
   repository    = var.repository
   variable_name = "REQUIRED_APPROVAL_COUNT"

@@ -11,6 +11,14 @@ inputs:
   enabled:
     description: 'Whether the approval requirement is enabled (true or false)'
     required: true
+  qualifying-reviewers:
+    description: 'JSON array of logins and org/team-slug references whose approvals count. Empty means any reviewer other than the PR author counts.'
+    required: false
+    default: ''
+  resolver-token:
+    description: 'allowlist-resolver App installation token with organization Members read access, used to expand team references in qualifying-reviewers'
+    required: false
+    default: ''
   pr-number:
     description: 'Pull request number'
     required: true
@@ -56,6 +64,8 @@ runs:
         INPUT_PROTECTED_PR_AUTHOR_LOGINS: ${{ inputs.protected-pr-author-logins }}
         INPUT_REQUIRED_APPROVAL_COUNT: ${{ inputs.required-approval-count }}
         INPUT_ENABLED: ${{ inputs.enabled }}
+        INPUT_QUALIFYING_REVIEWERS: ${{ inputs.qualifying-reviewers }}
+        INPUT_RESOLVER_TOKEN: ${{ inputs.resolver-token }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         INPUT_HEAD_SHA: ${{ inputs.head-sha }}
         INPUT_REPO: ${{ inputs.repo }}

@@ -49,6 +49,22 @@ variable "protected_pr_author_logins" {
   }
 }
 
+variable "protected_approval_reviewers" {
+  description = "Logins and <org>/<team-slug> references whose approvals count toward required_approval_count on protected PRs. Empty means any reviewer other than the PR author counts (not recommended on public repositories). Team references are expanded for the repository owner's organization with the allowlist-resolver App (ALLOWLIST_RESOLVER_APP_ID / ALLOWLIST_RESOLVER_APP_PRIVATE_KEY secrets). Stored as the JSON-encoded PROTECTED_APPROVAL_REVIEWERS Actions variable."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = alltrue([
+      for entry in var.protected_approval_reviewers :
+      trimspace(entry) != "" && (!strcontains(entry, "/") || can(regex("^[^/]+/[^/]+$", entry)))
+      ]) && length(distinct([
+        for entry in var.protected_approval_reviewers : lower(entry)
+    ])) == length(var.protected_approval_reviewers)
+    error_message = "protected_approval_reviewers entries must be unique, non-empty logins or <org>/<team-slug> references."
+  }
+}
+
 variable "required_approval_count" {
   description = "Number of latest-per-reviewer non-self APPROVED reviews required for a protected PR. Stored as REQUIRED_APPROVAL_COUNT."
   type        = number

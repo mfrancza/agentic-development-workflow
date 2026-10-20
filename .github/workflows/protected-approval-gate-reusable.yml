@@ -45,6 +45,24 @@ on:
         required: false
         type: number
         default: 0
+      qualifying-reviewers:
+        description: >
+          JSON array of logins and <org>/<team-slug> references whose
+          approvals count toward the threshold (PROTECTED_APPROVAL_REVIEWERS).
+          Empty means any reviewer other than the PR author counts.
+        required: false
+        type: string
+        default: ''
+    secrets:
+      ALLOWLIST_RESOLVER_APP_ID:
+        description: >
+          Client ID of the allowlist-resolver GitHub App (organization
+          Members read). Needed only when qualifying-reviewers contains a
+          team reference.
+        required: false
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY:
+        description: Private key of the allowlist-resolver GitHub App.
+        required: false
 
 permissions:
   contents: read
@@ -101,12 +119,45 @@ jobs:
           fi
           echo "Helper checkout HEAD verified: ${actual_sha}"
 
+      # Team references in qualifying-reviewers need organization Members
+      # read, which GITHUB_TOKEN lacks. Mint the allowlist-resolver token only
+      # when the list has a team reference and the secret is configured. A
+      # missing secret or failed mint leaves the token empty, and the activity
+      # then fails protected PRs closed with an explanation.
+      - name: Detect team references in qualifying reviewers
+        id: reviewer-teams
+        env:
+          QUALIFYING_REVIEWERS: ${{ inputs.qualifying-reviewers }}
+          HAS_RESOLVER: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID != '' }}
+        run: |
+          set -euo pipefail
+          teams=false
+          if jq -e 'type == "array" and any(.[]; type == "string" and contains("/"))' <<<"${QUALIFYING_REVIEWERS:-[]}" >/dev/null 2>&1; then
+            teams=true
+          fi
+          if [[ "$teams" == "true" && "$HAS_RESOLVER" == "true" ]]; then
+            echo 'mint=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'mint=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint allowlist-resolver token
+        id: resolver-token
+        if: steps.reviewer-teams.outputs.mint == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
+
       - name: Publish protected-approval-gate check
         uses: ./_agentic-workflow/.github/actions/check-protected-approval-gate
         with:
           protected-pr-author-logins: ${{ inputs.protected-pr-author-logins }}
           required-approval-count: ${{ inputs.required-approval-count }}
           enabled: ${{ inputs.enabled }}
+          qualifying-reviewers: ${{ inputs.qualifying-reviewers }}
+          resolver-token: ${{ steps.resolver-token.outputs.token }}
           pr-number: ${{ inputs.pr-number }}
           head-sha: ${{ inputs.head-sha }}
           repo: ${{ inputs.repo }}

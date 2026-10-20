@@ -180,9 +180,10 @@ variable "enable_protected_approval_gate_reconcile_minutes" {
 }
 ```
 
-All four variables are wired through `terraform/main.tf` →
+All five variables are wired through `terraform/main.tf` →
 `agent_vars` module → `github_actions_variable` resources named
-`PROTECTED_PR_AUTHOR_LOGINS`, `REQUIRED_APPROVAL_COUNT`, `ENABLE_PROTECTED_APPROVAL_GATE`,
+`PROTECTED_PR_AUTHOR_LOGINS`, `PROTECTED_APPROVAL_REVIEWERS` (see Decision 4),
+`REQUIRED_APPROVAL_COUNT`, `ENABLE_PROTECTED_APPROVAL_GATE`,
 and `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`. The
 branch-protection module gains a new input
 `enable_protected_approval_gate_check_context` (defaulting to the
@@ -305,14 +306,42 @@ erase an earlier approval or request for changes. The selected review is
 1. Its selected opinionated state is `APPROVED` (not `CHANGES_REQUESTED` or
    `DISMISSED`).
 2. Reviewer login is **not** the PR author's login.
+3. If `PROTECTED_APPROVAL_REVIEWERS` is non-empty, the reviewer is one of its
+   listed logins or a member of one of its listed `<org>/<team-slug>` teams
+   (logins compared case-insensitively).
 
 The check conclusion is `success` iff the count of qualifying approvals is
 at least `REQUIRED_APPROVAL_COUNT`. The custom threshold is evaluated only
 when the PR author's login appears in `PROTECTED_PR_AUTHOR_LOGINS`; otherwise
-the per-PR outcome is immediately `success`. All other `APPROVED` reviews count — including from the reviewer
-agent, from Copilot, and from any human reviewer (regardless of whether
-GitHub itself would count the approval for the `required_approving_review_count`
-rule).
+the per-PR outcome is immediately `success`.
+
+**Qualifying reviewers.** `PROTECTED_APPROVAL_REVIEWERS` (Terraform
+`protected_approval_reviewers`, default `[]`) is a JSON array of logins and
+team references. When it is empty, condition 3 does not apply and every
+non-author `APPROVED` review counts, including the reviewer agent, Copilot,
+and any GitHub account. That is the original behavior, kept as the default so
+enabling the gate stays a single switch, but it is not recommended on public
+repositories: the base `required_approving_review_count = 1` rule guarantees
+only one write-access approval, so with a threshold of 2 or more the remaining
+approvals could come from any account. Bots count under a non-empty list only
+when listed by login.
+
+Team references follow the team-references design
+([`agent-user-lists-by-team-reference.md`](agent-user-lists-by-team-reference.md)):
+
+- They are expanded with the shared `lib/expand-team-refs.ts`, for a single
+  supported organization, the repository owner.
+- Membership lookup needs organization `Members: Read`, which `GITHUB_TOKEN`
+  lacks. The reusables mint an `allowlist-resolver` App token from the
+  optional `ALLOWLIST_RESOLVER_APP_ID` / `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY`
+  secrets, and only when the list contains a team reference. A list of logins
+  needs no credential.
+- If a team reference cannot be resolved (no credential, failed mint, unknown
+  or empty team, other organization, API error), protected PRs get `failure`
+  with the reason in the check summary and an `::error::` annotation. They
+  never fall back to counting every reviewer. Unprotected PRs still pass.
+  Malformed entries (bad JSON, empty strings, `a/b/c`, duplicates) are a
+  misconfiguration and fail every PR, as for the other gate inputs.
 
 **Rationale.** The default list and threshold match the issue text, while
 the configuration permits the same mechanism to protect more than one author
@@ -339,7 +368,8 @@ SHA; a later `COMMENTED` result must not discard that login's earlier
 | Alternative | Reason rejected |
 |-------------|-----------------|
 | Exclude all bot approvals (any login ending in `[bot]`) from the count | Would make the reviewer agent's `APPROVE` not count. The reviewer agent's approval is already advisory for the base `required_approving_review_count = 1` rule (read-only Contents permission), so excluding it from the custom count too would make the practical merge gate require the configured number of human approvals. This remains a possible future policy flag, but is distinct from configurable author scope and count. |
-| Replicate GitHub's write-access rule exactly (count only approvals from users with write access on the repo) | Requires an extra API call per reviewer to resolve collaborator permissions, adds a failure mode, and still arrives at the same effective merge gate when combined with `required_approving_review_count = 1` (because that rule already enforces the write-access filter). Not worth the extra surface. |
+| Replicate GitHub's write-access rule exactly (count only approvals from users with write access on the repo) | An earlier draft rejected this as arriving at the same effective gate as `required_approving_review_count = 1`. That only holds for a threshold of 1: the base rule guarantees one write-access approval, not N. An explicit reviewer list was chosen instead because it also lets operators decide whether bot reviewers such as the reviewer agent count, which a write-access rule cannot express (App reviewers are not collaborators). |
+| Filter by the review's `author_association` (`OWNER` / `MEMBER` / `COLLABORATOR`) | Cheap (no extra API calls) but implicit, and it excludes App reviewers with no way to opt them in. The explicit list covers the same need with an auditable configuration. |
 | Let the chronologically latest review of any state replace the prior review | A later `COMMENTED` or `PENDING` review would erase an earlier `APPROVED` review from the same login. That differs from GitHub's opinionated-review semantics and breaks this repository's multi-reviewer-agent matrix. |
 
 ### Decision 5 — Trigger events, trust model, and workflow shape

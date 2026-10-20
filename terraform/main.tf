@@ -76,6 +76,7 @@ module "agent_vars" {
   code_reviewers                                   = var.code_reviewers
   fix_checks_allow                                 = var.fix_checks_allow
   protected_pr_author_logins                       = var.protected_pr_author_logins
+  protected_approval_reviewers                     = var.protected_approval_reviewers
   required_approval_count                          = var.required_approval_count
   enable_protected_approval_gate                   = var.enable_protected_approval_gate
   enable_protected_approval_gate_reconcile_minutes = var.enable_protected_approval_gate_reconcile_minutes
