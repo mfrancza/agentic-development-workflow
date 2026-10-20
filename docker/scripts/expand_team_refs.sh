@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # Expand ADMIN_ASSIGNEES team references to login names for the grooming
 # prompt. This file is sourced by entrypoint.sh after `log()` is available.
