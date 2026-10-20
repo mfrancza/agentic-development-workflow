@@ -459,7 +459,8 @@ log "Building review prompt context in ${CONTEXT_FILE}"
     printf 'Base SHA (merge-base with origin/%s): %s\n' "${BASE_REF}" "${BASE_SHA}"
     printf 'Head SHA: %s\n' "${HEAD_SHA}"
     printf 'Reviewer identity (this bot): %s\n' "${REVIEWER_LOGIN}"
-    printf 'Reviewer model (this leg): %s\n\n' "${AGENT_MODEL}"
+    printf 'Reviewer model (this leg): %s\n' "${AGENT_MODEL}"
+    printf 'Review body header (copy this verbatim as the first two lines of every review body field; do not substitute a different model name):\n<!-- reviewer-model: %s -->\n### Review by `%s`\n\n' "${AGENT_MODEL}" "${AGENT_MODEL}"
     printf 'Post the review against Head SHA %s. Include "commit_id": "%s"\n' "${HEAD_SHA}" "${HEAD_SHA}"
     printf '(also available as $REVIEW_HEAD_SHA) in the review POST so GitHub records\n'
     printf 'the review against the commit this leg actually inspected (not the PR head\n'
