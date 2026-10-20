@@ -24,7 +24,7 @@ The complete flow from issue to deployment is:
 - A human opens an issue and optionally applies `agent:groom` to classify it and surface clarifying questions.
 - For complex issues the groomer applies the `plan` label; a human applies `agent:design` to produce a design document and draft sub-issues before implementation begins.
 - A human applies `agent:developer` to trigger implementation on a fresh branch; the agent opens a PR.
-- CI runs automatically; on failure the agent is re-invoked (`fix-checks`) to diagnose and push fixes.
+- CI runs automatically; an explicitly allowed actionable check failure re-invokes the agent (`fix-checks`) to diagnose and push fixes.
 - A human (or the agent itself) applies `agent:review` to request a code review from the reviewer agent.
 - On review feedback the developer agent addresses it (`respond-review`) and pushes updates; the cycle repeats until the PR is approved.
 - A human squash-merges the approved PR; the issue auto-closes via `Closes #N`.
@@ -36,7 +36,7 @@ See [AGENTS.md](AGENTS.md) for the full list of `AGENT_ACTION` values and their 
 
 Day-to-day operation is driven entirely by GitHub labels and events. See [`AGENTS.md § Labels`](AGENTS.md#labels) for the full label reference — all `agent:*`, `model:*`, grooming, and lifecycle labels with their descriptions and workflow behavior.
 
-- CI failure on an agent-authored PR → the agent is re-invoked to fix the checks. The `CI` workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs type-checking and unit tests on every PR; `agent-fix-checks` triggers on its failures.
+- Allowed check failure on an agent-authored PR → the agent is re-invoked to fix the checks. `agent-fix-checks` receives same-repository Actions failures through its explicit `workflow_run` subscriptions (including [`CI`](.github/workflows/ci.yml)) and other eligible origins through `check_run.completed`. `FIX_CHECKS_ALLOW` is a universal opt-in: `[]` disables all fix-checks handling, and each JSON entry must exactly match a raw Checks API `check_runs[].name`, not a workflow name or a decorated Checks-tab label.
 - Push to `main` → the agent checks all open developer-agent PRs for merge conflicts and resolves them automatically; each conflicted PR is resolved in its own parallel job so a single failure does not block the others. If the agent cannot resolve a conflict confidently, it aborts, applies `human-required`, and posts a PR comment naming the files that need manual attention. `workflow_dispatch` with a `pr_number` input is available as a manual backstop for a specific PR — for example, to manually re-trigger conflict resolution for PR #42:
 
   ```bash
@@ -107,7 +107,7 @@ Notes on the diagram:
 
 - **Human gates** (green) are the only places a person is required: opening the issue, applying `agent:*` labels, reviewing and merging the design PR, submitting a PR review, and squash-merging. Branch protection on `main` requires at least one human review before merge for non-admins — agents cannot self-approve. Repository admins can bypass the review requirement and merge via PR without a prior review (see the Terraform ruleset note in the [Reproduce this yourself](#reproduce-this-yourself) section).
 - **Agent steps** (blue): developer agent steps each run as a fresh container invocation of the developer agent image (`docker/`) with a specific `AGENT_ACTION`; the reviewer agent step uses a separate image (`docker/reviewer/`) and performs exactly one action (review a PR). See [AGENTS.md](AGENTS.md#agent-actions) for the required env vars per action.
-- **System checks** (yellow) are automated (GitHub Actions workflow checks, deployment status events) and drive the feedback loops back into the agent. The CI failure feedback loop (`fix-checks`) triggers when the `CI` workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) fails — it runs type-checking and unit tests on every PR.
+- **System checks** (yellow) are automated (GitHub Actions workflow checks, deployment status events) and drive the feedback loops back into the agent. The fix-checks feedback loop runs only for an allowed actionable check on an agent-authored PR. `CI` ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) is one same-repository delivery subscription; `FIX_CHECKS_ALLOW` independently controls the universal, exact Checks-API-name opt-in.
 - `fix-deployment` re-enters the flow at the CI/checks stage because it opens a new PR that goes through the same CI → review → merge lifecycle as any other change (including the `fix-checks` feedback loop if checks fail).
 
 ## Reuse in another repo
