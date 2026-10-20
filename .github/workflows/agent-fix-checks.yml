@@ -1,33 +1,70 @@
 name: agent-fix-checks
 
 on:
+  # Same-repository Actions check suites are suppressed from check_run events,
+  # so enumerate each same-repository workflow that should deliver failures.
+  # This is a delivery subscription only: FIX_CHECKS_ALLOW still authorizes
+  # the exact canonical Checks API check-run name for every event origin.
   workflow_run:
-    # `workflows:` is required by the GitHub Actions schema — without it the
-    # file fails validation with "on.workflow_run does not reference any
-    # workflows". No real CI workflow exists in this repo yet; "CI" is a
-    # placeholder. Update this list (or add the CI workflow with this name)
-    # when CI lands so fix-checks actually fires on its failures.
     workflows: ["CI"]
+    types: [completed]
+  # Covers eligible third-party and cross-repository workflow check runs.
+  check_run:
     types: [completed]
 
 permissions:
   contents: read
-  pull-requests: read  # for pulls.get in the filter-agent-pr activity
-
-concurrency:
-  # Fall back to workflow_run.id when the run isn't tied to a PR — otherwise
-  # unrelated PR-less workflow runs all collide on `agent-fix-checks-pr-`.
-  group: agent-fix-checks-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
-  cancel-in-progress: false
+  checks: read
+  pull-requests: read  # for resolve-check-pr and the reusable trust gate
 
 jobs:
-  fix-checks:
+  resolve-pr:
+    # Missing, malformed, or [] policy must not reach token minting, image
+    # setup, or the container. The resolver applies the definitive JSON and
+    # canonical Checks API name validation for both event origins.
     if: >
-      github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.pull_requests[0] != null
+      vars.FIX_CHECKS_ALLOW != '' &&
+      ((github.event_name == 'workflow_run' &&
+        (github.event.workflow_run.conclusion == 'failure' ||
+         github.event.workflow_run.conclusion == 'timed_out' ||
+         github.event.workflow_run.conclusion == 'action_required')) ||
+       (github.event_name == 'check_run' &&
+        (github.event.check_run.conclusion == 'failure' ||
+         github.event.check_run.conclusion == 'timed_out' ||
+         github.event.check_run.conclusion == 'action_required')))
+    runs-on: ubuntu-24.04
+    outputs:
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      proceed: ${{ steps.resolve.outputs.proceed }}
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+    steps:
+      - name: Check out workflow helpers
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Resolve failing check to pull request
+        id: resolve
+        uses: ./.github/actions/resolve-check-pr
+        with:
+          event-name: ${{ github.event_name }}
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          allowed-checks: ${{ vars.FIX_CHECKS_ALLOW }}
+
+  fix-checks:
+    needs: resolve-pr
+    if: needs.resolve-pr.outputs.proceed == 'true'
+    # This must be job-level: needs outputs are unavailable to workflow-level
+    # concurrency, while a per-PR group serializes simultaneous check failures.
+    concurrency:
+      group: agent-fix-checks-pr-${{ needs.resolve-pr.outputs.pr_number }}
+      cancel-in-progress: false
     uses: ./.github/workflows/agent-fix-checks-reusable.yml
     with:
-      pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
+      pr-number: ${{ needs.resolve-pr.outputs.pr_number }}
+      head-sha-at-trigger: ${{ needs.resolve-pr.outputs.head_sha }}
       agent-login: mfrancza-developer-agent[bot]
       image: ''
       helpers-ref: ${{ github.sha }}

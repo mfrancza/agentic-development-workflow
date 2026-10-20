@@ -979,19 +979,26 @@ review-author gate limits the prompt injection surface to actors you trust.
 ### `agent-fix-checks` reusable workflow
 
 **What it does.**  
-Responds to a CI failure on a developer-agent–authored PR by re-invoking the
-developer agent with `AGENT_ACTION=fix-checks`. The reusable first verifies
-that the PR is authored by the developer-agent bot — it never runs for
-human-authored PRs. The CI workflow name that triggers this must be listed in
-the caller's `workflow_run.workflows:` filter.
+Responds to an allowed actionable check failure on a developer-agent–authored
+PR by re-invoking the developer agent with `AGENT_ACTION=fix-checks`. The
+reusable first verifies that the PR is authored by the developer-agent bot —
+it never runs for human-authored PRs. The caller resolves both same-repository
+Actions failures and eligible other check origins before calling the reusable.
 
 **Prerequisites.**
 
 - GitHub App: **developer-agent**.
 - Secrets: `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`, `ANTHROPIC_API_KEY`,
   `OPENAI_API_KEY`, `XAI_API_KEY`.
-- A CI workflow named (for example) `"CI"` in your repository. The name must
-  match the `workflows:` list in the caller stub.
+- A `FIX_CHECKS_ALLOW` Actions variable containing a non-empty JSON array of
+  raw Checks API `check_runs[].name` values. `[]` disables all fix-checks
+  handling, including same-repository `workflow_run` deliveries. Discover
+  names with `gh api repos/$OWNER/$REPO/commits/$SHA/check-runs --jq
+  '.check_runs[].name'`; do not use a workflow name or a decorated Checks-tab
+  label.
+- Same-repository workflow names (for example, `"CI"`) listed in the caller's
+  `workflow_run.workflows:` filter. This is a delivery subscription, not an
+  allowlist substitute.
 
 **Caller stub.**
 
@@ -1002,23 +1009,50 @@ on:
   workflow_run:
     workflows: ["CI"] # must match your CI workflow's `name:` field exactly
     types: [completed]
+  check_run:
+    types: [completed]
 
 permissions:
   contents: read
+  checks: read
   pull-requests: read
 
-concurrency:
-  group: agent-fix-checks-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
-  cancel-in-progress: false
-
 jobs:
-  fix-checks:
+  resolve-pr:
     if: >
-      github.event.workflow_run.conclusion == 'failure' &&
-      github.event.workflow_run.pull_requests[0] != null
+      vars.FIX_CHECKS_ALLOW != '' &&
+      ((github.event_name == 'workflow_run' &&
+        (github.event.workflow_run.conclusion == 'failure' ||
+         github.event.workflow_run.conclusion == 'timed_out' ||
+         github.event.workflow_run.conclusion == 'action_required')) ||
+       (github.event_name == 'check_run' &&
+        (github.event.check_run.conclusion == 'failure' ||
+         github.event.check_run.conclusion == 'timed_out' ||
+         github.event.check_run.conclusion == 'action_required')))
+    runs-on: ubuntu-24.04
+    outputs:
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+      proceed: ${{ steps.resolve.outputs.proceed }}
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+    steps:
+      - id: resolve
+        uses: mfrancza/agentic-development-workflow/.github/actions/resolve-check-pr@v0
+        with:
+          event-name: ${{ github.event_name }}
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          allowed-checks: ${{ vars.FIX_CHECKS_ALLOW }}
+
+  fix-checks:
+    needs: resolve-pr
+    if: needs.resolve-pr.outputs.proceed == 'true'
+    concurrency:
+      group: agent-fix-checks-pr-${{ needs.resolve-pr.outputs.pr_number }}
+      cancel-in-progress: false
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-fix-checks-reusable.yml@v0
     with:
-      pr-number: ${{ github.event.workflow_run.pull_requests[0].number }}
+      pr-number: ${{ needs.resolve-pr.outputs.pr_number }}
+      head-sha-at-trigger: ${{ needs.resolve-pr.outputs.head_sha }}
       agent-login: <developer-agent-slug>[bot]
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
       helpers-ref: v0

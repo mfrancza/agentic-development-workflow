@@ -1,9 +1,9 @@
 name: agent-fix-checks (reusable)
 
 # Reusable workflow extracted from agent-fix-checks.yml.
-# Callers supply the workflow_run trigger, the failure/PR conditions, and
-# the concurrency group; this workflow performs the actual trust-gate check,
-# token minting, and agent run.
+# Callers supply trigger resolution, the universal FIX_CHECKS_ALLOW policy,
+# and the per-PR concurrency group; this workflow performs the actual trust
+# gate, token minting, and agent run.
 #
 # NOTE on github.event in reusable workflows: within a reusable workflow
 # github.event is the workflow_call event payload, not the calling workflow's
@@ -19,8 +19,14 @@ on:
   workflow_call:
     inputs:
       pr-number:
-        description: 'Pull request number (github.event.workflow_run.pull_requests[0].number)'
+        description: 'Pull request number resolved from the triggering check event.'
         type: number
+        required: true
+      head-sha-at-trigger:
+        description: >
+          Head SHA observed by the caller's check resolver. Passed to the
+          container freshness guard as GITHUB_HEAD_SHA_AT_TRIGGER.
+        type: string
         required: true
       agent-login:
         description: >
@@ -70,10 +76,9 @@ permissions:
 
 jobs:
   fix-checks:
-    # No if: condition here — the caller's job already gates on
-    # workflow_run.conclusion == 'failure' and pull_requests[0] != null.
-    # Adding those conditions here would incorrectly reference the
-    # workflow_call event (which has no workflow_run property).
+    # No if: condition here — the caller resolves the workflow_run/check_run
+    # event and applies the fail-closed allowlist before this workflow call.
+    # Event payload fields are unavailable under the workflow_call event.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -175,6 +180,11 @@ jobs:
       - name: Run agent
         if: steps.filter.outputs.proceed == 'true'
         uses: ./_agentic-workflow/.github/actions/run-agent
+        env:
+          # Forwarded by run-agent's explicit optional-env allowlist. [] (or
+          # an absent policy) remains disabled inside the freshness guard.
+          FIX_CHECKS_ALLOW: ${{ vars.FIX_CHECKS_ALLOW }}
+          GITHUB_HEAD_SHA_AT_TRIGGER: ${{ inputs.head-sha-at-trigger }}
         with:
           image: ${{ inputs.image }}
           gh-token: ${{ steps.setup.outputs.token }}

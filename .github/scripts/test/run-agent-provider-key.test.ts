@@ -100,4 +100,13 @@ describe("run-agent forwards exactly one provider API key", () => {
     expect(actionProvider("llama-3")).toBeNull();
     expect(action).toContain("matches no provider prefix; forwarding no provider API key");
   });
+
+  it("forwards fix-check freshness inputs only when callers provide them", () => {
+    expect(action).toContain(
+      '[[ -n "${FIX_CHECKS_ALLOW:-}" ]] && _opt_env+=(-e FIX_CHECKS_ALLOW="${FIX_CHECKS_ALLOW}")',
+    );
+    expect(action).toContain(
+      '[[ -n "${GITHUB_HEAD_SHA_AT_TRIGGER:-}" ]] && _opt_env+=(-e GITHUB_HEAD_SHA_AT_TRIGGER="${GITHUB_HEAD_SHA_AT_TRIGGER}")',
+    );
+  });
 });
