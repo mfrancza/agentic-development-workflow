@@ -74,6 +74,7 @@ module "agent_vars" {
   design_default_model                             = var.design_default_model
   admin_assignees                                  = var.admin_assignees
   code_reviewers                                   = var.code_reviewers
+  fix_checks_allow                                 = var.fix_checks_allow
   protected_pr_author_logins                       = var.protected_pr_author_logins
   required_approval_count                          = var.required_approval_count
   enable_protected_approval_gate                   = var.enable_protected_approval_gate

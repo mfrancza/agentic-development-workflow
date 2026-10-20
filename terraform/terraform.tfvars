@@ -28,6 +28,10 @@ code_reviewers = [
   "mfrancza",
 ]
 
+# Raw Checks API check-run names that may trigger the fix-checks agent.
+# Keep this existing CI check enabled as universal allowlist delivery rolls out.
+fix_checks_allow = ["ci / Typecheck and test"]
+
 # Auto-trigger configuration. Each key controls whether the corresponding
 # agent:* label is applied automatically at the natural upstream signal,
 # advancing the SDLC pipeline without manual labeling.

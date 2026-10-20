@@ -32,6 +32,12 @@ variable "code_reviewers" {
   default     = []
 }
 
+variable "fix_checks_allow" {
+  description = "Check-run names allowed to trigger the fix-checks agent. Stored as the JSON-encoded FIX_CHECKS_ALLOW Actions variable. Entries must be raw Checks API check_runs[].name values, not workflow names or decorated Checks-tab labels. An empty list disables all fix-checks delivery."
+  type        = list(string)
+  default     = []
+}
+
 variable "protected_pr_author_logins" {
   description = "GitHub login list whose PRs require the custom approval threshold. Stored as the JSON-encoded PROTECTED_PR_AUTHOR_LOGINS Actions variable."
   type        = list(string)
