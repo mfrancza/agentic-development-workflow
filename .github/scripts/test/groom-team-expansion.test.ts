@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -96,8 +96,8 @@ describe("groom resolver token forwarding contract", () => {
   it("redacts the resolver token from harvested container logs", () => {
     const functionMatch = entrypoint.match(/_log_capture_exit\(\) \{[\s\S]*?\n\}\n# Save the exit code/);
     expect(functionMatch).not.toBeNull();
-    const logPath = "/home/agent/logs/resolver-redaction-vitest.log";
-    mkdirSync("/home/agent/logs", { recursive: true });
+    const logDir = mkdtempSync(join(tmpdir(), "resolver-redaction-vitest-"));
+    const logPath = join(logDir, "resolver-redaction-vitest.log");
     writeFileSync(logPath, "token=resolver[secret]/value\n");
     const result = spawnSync("bash", ["-c", `
       set -euo pipefail
@@ -109,12 +109,14 @@ describe("groom resolver token forwarding contract", () => {
       env: {
         ...process.env,
         ALLOWLIST_RESOLVER_TOKEN: "resolver[secret]/value",
-        LOG_CAPTURE_FUNCTION: functionMatch![0].replace("\n# Save the exit code", ""),
+        LOG_CAPTURE_FUNCTION: functionMatch![0]
+          .replace("\n# Save the exit code", "")
+          .replaceAll("/home/agent/logs", logDir),
       },
       encoding: "utf8",
     });
     expect(result.status, result.stderr).toBe(0);
     expect(readFileSync(logPath, "utf8")).toContain("***REDACTED-ALLOWLIST_RESOLVER_TOKEN***");
-    rmSync(logPath, { force: true });
+    rmSync(logDir, { recursive: true, force: true });
   });
 });

@@ -235,9 +235,11 @@ jobs:
           if [[ -n "${ADMIN_ASSIGNEES}" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "${ADMIN_ASSIGNEES}" >/dev/null; then
             assignees_has_team=true
           fi
-          echo "allowlist_has_team=${allowlist_has_team}" >> "$GITHUB_OUTPUT"
-          echo "assignees_has_team=${assignees_has_team}" >> "$GITHUB_OUTPUT"
-          echo "assignees_needs_resolver=${assignees_has_team}" >> "$GITHUB_OUTPUT"
+          {
+            echo "allowlist_has_team=${allowlist_has_team}"
+            echo "assignees_has_team=${assignees_has_team}"
+            echo "assignees_needs_resolver=${assignees_has_team}"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Mint installation token for grooming assignee resolver
         id: assignee-resolver
