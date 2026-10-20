@@ -49,7 +49,7 @@ Day-to-day operation is driven entirely by GitHub labels and events. See [`AGENT
 - **Terraform CI pipeline** — every PR that touches `terraform/**` triggers a plan-on-PR workflow ([`.github/workflows/terraform-ci.yml`](.github/workflows/terraform-ci.yml)) that runs `fmt -check`, `validate`, and `terraform plan`, then posts the plan output as an evergreen PR comment so reviewers can see what will change. On merge to `main` the same workflow auto-applies the plan. The pipeline authenticates to GitHub as the `terraform-ci` App (minted via [`.github/actions/agent-token`](.github/actions/agent-token/action.yml)) and to HCP Terraform's state backend via `TF_API_TOKEN`. See [`docs/design/terraform-ci.md`](docs/design/terraform-ci.md) for the full design and threat-model rationale.
 - **CI run logs** — container logs and Claude session transcripts are captured as workflow artifacts with 30-day retention. See [AGENTS.md](AGENTS.md#debugging) for download instructions and what each artifact contains.
 
-Only usernames (and agent bot identities such as `<developer-agent-app-slug>[bot]`) in the Terraform-managed `AGENT_ALLOWLIST` can trigger the label-driven workflows (`agent:groom`, `agent:developer`, `agent:review`, `agent:design`). The agent bots are included so an agent can apply `agent:*` labels to hand work off — for example, the developer agent applying `agent:review` on its own PR to request a code review. Event-driven workflows then apply their own gates: `fix-checks`/`respond-review` run only for developer-agent PRs, and `fix-deployment` runs on any failed `deployment_status` event and skips cleanly unless it can map the deployment SHA to a PR containing `Closes #N`.
+Only usernames (and agent bot identities such as `<developer-agent-app-slug>[bot]`) in the Terraform-managed `AGENT_ALLOWLIST` can trigger the label-driven workflows (`agent:groom`, `agent:developer`, `agent:review`, `agent:design`). The allowlist may also contain same-organization `org/team-slug` references; resolving those entries requires the optional `ALLOWLIST_RESOLVER_APP_ID` and `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` repository secrets, while login-only lists need no resolver credential. The agent bots are included so an agent can apply `agent:*` labels to hand work off — for example, the developer agent applying `agent:review` on its own PR to request a code review. Event-driven workflows then apply their own gates: `fix-checks`/`respond-review` run only for developer-agent PRs, and `fix-deployment` runs on any failed `deployment_status` event and skips cleanly unless it can map the deployment SHA to a PR containing `Closes #N`.
 
 See [AGENTS.md](AGENTS.md) for the full list of `AGENT_ACTION` values and their required env vars.
 
@@ -164,23 +164,24 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 ```
 #   repo_owner           — GitHub user or org that owns the repo
 #   repo_name            — repository name (default: agentic-development-workflow)
-#   agent_allowlist      — GitHub usernames and agent bot identities (e.g.
-#                          myfork-developer-agent[bot]) permitted to trigger workflows
+#   agent_allowlist      — GitHub usernames, agent bot identities (e.g.
+#                          myfork-developer-agent[bot]), and same-organization
+#                          org/team-slug references permitted to trigger workflows
 #   default_model        — repo-wide default model (e.g. "sonnet")
 #   design_default_model — (optional) design-agent default model; when set,
 #                          agent-design prefers this over default_model; omit or
 #                          set to "" to fall back to default_model (the default)
 #   auto_trigger_agents  — per-stage auto-trigger switches (all false by default;
 #                          set a key to true to auto-apply that stage's agent:* label)
-#   admin_assignees      — (optional) list of GitHub usernames assigned by the groom
-#                          agent when it applies the human-required label; stored as
-#                          the JSON-encoded ADMIN_ASSIGNEES Actions variable; omit or
-#                          set to [] to skip
-#   code_reviewers       — (optional) list of GitHub usernames to request as PR
-#                          reviewers when the implement agent determines human review
-#                          is warranted; stored as the JSON-encoded CODE_REVIEWERS
-#                          Actions variable; omit or set to [] to request no specific
-#                          reviewers
+#   admin_assignees      — (optional) GitHub usernames or same-organization
+#                          org/team-slug references assigned by the groom agent when it
+#                          applies the human-required label; stored as the JSON-encoded
+#                          ADMIN_ASSIGNEES Actions variable; omit or set to [] to skip
+#   code_reviewers       — (optional) GitHub usernames or org/team-slug references to
+#                          request as PR reviewers when the implement agent determines
+#                          human review is warranted; stored as the JSON-encoded
+#                          CODE_REVIEWERS Actions variable; omit or set to [] to request
+#                          no specific reviewers
 #   reviewer_models      — (optional) ordered list of model identifiers for the
 #                          multi-reviewer feature; stored as the JSON-encoded
 #                          REVIEWER_MODELS Actions variable; omit or set to [] to
