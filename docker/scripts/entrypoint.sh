@@ -223,6 +223,25 @@ ${stripped_body}"
     log "authored-by-model marker written to PR #${pr_number} (model: ${AGENT_MODEL})"
 }
 
+# agent_escalated_issue <since>
+#
+# Returns 0 when the agent escalated issue $GITHUB_ISSUE_NUMBER to a human
+# during this run instead of opening a PR: the issue carries `human-required`
+# and has a comment posted at or after <since> (ISO-8601 UTC). The implement
+# and design prompts require both when escalating, so either signal alone is
+# not enough. API errors count as "not escalated" so the caller fails loudly.
+agent_escalated_issue() {
+    local since="$1" has_label new_comments
+
+    has_label="$(gh issue view "$GITHUB_ISSUE_NUMBER" --repo "$GITHUB_REPO" --json labels \
+        --jq '[.labels[].name] | any(. == "human-required")' 2>/dev/null)" || return 1
+    [ "$has_label" = "true" ] || return 1
+
+    new_comments="$(gh api --paginate "repos/${GITHUB_REPO}/issues/${GITHUB_ISSUE_NUMBER}/comments?since=${since}" \
+        --jq '.[].id' 2>/dev/null)" || return 1
+    [ -n "$new_comments" ]
+}
+
 # -----------------------------------------------------------------------------
 # Log capture (docs/design/agent-container-logs.md, decisions 3 & 4)
 # Installed before the preamble so env-validation errors are captured too.
@@ -358,6 +377,7 @@ action_implement() {
     log "Creating branch ${BRANCH_NAME}"
     git checkout -b "$BRANCH_NAME"
 
+    AGENT_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     log "Running Claude to implement solution"
     run_agent "implement.md" \
         "Implement a solution for this GitHub issue.
@@ -379,7 +399,11 @@ CODE_REVIEWERS: ${CODE_REVIEWERS}"
         --json url,headRepositoryOwner \
         --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].url // empty")"
     if [ -z "$PR_URL" ]; then
-        log "ERROR: no open PR found for ${BRANCH_NAME} (owner: ${OWNER}) — agent did not complete the issue→PR flow"
+        if agent_escalated_issue "$AGENT_STARTED_AT"; then
+            log "No PR opened: agent escalated issue #${GITHUB_ISSUE_NUMBER} to a human (human-required + comment) — finishing without a PR"
+            return 0
+        fi
+        log "ERROR: no open PR found for ${BRANCH_NAME} (owner: ${OWNER}) and issue #${GITHUB_ISSUE_NUMBER} was not escalated — agent did not complete the issue→PR flow"
         exit 1
     fi
     log "Verified PR: ${PR_URL}"
@@ -615,6 +639,7 @@ action_design() {
     log "Creating branch ${BRANCH_NAME}"
     git checkout -b "$BRANCH_NAME"
 
+    AGENT_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     log "Running Claude to produce design"
     run_agent "design.md" \
         "Design a solution for this GitHub issue.
@@ -636,7 +661,11 @@ ${ISSUE_COMMENTS:-none}"
         --json url,headRepositoryOwner \
         --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].url // empty")"
     if [ -z "$PR_URL" ]; then
-        log "ERROR: no open PR found for ${BRANCH_NAME} (owner: ${OWNER}) — agent did not open a design PR"
+        if agent_escalated_issue "$AGENT_STARTED_AT"; then
+            log "No design PR opened: agent escalated issue #${GITHUB_ISSUE_NUMBER} to a human (human-required + comment) — finishing without a PR"
+            return 0
+        fi
+        log "ERROR: no open PR found for ${BRANCH_NAME} (owner: ${OWNER}) and issue #${GITHUB_ISSUE_NUMBER} was not escalated — agent did not open a design PR"
         exit 1
     fi
     log "Verified design PR: ${PR_URL}"
