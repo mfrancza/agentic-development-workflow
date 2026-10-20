@@ -33,11 +33,6 @@ output "enable_protected_approval_gate_variable_name" {
   value       = github_actions_variable.enable_protected_approval_gate.variable_name
 }
 
-output "enable_protected_approval_gate_check_generation_variable_name" {
-  description = "Name of the ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION Actions variable."
-  value       = github_actions_variable.enable_protected_approval_gate_check_generation.variable_name
-}
-
 output "enable_protected_approval_gate_reconcile_minutes_variable_name" {
   description = "Name of the ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES Actions variable."
   value       = github_actions_variable.enable_protected_approval_gate_reconcile_minutes.variable_name

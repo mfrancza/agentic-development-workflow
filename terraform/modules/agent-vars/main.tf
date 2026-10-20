@@ -66,12 +66,6 @@ resource "github_actions_variable" "enable_protected_approval_gate" {
   value         = tostring(var.enable_protected_approval_gate)
 }
 
-resource "github_actions_variable" "enable_protected_approval_gate_check_generation" {
-  repository    = var.repository
-  variable_name = "ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION"
-  value         = tostring(var.enable_protected_approval_gate_check_generation)
-}
-
 resource "github_actions_variable" "enable_protected_approval_gate_reconcile_minutes" {
   repository    = var.repository
   variable_name = "ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES"

@@ -251,7 +251,7 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 | `agent-respond-review-reusable.yml`            | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
 | `agent-review-reusable.yml`                    | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`                   | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY` |
 | `ci-reusable.yml`                              | —                                                               | —                                                    |
-| `require-two-developer-approvals-reusable.yml` | —                                                               | —                                                    |
+| `protected-approval-gate-reusable.yml`         | —                                                               | —                                                    |
 | `secret-scan-reusable.yml`                     | —                                                               | —                                                    |
 | `terraform-ci-reusable.yml`                    | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | —                                                    |
 | `test-helper-ref-reusable.yml`                 | —                                                               | —                                                    |
@@ -574,19 +574,19 @@ on `pull_request_target` and on completion of the notifier; pass the same
 trusted helpers ref as the reusable workflow ref.
 
 ```yaml
-name: require-two-developer-approvals-publisher
+name: protected-approval-gate-publisher
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, edited, ready_for_review, closed]
   workflow_run:
-    workflows: ["require-two-developer-approvals-notify"]
+    workflows: ["protected-approval-gate-notify"]
     types: [completed]
 permissions:
   contents: read
   pull-requests: read
   checks: write
 concurrency:
-  group: require-two-developer-approvals-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  group: protected-approval-gate-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
   cancel-in-progress: false
 ```
 
@@ -594,7 +594,7 @@ The `workflow_run` publishing job must be guarded with
 `github.event.workflow_run.pull_requests[0] != null`. The notifier is a
 separate workflow with `pull_request_review` types `submitted`, `edited`, and
 `dismissed`, `permissions: {}`, and one `true` step. Give it the matching
-`require-two-developer-approvals-pr-${{ github.event.pull_request.number }}`
+`protected-approval-gate-pr-${{ github.event.pull_request.number }}`
 concurrency group with `cancel-in-progress: false`.
 
 Inside the publisher job, call the reusable and provide the pull request
@@ -608,12 +608,11 @@ jobs:
       contents: read
       pull-requests: read
       checks: write
-    uses: mfrancza/agentic-development-workflow/.github/workflows/require-two-developer-approvals-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-reusable.yml@v0
     with:
       protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      generation: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION }}
       pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
       head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
       repo: ${{ github.repository }}

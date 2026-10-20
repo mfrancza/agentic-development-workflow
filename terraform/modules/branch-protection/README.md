@@ -8,7 +8,7 @@ Manages the `main-protection` repository ruleset that enforces required PR revie
 - Linear history required (no merge commits).
 - Deletion of the default branch is blocked.
 - Stale-review dismissal on push is enabled.
-- The optional protected-approval status check is disabled by default. Enabling it adds the generation-suffixed `require-two-developer-approvals-g<N>` check, pinned to the GitHub Actions App, without changing the normal required-review count.
+- The optional protected-approval status check is disabled by default. Enabling it adds the `protected-approval-gate` check, pinned to the GitHub Actions App, without changing the normal required-review count.
 
 ## Usage
 
@@ -57,8 +57,7 @@ provider "github" {
 | `repository` | `string` | yes | — | Name of the GitHub repository to protect. |
 | `required_approving_review_count` | `number` | no | `1` | Number of required approving reviews before a PR can be merged. |
 | `enable_protected_approval_gate` | `bool` | no | `false` | When enabled, requires the protected-approval check without changing `required_approving_review_count`. |
-| `enable_protected_approval_gate_check_context` | `string` | no | `null` | Optional context override; default is generation-suffixed. |
-| `enable_protected_approval_gate_check_generation` | `number` | no | `1` | Context generation. |
+| `enable_protected_approval_gate_check_context` | `string` | no | `null` | Optional context override; defaults to `protected-approval-gate`. |
 | `enable_protected_approval_gate_check_integration_id` | `number` | no | `15368` | Publisher App ID (GitHub Actions). |
 
 ## Outputs
@@ -74,4 +73,6 @@ This ruleset uses the modern `github_repository_ruleset` resource (not the legac
 
 Reviews must flag any PR that weakens this ruleset (lowers `required_approving_review_count` below 1, adds a force-push bypass, or changes the admin bypass from `pull_request` to `always`).
 
-When `enable_protected_approval_gate` is `true`, the ruleset requires `require-two-developer-approvals-g<N>` from GitHub Actions (`integration_id = 15368`). This opt-in check supplements, rather than changes, the normal `required_approving_review_count` of `1`.
+When `enable_protected_approval_gate` is `true`, the ruleset requires `protected-approval-gate` from GitHub Actions (`integration_id = 15368`). This opt-in check supplements, rather than changes, the normal `required_approving_review_count` of `1`.
+
+After re-enabling the gate (any OFF → ON change after the first), dispatch `protected-approval-gate-backfill.yml`. While the gate was OFF the publisher updated only the `(preview)` context, so an open PR whose head has not changed may still carry an enforcing-context `success` from the earlier ON interval. The backfill re-posts the current result on every open PR. The scheduled reconcile sweep also replaces stale results within `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`, so the backfill only shortens that window.

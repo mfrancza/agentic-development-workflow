@@ -54,7 +54,7 @@ resource "github_repository_ruleset" "main" {
         strict_required_status_checks_policy = false
 
         required_check {
-          context        = coalesce(var.enable_protected_approval_gate_check_context, "require-two-developer-approvals-g${var.enable_protected_approval_gate_check_generation}")
+          context        = coalesce(var.enable_protected_approval_gate_check_context, "protected-approval-gate")
           integration_id = var.enable_protected_approval_gate_check_integration_id
         }
       }

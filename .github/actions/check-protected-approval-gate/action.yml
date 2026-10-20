@@ -1,4 +1,4 @@
-name: 'Check two developer approvals'
+name: 'Check protected approval gate'
 description: 'Publishes the configurable protected-author approval check run.'
 
 inputs:
@@ -10,9 +10,6 @@ inputs:
     required: true
   enabled:
     description: 'Whether the approval requirement is enabled (true or false)'
-    required: true
-  generation:
-    description: 'Positive check-context generation number'
     required: true
   pr-number:
     description: 'Pull request number'
@@ -59,10 +56,9 @@ runs:
         INPUT_PROTECTED_PR_AUTHOR_LOGINS: ${{ inputs.protected-pr-author-logins }}
         INPUT_REQUIRED_APPROVAL_COUNT: ${{ inputs.required-approval-count }}
         INPUT_ENABLED: ${{ inputs.enabled }}
-        INPUT_GENERATION: ${{ inputs.generation }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         INPUT_HEAD_SHA: ${{ inputs.head-sha }}
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_DEPARTED_SHA: ${{ inputs.departed-sha }}
         INPUT_DEPARTED_PR_NUMBER: ${{ inputs.departed-pr-number }}
-      run: npx --no-install tsx src/check-two-developer-approvals.ts
+      run: npx --no-install tsx src/check-protected-approval-gate.ts

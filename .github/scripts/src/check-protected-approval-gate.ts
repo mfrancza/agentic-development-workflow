@@ -7,7 +7,7 @@ type Octokit = ReturnType<typeof github.getOctokit>;
 export interface Review { userLogin: string | null; state: string; }
 export interface ApprovalResult { conclusion: "success" | "failure"; summary: string; }
 interface Candidate { number: number; author: string; headSha: string; state: string; }
-interface Config { protectedAuthors: Set<string>; requiredApprovals: number; generation: number; }
+interface Config { protectedAuthors: Set<string>; requiredApprovals: number; }
 
 /** Applies GitHub's latest-opinionated-review semantics. */
 export function evaluateApprovals(reviews: Review[], prAuthor: string, requiredApprovals: number): ApprovalResult {
@@ -37,14 +37,17 @@ function splitRepository(repository: string): [string, string] {
   return [owner, repo];
 }
 
-function checkName(generation: number, preview: boolean): string {
-  return `require-two-developer-approvals-g${generation}${preview ? " (preview)" : ""}`;
+// Fixed context name. Stale results from an earlier ON interval are replaced by
+// the backfill on enable and by the reconcile sweep (see Decision 7).
+const CHECK_NAME = "protected-approval-gate";
+
+function checkName(preview: boolean): string {
+  return `${CHECK_NAME}${preview ? " (preview)" : ""}`;
 }
 
 function parseConfig(): Config {
   const rawAuthors = core.getInput("protected_pr_author_logins", { required: true });
   const rawCount = core.getInput("required_approval_count", { required: true }).trim();
-  const rawGeneration = core.getInput("generation", { required: true }).trim();
   let authors: unknown;
   try { authors = JSON.parse(rawAuthors); } catch { throw new Error("protected-pr-author-logins must be valid JSON."); }
   if (!Array.isArray(authors) || authors.length === 0 || authors.some(author => typeof author !== "string" || author.trim() === "")) {
@@ -53,8 +56,7 @@ function parseConfig(): Config {
   const normalized = authors.map(author => author.trim());
   if (new Set(normalized).size !== normalized.length) throw new Error("protected-pr-author-logins must not contain duplicate logins.");
   if (!/^\d+$/.test(rawCount) || Number(rawCount) < 1 || !Number.isSafeInteger(Number(rawCount))) throw new Error("required-approval-count must be a positive integer.");
-  if (!/^\d+$/.test(rawGeneration) || Number(rawGeneration) < 1 || !Number.isSafeInteger(Number(rawGeneration))) throw new Error("generation must be a positive integer.");
-  return { protectedAuthors: new Set(normalized), requiredApprovals: Number(rawCount), generation: Number(rawGeneration) };
+  return { protectedAuthors: new Set(normalized), requiredApprovals: Number(rawCount) };
 }
 
 async function publishResult(octokit: Octokit, owner: string, repo: string, headSha: string, name: string, result: ApprovalResult): Promise<void> {
@@ -104,17 +106,15 @@ export async function run(): Promise<void> {
   const octokit = github.getOctokit(token);
   let config: Config;
   try { config = parseConfig(); } catch (error) {
-    // A generation is needed to publish a visible enforcing failure. Fall back only for malformed generation.
-    const generation = Number(core.getInput("generation").trim()) || 1;
     const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
-    if (enabled) await publishFailure(octokit, owner, repo, pr.head.sha, checkName(generation, false), error);
+    if (enabled) await publishFailure(octokit, owner, repo, pr.head.sha, checkName(false), error);
     else core.error(error instanceof Error ? error.message : String(error));
     if (enabled) throw error;
     return;
   }
   const { data: triggeringPr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
   const liveHeadSha = triggeringPr.head.sha;
-  const name = checkName(config.generation, !enabled);
+  const name = checkName(!enabled);
   try {
     const result = await evaluateSha(octokit, owner, repo, liveHeadSha, config);
     if (result) await publishResult(octokit, owner, repo, liveHeadSha, name, result);
@@ -127,9 +127,9 @@ export async function run(): Promise<void> {
   if (enabled && departedSha && !(departedSha === liveHeadSha && triggeringPr.state === "open")) {
     try {
       const result = await evaluateSha(octokit, owner, repo, departedSha, config, departedNumber);
-      if (result) await publishResult(octokit, owner, repo, departedSha, checkName(config.generation, false), result);
+      if (result) await publishResult(octokit, owner, repo, departedSha, checkName(false), result);
     } catch (error) {
-      await publishFailure(octokit, owner, repo, departedSha, checkName(config.generation, false), error);
+      await publishFailure(octokit, owner, repo, departedSha, checkName(false), error);
       throw error;
     }
   }

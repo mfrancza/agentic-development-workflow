@@ -16,16 +16,10 @@ variable "enable_protected_approval_gate" {
 }
 
 variable "enable_protected_approval_gate_check_context" {
-  description = "Optional override for the protected-approval status-check context. By default it is composed from the generation suffix."
+  description = "Optional override for the protected-approval status-check context. Defaults to protected-approval-gate."
   type        = string
   default     = null
   nullable    = true
-}
-
-variable "enable_protected_approval_gate_check_generation" {
-  description = "Generation suffix for the protected-approval required-check context."
-  type        = number
-  default     = 1
 }
 
 variable "enable_protected_approval_gate_check_integration_id" {

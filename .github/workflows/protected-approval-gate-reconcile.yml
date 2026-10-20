@@ -1,4 +1,4 @@
-name: require-two-developer-approvals-reconcile
+name: protected-approval-gate-reconcile
 
 on:
   schedule:
@@ -12,7 +12,7 @@ permissions:
   checks: write
 
 concurrency:
-  group: require-two-developer-approvals-reconcile
+  group: protected-approval-gate-reconcile
   cancel-in-progress: false
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
             exit 1
           fi
           if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
-            if completed="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/require-two-developer-approvals-reconcile.yml/runs?status=success&per_page=10" 2>/dev/null)"; then
+            if completed="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/protected-approval-gate-reconcile.yml/runs?status=success&per_page=10" 2>/dev/null)"; then
               previous="$(jq -r --arg id "$GITHUB_RUN_ID" '[.workflow_runs[] | select((.id | tostring) != $id) | .updated_at] | max // empty' <<<"$completed")"
               if [[ -n "$previous" ]] && (( $(date +%s) - $(date -d "$previous" +%s) < minutes * 60 )); then
                 echo 'run=false' >> "$GITHUB_OUTPUT"
@@ -61,14 +61,13 @@ jobs:
       matrix:
         pr: ${{ fromJSON(needs.find-open-prs.outputs.prs) }}
     concurrency:
-      group: require-two-developer-approvals-sha-${{ matrix.pr.sha }}
+      group: protected-approval-gate-sha-${{ matrix.pr.sha }}
       cancel-in-progress: false
-    uses: ./.github/workflows/require-two-developer-approvals-reusable.yml
+    uses: ./.github/workflows/protected-approval-gate-reusable.yml
     with:
       protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
       required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      generation: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_CHECK_GENERATION }}
       pr-number: ${{ matrix.pr.number }}
       head-sha: ${{ matrix.pr.sha }}
       repo: ${{ github.repository }}
