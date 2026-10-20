@@ -148,6 +148,7 @@ jobs:
       - name: Check agent allowlist
         uses: ./_agentic-workflow/.github/actions/check-agent-allowlist
         with:
+          allowlist: ${{ vars.AGENT_ALLOWLIST }}
           principal: ${{ inputs.review-author }}
           additional-trusted-logins: '["mfrancza-reviewer-agent[bot]","Copilot","copilot-pull-request-reviewer[bot]","github-copilot[bot]"]'
           resolver-token: ${{ steps.allowlist-resolver.outputs.token }}

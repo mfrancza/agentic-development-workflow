@@ -11,7 +11,7 @@ import { run } from "../src/check-agent-allowlist.js";
 
 const paginate = vi.fn();
 function inputs(values: Record<string, string> = {}) {
-  vi.mocked(core.getInput).mockImplementation((name) => values[name] ?? "");
+  vi.mocked(core.getInput).mockImplementation((name) => values[name] ?? (name === "allowlist" ? process.env.AGENT_ALLOWLIST ?? "" : ""));
   vi.mocked(core.getBooleanInput).mockImplementation((name) => values[name] === "true");
 }
 function octokit() {

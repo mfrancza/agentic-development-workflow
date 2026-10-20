@@ -1,6 +1,10 @@
 name: Check agent allowlist
 description: Fail-closed authorization gate for agent-triggering identities.
 inputs:
+  allowlist:
+    description: 'JSON array of AGENT_ALLOWLIST entries (logins and org/team-slug references). Composite actions cannot read the vars context, so the calling workflow passes vars.AGENT_ALLOWLIST here.'
+    required: false
+    default: ''
   principal:
     description: Login to authorize.
     required: true
@@ -42,5 +46,5 @@ runs:
         INPUT_ADDITIONAL_TRUSTED_LOGINS: ${{ inputs.additional-trusted-logins }}
         INPUT_SKIP_GATE: ${{ inputs.skip-gate }}
         INPUT_RESOLVER_TOKEN: ${{ inputs.resolver-token }}
-        AGENT_ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}
+        INPUT_ALLOWLIST: ${{ inputs.allowlist }}
       run: npx --no-install tsx src/check-agent-allowlist.ts

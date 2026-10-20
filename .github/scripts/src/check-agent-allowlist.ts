@@ -41,7 +41,7 @@ export async function run(): Promise<void> {
     return;
   }
 
-  const rawAllowlist = process.env.AGENT_ALLOWLIST ?? "";
+  const rawAllowlist = core.getInput("allowlist");
   if (rawAllowlist.trim() === "") {
     fail("AGENT_ALLOWLIST is empty.");
     return;

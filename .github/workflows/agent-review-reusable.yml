@@ -159,6 +159,7 @@ jobs:
       - name: Check agent allowlist
         uses: ./_agentic-workflow/.github/actions/check-agent-allowlist
         with:
+          allowlist: ${{ vars.AGENT_ALLOWLIST }}
           principal: ${{ inputs.sender-login }}
           skip-gate: ${{ inputs.event-action == 'synchronize' }}
           resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
