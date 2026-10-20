@@ -136,7 +136,9 @@ jobs:
           ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }}
         run: |
           has=false; admin=false
-          [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "$ALLOWLIST" >/dev/null && has=true || true
+          if [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "$ALLOWLIST" >/dev/null; then
+            has=true
+          fi
           [[ -n "$ADMIN_ASSIGNEES" ]] && jq -e 'any(.[]; type == "string" and test("^[^/]+/[^/]+$"))' <<< "$ADMIN_ASSIGNEES" >/dev/null && admin=true || true
           echo "allowlist_has_team=$has" >> "$GITHUB_OUTPUT"; [[ "$has" == true || "$admin" == true ]] && needs=true || needs=false; echo "needs_resolver=$needs" >> "$GITHUB_OUTPUT"
       - name: Mint installation token for allowlist resolver

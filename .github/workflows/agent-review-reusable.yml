@@ -78,7 +78,9 @@ jobs:
           ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}
         run: |
           has=false
-          [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "$ALLOWLIST" >/dev/null && has=true || true
+          if [[ -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "$ALLOWLIST" >/dev/null; then
+            has=true
+          fi
           echo "allowlist_has_team=$has" >> "$GITHUB_OUTPUT"
           echo "needs_resolver=$has" >> "$GITHUB_OUTPUT"
       - name: Mint installation token for allowlist resolver
@@ -104,7 +106,7 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: $/.github/workflows/agent-review-worker-reusable.yml
+    uses: ./.github/workflows/agent-review-worker-reusable.yml
     with:
       pr-number: ${{ inputs.pr-number }}
       repo: ${{ inputs.repo }}

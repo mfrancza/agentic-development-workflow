@@ -324,10 +324,10 @@ pattern:
     permissions:
       contents: write
       pull-requests: write
-    # `$/` resolves against this workflow's repository and running SHA,
-    # rather than an external consumer's checkout. It deliberately has no
+    # `./` is GitHub's supported same-repository reusable-workflow form. It
+    # resolves from this workflow's repository and running SHA, with no
     # `@ref` suffix.
-    uses: $/.github/workflows/agent-review-worker-reusable.yml
+    uses: ./.github/workflows/agent-review-worker-reusable.yml
     with:
       pr-number: ${{ inputs.pr-number }}
       repo: ${{ inputs.repo }}
@@ -1211,7 +1211,8 @@ For #649 acceptance test **(t)**, the `agent-review` wrapper must retain
 must have `contents: read` (inherited only where the reusable already grants
 it) plus its own four-step helpers-ref bootstrap before local-composite
 detect/mint/gate steps. The wrapper's nested-worker reference must use
-`uses: $/.github/workflows/agent-review-worker-reusable.yml`, never `./`.
+`uses: ./.github/workflows/agent-review-worker-reusable.yml`, which resolves
+from the same repository and commit as the calling reusable.
 
 For #649 caller cleanup, every explicit-secrets caller stub must pass the
 optional resolver-App secrets through to its reusable:
