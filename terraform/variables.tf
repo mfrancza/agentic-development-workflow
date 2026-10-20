@@ -83,13 +83,13 @@ variable "enable_protected_approval_gate" {
 }
 
 variable "enable_protected_approval_gate_reconcile_minutes" {
-  description = "Minimum interval in minutes between protected-approval reconciliation sweeps. Stored as ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES."
+  description = "Minimum interval in minutes between protected-approval reconciliation sweeps (minimum 5, GitHub's shortest schedule interval). Stored as ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES."
   type        = number
   default     = 10
 
   validation {
-    condition     = var.enable_protected_approval_gate_reconcile_minutes >= 1 && floor(var.enable_protected_approval_gate_reconcile_minutes) == var.enable_protected_approval_gate_reconcile_minutes
-    error_message = "enable_protected_approval_gate_reconcile_minutes must be a positive integer."
+    condition     = var.enable_protected_approval_gate_reconcile_minutes >= 5 && floor(var.enable_protected_approval_gate_reconcile_minutes) == var.enable_protected_approval_gate_reconcile_minutes
+    error_message = "enable_protected_approval_gate_reconcile_minutes must be an integer of at least 5 (GitHub runs schedules at most every 5 minutes)."
   }
 }
 

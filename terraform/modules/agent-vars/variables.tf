@@ -72,7 +72,7 @@ variable "enable_protected_approval_gate" {
 }
 
 variable "enable_protected_approval_gate_reconcile_minutes" {
-  description = "Minimum interval in minutes between protected-approval reconciliation sweeps. Stored as ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES."
+  description = "Minimum interval in minutes between protected-approval reconciliation sweeps (minimum 5). Stored as ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES."
   type        = number
   default     = 10
 }

@@ -1711,8 +1711,9 @@ jobs:
 ```
 
 `.github/workflows/protected-approval-gate-reconcile.yml` (scheduled safety
-net). The cron fires every minute because schedules cannot read Actions
-variables; the sweep skips runs that come sooner than
+net). The cron uses GitHub's shortest supported interval, every 5 minutes,
+because schedules cannot read Actions variables; the sweep skips runs that
+come sooner than
 `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` after the last successful
 one:
 
@@ -1721,7 +1722,7 @@ name: protected-approval-gate-reconcile
 
 on:
   schedule:
-    - cron: '* * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:

@@ -1,0 +1,57 @@
+name: actionlint
+
+# Lints workflow files with actionlint: YAML structure, `${{ }}` expression
+# syntax and types, reusable-workflow input/secret contracts, and (through the
+# shellcheck preinstalled on the runner) every `run:` script. CI's TypeScript
+# checks never load workflow files, so before this an invalid workflow merged
+# green and failed only when GitHub refused to run it (zero-job failures).
+#
+# actionlint is downloaded from its GitHub release and SHA-256-verified rather
+# than used through a third-party action, so the actions policy stays
+# GitHub-owned only (same pattern as gitleaks in secret-scan-reusable.yml).
+# To upgrade, change both values below to a release and the checksum from that
+# release's actionlint_<version>_checksums.txt.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actionlint-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ACTIONLINT_VERSION: '1.7.7'
+  ACTIONLINT_SHA256: '023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757'
+
+jobs:
+  actionlint:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        run: |
+          set -euo pipefail
+          archive="actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          curl -fsSL -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/${archive}"
+          echo "${ACTIONLINT_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict
+          mkdir -p "$RUNNER_TEMP/actionlint"
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP/actionlint" actionlint
+          echo "$RUNNER_TEMP/actionlint" >> "$GITHUB_PATH"
+
+      - name: Run actionlint
+        run: |
+          set -euo pipefail
+          shellcheck --version | head -2
+          actionlint -version
+          actionlint -color

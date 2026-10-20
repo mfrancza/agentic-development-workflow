@@ -84,7 +84,7 @@ jobs:
 
           # Smoke-run one activity entry-point from the action-path-relative
           # scripts directory to confirm tsx module resolution works.
-          OUT="$(cd "$SCRIPTS_DIR" && npx --no-install tsx src/resolve-model.ts 2>&1 || true)"
+          OUT="$(cd "$SCRIPTS_DIR" && { npx --no-install tsx src/resolve-model.ts 2>&1 || true; })"
           if printf '%s' "$OUT" | grep -qE \
             'ERR_PACKAGE_PATH_NOT_EXPORTED|ERR_MODULE_NOT_FOUND|ERR_REQUIRE_ESM|Cannot find module'; then
             echo "ERROR: resolve-model.ts failed module loading:"

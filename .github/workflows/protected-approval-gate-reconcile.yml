@@ -1,12 +1,14 @@
 name: protected-approval-gate-reconcile
 
 # Safety net: re-publishes the gate check on every open pull request once every
-# ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES (default 10). The cron fires
-# every minute because schedules cannot read Actions variables; the sweep's
-# interval guard skips runs that come too soon after the last successful one.
+# ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES (default 10, minimum 5). The
+# cron uses GitHub's shortest supported interval, every 5 minutes, because
+# schedules cannot read Actions variables; the sweep's interval guard skips runs
+# that come too soon after the last successful one. GitHub may delay scheduled
+# runs under load, so the real interval can be longer.
 on:
   schedule:
-    - cron: '* * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:

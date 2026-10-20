@@ -40,7 +40,7 @@ See [`docs/design-philosophy.md`](docs/design-philosophy.md) for the reasoning b
     │   ├── tsconfig.json             # strict: true
     │   ├── src/                      # One entry file per activity; lib/ for shared helpers
     │   └── test/                     # Vitest unit tests (one file per activity)
-    └── workflows/                    # Event-triggered caller stubs (one per AGENT_ACTION trigger), reusable `*-reusable.yml` counterparts for all eight agent-container workflows, plus ci.yml, secret-scan.yml, and terraform-ci.yml (plan on PR / apply on push to main)
+    └── workflows/                    # Event-triggered caller stubs (one per AGENT_ACTION trigger), reusable `*-reusable.yml` counterparts for all eight agent-container workflows, plus ci.yml, actionlint.yml (workflow-file lint), secret-scan.yml, and terraform-ci.yml (plan on PR / apply on push to main)
 ```
 
 ## MVP Workflow

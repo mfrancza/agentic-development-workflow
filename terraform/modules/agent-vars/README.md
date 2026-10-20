@@ -14,7 +14,7 @@ Manages the GitHub Actions repository variables that configure agentic workflow 
 | `PROTECTED_APPROVAL_REVIEWERS` | JSON array | Logins and `<org>/<team-slug>` references whose approvals count toward `REQUIRED_APPROVAL_COUNT`. Defaults to `[]`, meaning any reviewer other than the PR author counts. Team references need the allowlist-resolver App secrets. |
 | `REQUIRED_APPROVAL_COUNT` | string integer | Required non-self approvals for protected PRs. Defaults to `"2"`. |
 | `ENABLE_PROTECTED_APPROVAL_GATE` | string (`"true"` / `"false"`) | Enables the opt-in protected-approval gate. Defaults to `"false"`. |
-| `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` | string integer | Minimum interval for reconciliation sweeps. Defaults to `"10"`. |
+| `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` | string integer | Minimum interval for reconciliation sweeps, at least 5 (GitHub's shortest schedule interval). Defaults to `"10"`. |
 | `AUTO_TRIGGER_AGENTS` | JSON object | Per-stage gates (`groom`, `design`, `developer`, `review`) that auto-advance the SDLC pipeline without manual labeling. All default to `false` (opt-in). |
 | `REVIEWER_MODELS` | JSON array | Ordered list of model identifiers for the multi-reviewer feature. Empty array (`[]`) disables multi-reviewer. Workflow guards use `vars.REVIEWER_MODELS != ''` before `fromJSON`. |
 | `REVIEW_MODEL_PAIRING` | JSON object | Reviewer model-pair preferences. When `enabled` is `true`, the agent-review workflow uses the configured `policy`, `preferred_vendors`, `explicit_map`, and `fallback_chain` to pick a reviewer model based on the authoring model recorded in the PR body. Explicit `model:review:*` / `model:*` labels on the PR take precedence. Defaults to `enabled = false` (fail-safe opt-in). Workflow guards use `vars.REVIEW_MODEL_PAIRING != ''` before `fromJSON`. See `docs/design/configurable-model-pair-preferences.md` for resolver semantics. |
@@ -122,7 +122,7 @@ provider "github" {
 | `protected_approval_reviewers` | `list(string)` | no | `[]` | Logins and `<org>/<team-slug>` references whose approvals count; empty counts any non-author reviewer. |
 | `required_approval_count` | `number` | no | `2` | Non-self approvals required for a protected PR. |
 | `enable_protected_approval_gate` | `bool` | no | `false` | Enables the protected-approval gate. |
-| `enable_protected_approval_gate_reconcile_minutes` | `number` | no | `10` | Reconciliation-sweep interval in minutes. |
+| `enable_protected_approval_gate_reconcile_minutes` | `number` | no | `10` | Reconciliation-sweep interval in minutes; minimum 5. |
 | `auto_trigger_agents` | `object({groom,design,developer,review: bool})` | no | all `false` | Per-stage auto-trigger gates. |
 | `reviewer_models` | `list(string)` | no | `[]` | Ordered list of model identifiers for the multi-reviewer feature. Empty disables multi-reviewer. |
 | `review_model_pairing` | `object({enabled,policy,preferred_vendors,explicit_map,fallback_chain})` | no | `enabled=false` | Reviewer model-pair preferences. See `docs/design/configurable-model-pair-preferences.md`. |
