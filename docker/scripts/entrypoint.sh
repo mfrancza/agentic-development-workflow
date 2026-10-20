@@ -29,6 +29,8 @@ log() {
     echo "[agent] $(date -Iseconds) $*"
 }
 
+source "${SCRIPTS_DIR}/expand_team_refs.sh"
+
 resolve_provider() {
     local model="$1"
     # NOTE: This function is duplicated in docker/reviewer/entrypoint.sh
@@ -306,6 +308,11 @@ _log_capture_exit() {
         _escaped_xai=$(printf '%s\n' "${XAI_API_KEY}" | sed 's/[.^$*\\/]/\\&/g; s/\[/\\[/g')
         find /home/agent/logs -type f \
             -exec sed -i "s/${_escaped_xai}/***REDACTED-XAI_API_KEY***/g" {} +
+    fi
+    if [ -n "${ALLOWLIST_RESOLVER_TOKEN:-}" ]; then
+        _escaped_resolver=$(printf '%s\n' "${ALLOWLIST_RESOLVER_TOKEN}" | sed 's/[.^$*\\/]/\\&/g; s/\[/\\[/g')
+        find /home/agent/logs -type f \
+            -exec sed -i "s/${_escaped_resolver}/***REDACTED-ALLOWLIST_RESOLVER_TOKEN***/g" {} +
     fi
 }
 # Save the exit code before the trap runs so the container exits with the
@@ -695,6 +702,8 @@ ${ISSUE_COMMENTS:-none}"
 
 action_groom() {
     : "${GITHUB_ISSUE_NUMBER:?GITHUB_ISSUE_NUMBER is required for groom}"
+
+    expand_admin_assignees
 
     setup_repo
     cd "$WORK_DIR"
