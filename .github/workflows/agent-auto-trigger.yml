@@ -107,7 +107,7 @@ jobs:
       github.event.action == 'labeled' &&
       github.event.label.name == 'do' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
       !contains(github.event.issue.labels.*.name, 'draft')
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
@@ -216,7 +216,7 @@ jobs:
       github.event_name == 'issues' &&
       github.event.action == 'closed' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
+      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-developer-unblock
