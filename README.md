@@ -121,7 +121,7 @@ adoption guide, including:
 
 - Adoption profiles (labels-only, grooming only, review only, full pipeline)
 - Common prerequisites (GitHub Apps, secrets, Terraform provider config)
-- Version pinning strategy (`@v0` vs. `@v0.0.0` vs. `@<sha>`)
+- Version pinning strategy (pin an exact release tag such as `@v0.2.1`; the moving `@v0` is not advised before 1.0)
 - Per-module and per-workflow sections with copy-paste wiring snippets
 - Manual repository settings (fork-PR approval policy, interaction limit)
 
@@ -393,13 +393,13 @@ See [`docs/design/configurable-model-pair-preferences.md`](docs/design/configura
 
 The developer and reviewer images are published to GHCR on every `v*` tag push by [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml). Two tags are published per release:
 
-- **Full tag** (e.g. `v0.0.0`) — immutable; pin to this for reproducible runs.
-- **Major tag** (e.g. `v0`) — a moving pointer updated on every release within the same major version; use this to receive automatic patch and minor updates.
+- **Full tag** (e.g. `v0.2.1`) — immutable; adopters should pin this (see [Version pinning](docs/adopting.md#version-pinning)).
+- **Major tag** (e.g. `v0`) — a moving pointer updated on every release within the same major version. Before 1.0, minor releases may contain breaking changes, so following it is not advised.
 
 ```
-ghcr.io/mfrancza/agentic-development-workflow/developer:v0.0.0
+ghcr.io/mfrancza/agentic-development-workflow/developer:v0.2.1
 ghcr.io/mfrancza/agentic-development-workflow/developer:v0
-ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0.0.0
+ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0.2.1
 ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0
 ```
 
@@ -433,7 +433,12 @@ gh workflow run release-images.yml \
 
 Releases follow semantic versioning: bump the **patch** version (`v1.2.3 → v1.2.4`) for bug fixes, documentation corrections, and internal refactors that do not change any consumer-facing contract; bump the **minor** version (`v1.2.3 → v1.3.0`) for backwards-compatible additions (new reusable workflow inputs with defaults, new optional Terraform variables, new composite action inputs that are not required); bump the **major** version (`v1.2.3 → v2.0.0`) for any breaking change to a reusable workflow's `inputs:` / `secrets:` surface, a Terraform module's required variables, or a composite action's inputs. The rationale for this contract is in [Decision 6 of the design doc](docs/design/publish-reusable-workflows-and-modules.md#decision-6--versioning-semver-tags-with-a-moving-major-tag).
 
-To cut a release, dispatch the [`release` workflow](.github/workflows/release.yml) from the Actions UI (or via `gh workflow run release.yml -f version=v1.2.3`). The workflow validates the version format, creates an annotated git tag and a moving major tag (e.g. `v1`), pushes both, and publishes a GitHub Release with auto-generated notes. The [`release-images` workflow](.github/workflows/release-images.yml) then fires automatically on the tag push to build and publish the updated container images to GHCR.
+To cut a release `vX.Y.Z`:
+
+- **Bump the nested worker pin first.** `agent-review-reusable.yml` calls `agent-review-worker-reusable.yml` by full reference at a fixed release tag (`uses:` cannot read `helpers-ref`). Merge a change setting it to the release you are about to cut, then tag that commit. Until the tag exists, `agent-review` runs that use the new pin fail to load the worker, so tag promptly after merging.
+- **Tag and publish:** dispatch the [`release` workflow](.github/workflows/release.yml) (`gh workflow run release.yml -f version=vX.Y.Z`). It validates the version format, creates an annotated tag and moves the major tag (e.g. `v0`), pushes both, and publishes a GitHub Release with auto-generated notes.
+- **Build the images:** dispatch [`release-images`](.github/workflows/release-images.yml) by hand (`gh workflow run release-images.yml --ref vX.Y.Z -f tag=vX.Y.Z`). It does not fire on its own, because tags pushed with the workflow `GITHUB_TOKEN` don't trigger other workflows.
+- **Write the notes:** add a hand-written section above the generated list calling out every stub change adopters must make (required before 1.0, when minor releases may break).
 
 ## Debugging
 

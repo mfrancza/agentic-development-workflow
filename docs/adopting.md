@@ -5,7 +5,7 @@ of the agentic-development-workflow — the Terraform modules that configure rep
 settings and the reusable GitHub Actions workflows that drive the agent SDLC.
 
 > **Source repo:** `mfrancza/agentic-development-workflow`
-> **Component reference tag:** `@v0` (or a pinned exact tag — see [Version pinning](#version-pinning))
+> **Component reference tag:** an exact release tag, shown as `@vX.Y.Z` in this guide (see [Version pinning](#version-pinning))
 
 ---
 
@@ -15,9 +15,10 @@ Complete these steps in order before wiring up any reusable workflows.
 
 1. **Verify a release exists.** Check that at least one `v*` tag exists on the
    source repo (`gh api repos/mfrancza/agentic-development-workflow/tags --jq '.[].name'`).
-   The published container images (`developer:v0`, `reviewer:v0`) and the
-   reusable workflow refs (`@v0`) only resolve once a release tag has been
-   pushed and the release-images workflow has published the images to GHCR.
+   Pick the release you will pin (see [Version pinning](#version-pinning)). Its
+   container images (`developer:vX.Y.Z`, `reviewer:vX.Y.Z`) and reusable
+   workflow refs (`@vX.Y.Z`) only resolve once that tag has been pushed and the
+   release-images workflow has published its images to GHCR.
 2. **Create your repository** (public recommended — the security module requires
    Dependabot, and secret scanning/push protection from the `security_and_analysis`
    block require a public repo or a GitHub Advanced Security licence).
@@ -321,26 +322,33 @@ terraform import github_repository.this "<your-repo-name>"
 ## Version pinning
 
 Every release of this repo is tagged `v<major>.<minor>.<patch>` (e.g.
-`v1.2.3`). A moving tag `v<major>` (e.g. `v1`) is force-updated to point at
-the newest release within that major version. Three pinning options are
-available:
+`v0.2.1`), and the moving tag `v<major>` (e.g. `v0`) is force-updated to point
+at the newest release within that major version. **Pin an exact release tag**
+so you upgrade when you choose to, not when a release is published:
 
-| Pin                 | Example reference               | Semantics                                                                                           |
-| ------------------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
-| Major (recommended) | `@v0` / `?ref=v0`               | Tracks patches and minor releases within `v0`; updated automatically on every non-breaking release. |
-| Exact               | `@v0.0.0` / `?ref=v0.0.0`       | Fully reproducible; only update when you choose to.                                                 |
-| SHA                 | `@<40-char-sha>` / `?ref=<sha>` | Maximally reproducible; opaque to humans but immune to tag moves.                                   |
+| Pin                   | Example reference                 | Semantics                                                                                                                                  |
+| --------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| Exact (recommended)   | `@v0.2.1` / `?ref=v0.2.1`         | Fixed until you change it. Upgrade by changing the tag in your stubs, `helpers-ref`, image tags and Terraform `?ref=` together.              |
+| Major (not advised)   | `@v0` / `?ref=v0`                 | Follows every new release automatically. Before `v1.0.0` that includes breaking changes (see **Pre-1.0 stability**), so a release can break your workflows without warning. |
+| SHA                   | `@<40-char-sha>` / `?ref=<sha>`   | Maximally reproducible; opaque to humans but immune to tag moves.                                                                          |
 
-**Recommendation:** pin at the major tag (`@v0`) for day-to-day use. Drop to
-an exact tag or SHA when you need reproducibility for auditing or when a
-breaking major change lands that you are not yet ready to adopt.
+**Examples in this guide use `vX.Y.Z`.** Replace it everywhere with the release
+you are adopting, for example `v0.2.1`: in every `uses:` line, every
+`helpers-ref:`, every image tag (`ghcr.io/…/developer:vX.Y.Z`) and every
+Terraform `?ref=`. To upgrade, read that release's notes for any stub changes,
+then change all of them to the new tag in one commit.
+
+**Allow the whole repository in your actions policy, not one version.** Use
+wildcard patterns (`…/.github/workflows/*@*` and `…/.github/actions/*@*`; see
+the [`actions-policy` module](#actions-policy-module)) so changing your pinned
+version never needs a policy change. The wildcard also covers the nested
+workflow that `agent-review-reusable.yml` calls at a fixed release of its own.
 
 **`helpers-ref` must match the pinned version.** The reusable workflows accept
 a required `helpers-ref` input that must be set to the same selector used in
-the `uses:` line. If you pin with `@v0`, pass `helpers-ref: v0`. If you pin
-with an exact tag (`@v0.0.2`), pass `helpers-ref: v0.0.2`. If you pin with a
-SHA, pass the same SHA. Mismatched selectors are caught at runtime before any
-helper action loads.
+the `uses:` line. If you pin with `@v0.2.1`, pass `helpers-ref: v0.2.1`; if you
+pin with a SHA, pass the same SHA. Mismatched selectors are caught at runtime
+before any helper action loads.
 
 Breaking changes (reusable workflow `inputs:`/`secrets:` contract, Terraform
 required variables, composite action inputs) always bump the major version.
@@ -350,9 +358,9 @@ refactors bump the patch version.
 > **Pre-1.0 stability.** That contract applies from `v1.0.0` onward. While the
 > project is on `v0.x.y` it is a feedback release: a breaking change to a
 > reusable's `inputs:`/`secrets:` contract may land on a **minor** bump (for
-> example `v0.0.x` → `v0.1.0`), and the moving `v0` tag will pick it up. Each
+> example `v0.1.x` → `v0.2.0`), and the moving `v0` tag picks it up. Each
 > such change is called out in the release notes with the stub lines to add.
-> If you need reproducibility, pin to an exact `v0.x.y` tag rather than `v0`.
+> This is why an exact tag is the recommended pin.
 > See [`docs/design/initial-release.md`](design/initial-release.md), Decision 6.
 
 ---
@@ -381,7 +389,7 @@ for any adoption profile because every other component reads these labels.
 
 ```hcl
 module "labels" {
-  source     = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/labels?ref=v0"
+  source     = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/labels?ref=vX.Y.Z"
   repository = github_repository.this.name
 }
 ```
@@ -440,7 +448,7 @@ behavior from the YAML.
 
 ```hcl
 module "agent_vars" {
-  source              = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/agent-vars?ref=v0"
+  source              = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/agent-vars?ref=vX.Y.Z"
   repository          = github_repository.this.name
   agent_allowlist     = ["your-github-username", "<developer-agent-slug>[bot]", "<reviewer-agent-slug>[bot]"]
   default_model       = "sonnet"
@@ -479,7 +487,7 @@ letting maintainers resolve impasses without removing protection entirely.
 
 ```hcl
 module "branch_protection" {
-  source     = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/branch-protection?ref=v0"
+  source     = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/branch-protection?ref=vX.Y.Z"
   repository = github_repository.this.name
   # required_approving_review_count = 1  # default
 }
@@ -542,14 +550,14 @@ be in GitHub's reusable-workflow form,
 `OWNER/REPO/.github/workflows/FILE.yml@REF`, not `owner/repo`: a bare
 `mfrancza/agentic-development-workflow` entry matches nothing, and every
 caller stub fails at startup with zero jobs. The wiring snippet below
-allow-lists all of this repository's reusables at the `v0` tag with one
-wildcard entry; if you pin to an exact tag or SHA, use the same selector after
-the `@`. The reusables themselves only call GitHub-owned `actions/*` actions
-and this repository's local composite actions, so no further entries are
-needed on their account. The `agent-fix-checks` caller stubs (event-driven and
-polling) also call two of this repository's composite actions directly
-(`resolve-check-pr`, `find-failing-agent-prs`); if you use them, add the
-matching `.github/actions/*@REF` entry shown in the snippet.
+allow-lists this repository's reusable workflows and composite actions at
+**any** ref (`@*`), so upgrading your pinned release never needs a policy
+change. Two calls depend on that wildcard even though they aren't in your
+stubs: `agent-review-reusable.yml` calls its internal
+`agent-review-worker-reusable.yml` at a fixed release of this repository, and
+the `agent-fix-checks` stubs (event-driven and polling) call this repository's
+`resolve-check-pr` and `find-failing-agent-prs` composite actions directly.
+The reusables otherwise only call GitHub-owned `actions/*` actions.
 
 **Prerequisites.**
 
@@ -564,17 +572,17 @@ matching `.github/actions/*@REF` entry shown in the snippet.
 
 ```hcl
 module "actions_policy" {
-  source     = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/actions-policy?ref=v0"
+  source     = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/actions-policy?ref=vX.Y.Z"
   repository = github_repository.this.name
   patterns_allowed = [
-    # Required: allow this repository's reusable workflows at the ref you pin
-    # in your caller stubs' uses: lines (here the moving v0 tag). GitHub
-    # matches the full OWNER/REPO/PATH/FILE@REF string, so owner/repo alone
-    # does not work. For an exact pin use ...workflows/*@v0.1.0 or ...@<sha>.
-    "mfrancza/agentic-development-workflow/.github/workflows/*@v0",
-    # Required only for the agent-fix-checks stubs, which call this
-    # repository's composite actions directly. Same ref rule as above.
-    "mfrancza/agentic-development-workflow/.github/actions/*@v0",
+    # Required: this repository's reusable workflows at any ref, so the
+    # release you pin in your stubs can change without a policy change.
+    # GitHub matches the full OWNER/REPO/PATH/FILE@REF string, so owner/repo
+    # alone does not work.
+    "mfrancza/agentic-development-workflow/.github/workflows/*@*",
+    # Required for the agent-fix-checks stubs, which call this repository's
+    # composite actions directly.
+    "mfrancza/agentic-development-workflow/.github/actions/*@*",
     # Add any non-GitHub-owned action your own workflows use, as owner/repo@<sha>.
   ]
 }
@@ -604,7 +612,7 @@ Advanced Security licence).
 
 ```hcl
 module "security" {
-  source     = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/security?ref=v0"
+  source     = "git::https://github.com/mfrancza/agentic-development-workflow.git//terraform/modules/security?ref=vX.Y.Z"
   repository = github_repository.this.name
 }
 ```
@@ -636,7 +644,7 @@ resource "github_repository" "this" {
 All reusable workflows are called via:
 
 ```yaml
-uses: mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@v0
+uses: mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@vX.Y.Z
 ```
 
 Pass `image:` to pull the published agent container image from GHCR — this
@@ -644,8 +652,8 @@ skips a `docker build` step that the reusable workflow cannot perform without
 the source `docker/` tree in the caller's workspace:
 
 ```
-image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
-image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0
+image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
+image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:vX.Y.Z
 ```
 
 **Security note on allowlist gating.** The reusable's first authorization step
@@ -699,15 +707,15 @@ jobs:
     if: >
       github.event.label.name == 'agent:groom' &&
       github.event.issue.state == 'open'
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-groom-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-groom-reusable.yml@vX.Y.Z
     with:
       issue-number: ${{ github.event.issue.number }}
       repo: ${{ github.repository }}
-      image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
+      image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
       default-model: ${{ vars.DEFAULT_MODEL }}
       admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}
       logs-retention-days: 30
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
@@ -773,15 +781,15 @@ jobs:
     if: >
       github.event.label.name == 'agent:design' &&
       github.event.issue.state == 'open'
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-design-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-design-reusable.yml@vX.Y.Z
     with:
       run-design: true
       issue-number: ${{ github.event.issue.number }}
       repo: ${{ github.repository }}
-      image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
+      image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
       default-model: ${{ vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
       logs-retention-days: 30
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
@@ -797,12 +805,12 @@ jobs:
       github.event.pull_request.merged == true &&
       startsWith(github.event.pull_request.head.ref, 'design/issue-') &&
       github.event.pull_request.head.repo.full_name == github.repository
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-design-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-design-reusable.yml@vX.Y.Z
     with:
       run-undraft: true
       pr-head-ref: ${{ github.event.pull_request.head.ref }}
       repo: ${{ github.repository }}
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
@@ -857,15 +865,15 @@ jobs:
     if: >
       github.event.label.name == 'agent:developer' &&
       github.event.issue.state == 'open'
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@vX.Y.Z
     with:
       issue-number: ${{ github.event.issue.number }}
       repo: ${{ github.repository }}
-      image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
+      image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
       default-model: ${{ vars.DEFAULT_MODEL }}
       code-reviewers: ${{ vars.CODE_REVIEWERS }}
       logs-retention-days: 30
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
@@ -932,15 +940,15 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-review-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-review-reusable.yml@vX.Y.Z
     with:
       pr-number: ${{ github.event.pull_request.number }}
       repo: ${{ github.repository }}
-      image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:v0
+      image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:vX.Y.Z
       default-model: ${{ vars.DEFAULT_MODEL }}
       reviewer-models: ${{ vars.REVIEWER_MODELS }}
       logs-retention-days: 30
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
       event-action: ${{ github.event.action }}
     secrets:
@@ -1011,7 +1019,7 @@ jobs:
     if: >
       github.event.pull_request.user.login == '<developer-agent-slug>[bot]' &&
       github.event.review.user.login != github.event.pull_request.user.login
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-respond-review-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-respond-review-reusable.yml@vX.Y.Z
     with:
       pr-number: ${{ github.event.pull_request.number }}
       review-state: ${{ github.event.review.state }}
@@ -1022,8 +1030,8 @@ jobs:
       repo-name: ${{ github.event.repository.name }}
       head-sha: ${{ github.event.pull_request.head.sha }}
       review-commit-id: ${{ github.event.review.commit_id }}
-      image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
-      helpers-ref: v0
+      image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
+      helpers-ref: vX.Y.Z
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1072,7 +1080,7 @@ Actions failures and eligible other check origins before calling the reusable.
   `workflow_run.workflows:` filter. This is a delivery subscription, not an
   allowlist substitute.
 - An actions-policy entry for this repository's composite actions
-  (`mfrancza/agentic-development-workflow/.github/actions/*@v0`), because the
+  (`mfrancza/agentic-development-workflow/.github/actions/*@*`), because the
   stubs call `resolve-check-pr` and `find-failing-agent-prs` directly. See the
   [`actions-policy` module](#actions-policy-module).
 
@@ -1112,7 +1120,7 @@ jobs:
       head_sha: ${{ steps.resolve.outputs.head_sha }}
     steps:
       - id: resolve
-        uses: mfrancza/agentic-development-workflow/.github/actions/resolve-check-pr@v0
+        uses: mfrancza/agentic-development-workflow/.github/actions/resolve-check-pr@vX.Y.Z
         with:
           event-name: ${{ github.event_name }}
           token: ${{ github.token }}
@@ -1125,13 +1133,13 @@ jobs:
     concurrency:
       group: agent-fix-checks-pr-${{ needs.resolve-pr.outputs.pr_number }}
       cancel-in-progress: false
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-fix-checks-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-fix-checks-reusable.yml@vX.Y.Z
     with:
       pr-number: ${{ fromJSON(needs.resolve-pr.outputs.pr_number) }}
       head-sha-at-trigger: ${{ needs.resolve-pr.outputs.head_sha }}
       agent-login: <developer-agent-slug>[bot]
-      image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
-      helpers-ref: v0
+      image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
+      helpers-ref: vX.Y.Z
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1176,7 +1184,7 @@ jobs:
     steps:
       - name: Find agent PRs with allowed failing checks
         id: find
-        uses: mfrancza/agentic-development-workflow/.github/actions/find-failing-agent-prs@v0
+        uses: mfrancza/agentic-development-workflow/.github/actions/find-failing-agent-prs@vX.Y.Z
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -1193,13 +1201,13 @@ jobs:
     concurrency:
       group: agent-fix-checks-pr-${{ matrix.pr.number }}
       cancel-in-progress: false
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-fix-checks-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-fix-checks-reusable.yml@vX.Y.Z
     with:
       pr-number: ${{ matrix.pr.number }}
       head-sha-at-trigger: ${{ matrix.pr.head_sha }}
       agent-login: <developer-agent-slug>[bot]
-      image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
-      helpers-ref: v0
+      image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
+      helpers-ref: vX.Y.Z
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1211,7 +1219,7 @@ jobs:
 Set `author` and `agent-login` to the same developer-agent bot login as the
 event-driven stub. Like the event-driven stub, it calls one of this
 repository's composite actions directly, so your actions policy needs the
-`mfrancza/agentic-development-workflow/.github/actions/*@v0` entry (see the
+`mfrancza/agentic-development-workflow/.github/actions/*@*` entry (see the
 [`actions-policy` module](#actions-policy-module) wiring snippet).
 
 **Trust considerations.** This workflow runs on `workflow_run` (not
@@ -1260,11 +1268,11 @@ jobs:
     if: >
       github.event.deployment_status.state == 'failure' ||
       github.event.deployment_status.state == 'error'
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-fix-deployment-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-fix-deployment-reusable.yml@vX.Y.Z
     with:
       deployment-sha: ${{ github.event.deployment.sha }}
-      image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
-      helpers-ref: v0
+      image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
+      helpers-ref: vX.Y.Z
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1321,13 +1329,13 @@ permissions:
 
 jobs:
   resolve-conflicts:
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-resolve-conflicts-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-resolve-conflicts-reusable.yml@vX.Y.Z
     with:
       pr-number: ${{ inputs.pr_number || '' }}
       developer-author: app/<developer-app-slug>
       escalation-assignee: ${{ github.repository_owner }}
-      image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
-      helpers-ref: v0
+      image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
+      helpers-ref: vX.Y.Z
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1414,7 +1422,7 @@ jobs:
   remove-developer-label:
     needs: extract-issue-number
     if: needs.extract-issue-number.outputs.proceed == 'true'
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-pr-merged-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-pr-merged-reusable.yml@vX.Y.Z
     with:
       issue-number: ${{ needs.extract-issue-number.outputs.issue_number }}
     secrets:
@@ -1483,11 +1491,11 @@ jobs:
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
       !contains(github.event.issue.labels.*.name, 'draft')
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-groom
       issue-number: ${{ github.event.issue.number }}
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
@@ -1502,11 +1510,11 @@ jobs:
       github.event.label.name == 'plan' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-design
       issue-number: ${{ github.event.issue.number }}
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
@@ -1522,11 +1530,11 @@ jobs:
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
       !contains(github.event.issue.labels.*.name, 'draft')
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-developer-do
       issue-number: ${{ github.event.issue.number }}
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
@@ -1541,11 +1549,11 @@ jobs:
       github.event.label.name == 'draft' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-developer-undraft
       issue-number: ${{ github.event.issue.number }}
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
@@ -1563,11 +1571,11 @@ jobs:
        github.event.pull_request.user.login == '<developer-agent-slug>[bot]') &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).review == true
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-review
       pr-number: ${{ github.event.pull_request.number }}
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
@@ -1581,11 +1589,11 @@ jobs:
       github.event.action == 'closed' &&
       vars.AUTO_TRIGGER_AGENTS != '' &&
       fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-developer-unblock
       issue-number: ${{ github.event.issue.number }}
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
@@ -1636,7 +1644,7 @@ permissions:
 
 jobs:
   ci:
-    uses: mfrancza/agentic-development-workflow/.github/workflows/ci-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/ci-reusable.yml@vX.Y.Z
 ```
 
 **Trust considerations.** No secrets are used; the workflow only reads
@@ -1679,7 +1687,7 @@ concurrency:
 
 jobs:
   scan:
-    uses: mfrancza/agentic-development-workflow/.github/workflows/secret-scan-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/secret-scan-reusable.yml@vX.Y.Z
     # Optional: override the gitleaks version and its SHA-256 checksum
     # with:
     #   gitleaks-version: '8.28.0'
@@ -1760,7 +1768,7 @@ concurrency:
 jobs:
   check-protected-approvals:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
-    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-reusable.yml@vX.Y.Z
     secrets:
       ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
@@ -1772,7 +1780,7 @@ jobs:
       pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
       head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
       repo: ${{ github.repository }}
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
       departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
 ```
@@ -1820,7 +1828,7 @@ permissions:
 
 jobs:
   sweep:
-    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@vX.Y.Z
     secrets:
       ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
@@ -1830,7 +1838,7 @@ jobs:
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
       qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       repo: ${{ github.repository }}
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
 ```
 
 `.github/workflows/protected-approval-gate-reconcile.yml` (scheduled safety
@@ -1860,7 +1868,7 @@ concurrency:
 
 jobs:
   sweep:
-    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@v0
+    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@vX.Y.Z
     secrets:
       ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
@@ -1870,7 +1878,7 @@ jobs:
       enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
       qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       repo: ${{ github.repository }}
-      helpers-ref: v0
+      helpers-ref: vX.Y.Z
       interval-minutes: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES }}
 ```
 
@@ -2194,28 +2202,27 @@ fixed in the v0.0.1 patch release. (See
 for the full analysis.) Each reusable now self-checks out its own helper actions
 into a `_agentic-workflow/` subdirectory before any composite action step runs.
 The helper version is pinned via the required `helpers-ref` workflow input — pass
-the same tag or SHA you use in the `uses:` line (e.g. `helpers-ref: v0` alongside
-`uses: ...@v0`). See [`docs/design/helper-checkout-job-workflow-sha-context.md`](design/helper-checkout-job-workflow-sha-context.md)
+the same tag or SHA you use in the `uses:` line (e.g. `helpers-ref: v0.2.1`
+alongside `uses: ...@v0.2.1`). See [`docs/design/helper-checkout-job-workflow-sha-context.md`](design/helper-checkout-job-workflow-sha-context.md)
 for the full design and `AGENTS.md` § "Reusable workflows: self-checkout for helper
 actions" for the canonical pattern.
 
 **Fix:**
 
-- If you pinned to an exact tag, upgrade to `@v0.0.2` or later (or `@v0` to track
-  future patches automatically). Add `helpers-ref:` matching the same version
-  selector you use in the `uses:` line:
+- Upgrade to an exact tag of `v0.0.2` or later. Add `helpers-ref:` matching
+  the same version selector you use in the `uses:` line:
 
   ```yaml
-  uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@v0
+  uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@vX.Y.Z
   with:
-    image: ghcr.io/mfrancza/agentic-development-workflow/developer:v0
-    helpers-ref: v0
+    image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
+    helpers-ref: vX.Y.Z
   ```
 
-- If you are already on `@v0` (the moving major tag) and adopted before
-  the `helpers-ref` input was added, add `helpers-ref: v0` to the `with:` block
-  of every affected caller stub — the next workflow run will pick up the required
-  input.
+- If you are on the moving major tag (`@v0`) and adopted before the
+  `helpers-ref` input was added, add `helpers-ref: v0` to the `with:` block of
+  every affected caller stub, or switch to an exact tag as recommended in
+  [Version pinning](#version-pinning).
 
 **Verification after fixing:** Open a test issue on your consumer repo and apply
 `agent:developer`. The workflow should:
@@ -2257,19 +2264,21 @@ form `OWNER/REPO/.github/workflows/FILE.yml@REF`. An entry of
 `mfrancza/agentic-development-workflow` (an earlier version of this guide's
 wiring snippet suggested "owner/repo patterns") matches nothing.
 
-**Fix:** Add a pattern that matches the reusables at the ref you pin, then
-apply:
+**Fix:** Allow this repository's reusable workflows and composite actions at
+any ref, then apply:
 
 ```hcl
 patterns_allowed = [
-  "mfrancza/agentic-development-workflow/.github/workflows/*@v0",
+  "mfrancza/agentic-development-workflow/.github/workflows/*@*",
+  "mfrancza/agentic-development-workflow/.github/actions/*@*",
 ]
 ```
 
-For an exact pin, use the same selector you use in `uses:` after the `@`, e.g.
-`...workflows/*@v0.1.0` or `...workflows/*@<40-char-sha>`. Without Terraform,
-the same list lives under _Settings → Actions → General → Allow specified
-actions and reusable workflows_.
+Use `@*`, not your pinned tag: `agent-review-reusable.yml` calls its internal
+worker workflow at a fixed release of this repository, which a pattern for your
+own tag doesn't match. Without Terraform, the same list lives under
+_Settings → Actions → General → Allow specified actions and reusable
+workflows_.
 
 ---
 
