@@ -220,11 +220,16 @@ Every composite action step that references the shared npm package **must** use 
 
 **Important:** `setup-node`'s `cache-dependency-path` is a glob resolved by `@actions/glob`, which rejects `.` / `..` path segments. The action-relative path `${{ github.action_path }}/../../scripts` must therefore be normalized to an absolute path before it can be used in `cache-dependency-path`. Use a dedicated "Resolve scripts directory" step whose output is then referenced by all subsequent steps.
 
+**Second constraint:** `@actions/glob` (used by `setup-node`) cannot locate files outside `GITHUB_WORKSPACE`. When this action is referenced remotely (`uses: owner/repo/.../action@ref`), `github.action_path` resolves to the runner's `_actions` cache, which is outside `GITHUB_WORKSPACE`. Passing that out-of-workspace path as `cache-dependency-path` causes the step to fail with "Some specified paths were not resolved, unable to cache dependencies." Enable npm caching only when the resolved scripts directory is inside `GITHUB_WORKSPACE`.
+
 The required form for every `setup-node` block and run step in a composite action wrapper:
 
 ```yaml
 # setup-node's cache-dependency-path is resolved via @actions/glob,
-# which rejects '.' / '..' segments, so normalize first.
+# which rejects '.' / '..' segments, so normalize first. Also emit
+# cache-key-path only when inside GITHUB_WORKSPACE — @actions/glob
+# cannot find files outside the workspace (remote action references
+# resolve github.action_path to the _actions cache, outside the workspace).
 - name: Resolve scripts directory
   id: scripts-dir
   shell: bash
@@ -232,14 +237,24 @@ The required form for every `setup-node` block and run step in a composite actio
     ACTION_PATH: ${{ github.action_path }}
   run: |
     set -euo pipefail
-    echo "dir=$(cd "$ACTION_PATH/../../scripts" && pwd)" >> "$GITHUB_OUTPUT"
+    scripts_dir="$(cd "$ACTION_PATH/../../scripts" && pwd)"
+    echo "dir=${scripts_dir}" >> "$GITHUB_OUTPUT"
+    if [[ "${scripts_dir}" == "${GITHUB_WORKSPACE}"* ]]; then
+      echo "cache-key-path=${scripts_dir}/package-lock.json" >> "$GITHUB_OUTPUT"
+    fi
 
 - name: Set up Node.js
+  if: steps.scripts-dir.outputs.cache-key-path != ''
   uses: actions/setup-node@<sha>  # v7.0.0
   with:
     node-version: '22'
     cache: npm
-    cache-dependency-path: ${{ steps.scripts-dir.outputs.dir }}/package-lock.json
+    cache-dependency-path: ${{ steps.scripts-dir.outputs.cache-key-path }}
+- name: Set up Node.js
+  if: steps.scripts-dir.outputs.cache-key-path == ''
+  uses: actions/setup-node@<sha>  # v7.0.0
+  with:
+    node-version: '22'
 
 - name: Install dependencies
   shell: bash
