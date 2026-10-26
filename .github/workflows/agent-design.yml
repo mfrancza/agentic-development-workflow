@@ -23,11 +23,10 @@ jobs:
     # hardcoded in YAML — run `terraform apply` to update it.
     #
     # Security: the reusable's authorize job checks the sender allowlist before
-    # it enters its concurrency group. Keep this caller limited to event and
-    # state predicates so team-reference allowlist members can reach that gate.
+    # it enters its concurrency group. Keep this caller limited to queue
+    # predicates; lifecycle state is checked by the reusable gate.
     if: >
-      github.event.label.name == 'agent:design' &&
-      github.event.issue.state == 'open'
+      github.event.label.name == 'agent:design'
     uses: ./.github/workflows/agent-design-reusable.yml
     with:
       run-design: true
@@ -38,6 +37,7 @@ jobs:
       logs-retention-days: 30
       helpers-ref: ${{ github.sha }}
       sender-login: ${{ github.event.sender.login }}
+      issue-state: ${{ github.event.issue.state }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -48,14 +48,11 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   call-undraft:
-    # Fires only when a design-branch PR is merged — not just closed without
-    # merging.  pull_request.branches filters the *base* branch, so the
-    # head-branch check must live in the `if` condition instead. This cleanup
-    # path does not use the design-run authorize job; sender-login is passed to
+    # The same-repository guard remains in the caller trust boundary. The
+    # reusable gate accepts only merged design/issue-* PRs. This cleanup path
+    # does not use the design-run authorize job; sender-login is passed to
     # satisfy the reusable's shared workflow-call contract.
     if: >
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'design/issue-') &&
       github.event.pull_request.head.repo.full_name == github.repository
     uses: ./.github/workflows/agent-design-reusable.yml
     with:
@@ -64,6 +61,7 @@ jobs:
       repo: ${{ github.repository }}
       helpers-ref: ${{ github.sha }}
       sender-login: ${{ github.event.sender.login }}
+      pr-merged: ${{ github.event.pull_request.merged }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}

@@ -12,10 +12,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: agent-pr-merged-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
   # SECURITY EXCEPTION (Decision 8 of docs/design/refactor-github-actions.md):
   # Neither job below performs a workspace checkout. On pull_request.closed
@@ -24,53 +20,19 @@ jobs:
   # a checkout were present. By omitting the checkout entirely, there is no
   # local code-execution path that a merged PR can influence.
   #
-  # The PR body must be extracted here (in the caller) rather than in the
-  # reusable because github.event.pull_request.body is only accessible from the
-  # calling workflow — reusable workflows receive the workflow_call event, not
-  # the original pull_request event. The extracted issue number is then passed
-  # to the reusable workflow as a typed input.
+  # Pass the event body as an explicit reusable-workflow input. The reusable
+  # gate parses its typed input before taking the per-PR concurrency lock or
+  # minting an installation token.
 
-  extract-issue-number:
+  remove-developer-label:
     # Only act on PRs authored by the developer-agent bot.  Both merged and
     # abandoned PRs are handled — in either case the developer agent's
     # iterative loop is definitively over.
     if: github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      proceed: ${{ steps.lookup.outputs.proceed }}
-      issue_number: ${{ steps.lookup.outputs.issue_number }}
-
-    steps:
-      - name: Extract linked issue number from PR body
-        id: lookup
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          set -euo pipefail
-          # Extract the issue number from a "Closes #N" reference in the PR body.
-          # Pass the body through an env var (not a template expression) to avoid
-          # shell-injection from attacker-controlled PR body content.
-          # grep returns 1 when there is no match; the `|| true` lets set -e ignore that.
-          ISSUE_NUM="$(printf '%s' "$PR_BODY" | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
-          if [ -z "${ISSUE_NUM:-}" ]; then
-            echo "PR body does not contain a 'Closes #N' reference; skipping."
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "Found linked issue #${ISSUE_NUM}."
-            # ISSUE_NUM is purely numeric (grep -oE '[0-9]+') so no CR/LF will be
-            # present, but strip defensively to comply with output-injection hygiene.
-            ISSUE_NUM="$(printf '%s' "$ISSUE_NUM" | tr -d '\r\n')"
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            echo "issue_number=${ISSUE_NUM}" >> "$GITHUB_OUTPUT"
-          fi
-
-  remove-developer-label:
-    needs: extract-issue-number
-    if: needs.extract-issue-number.outputs.proceed == 'true'
     uses: ./.github/workflows/agent-pr-merged-reusable.yml
     with:
-      issue-number: ${{ needs.extract-issue-number.outputs.issue_number }}
+      pr-number: ${{ github.event.pull_request.number }}
+      pr-body: ${{ github.event.pull_request.body }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}

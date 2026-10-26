@@ -705,8 +705,7 @@ permissions:
 jobs:
   groom:
     if: >
-      github.event.label.name == 'agent:groom' &&
-      github.event.issue.state == 'open'
+      github.event.label.name == 'agent:groom'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-groom-reusable.yml@vX.Y.Z
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -717,6 +716,7 @@ jobs:
       logs-retention-days: 30
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
+      issue-state: ${{ github.event.issue.state }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -779,8 +779,7 @@ permissions:
 jobs:
   call-design:
     if: >
-      github.event.label.name == 'agent:design' &&
-      github.event.issue.state == 'open'
+      github.event.label.name == 'agent:design'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-design-reusable.yml@vX.Y.Z
     with:
       run-design: true
@@ -791,6 +790,7 @@ jobs:
       logs-retention-days: 30
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
+      issue-state: ${{ github.event.issue.state }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -802,8 +802,6 @@ jobs:
 
   call-undraft:
     if: >
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'design/issue-') &&
       github.event.pull_request.head.repo.full_name == github.repository
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-design-reusable.yml@vX.Y.Z
     with:
@@ -812,6 +810,7 @@ jobs:
       repo: ${{ github.repository }}
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
+      pr-merged: ${{ github.event.pull_request.merged }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -863,8 +862,7 @@ permissions:
 jobs:
   implement:
     if: >
-      github.event.label.name == 'agent:developer' &&
-      github.event.issue.state == 'open'
+      github.event.label.name == 'agent:developer'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@vX.Y.Z
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -875,6 +873,7 @@ jobs:
       logs-retention-days: 30
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
+      issue-state: ${{ github.event.issue.state }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -929,7 +928,6 @@ jobs:
   review:
     # Exclude fork-headed PRs on both event paths.
     if: >
-      github.event.pull_request.state == 'open' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (
         (github.event.action == 'labeled' &&
@@ -951,6 +949,7 @@ jobs:
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
       event-action: ${{ github.event.action }}
+      pr-state: ${{ github.event.pull_request.state }}
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}
@@ -1389,50 +1388,23 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: agent-pr-merged-pr-${{ github.event.pull_request.number }}
-  cancel-in-progress: false
-
 jobs:
-  extract-issue-number:
+  remove-developer-label:
     # Only act on PRs authored by the developer-agent bot.
     # Adjust the login to match your App's bot identity.
     if: github.event.pull_request.user.login == '<developer-agent-slug>[bot]'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    outputs:
-      proceed: ${{ steps.lookup.outputs.proceed }}
-      issue_number: ${{ steps.lookup.outputs.issue_number }}
-    steps:
-      - name: Extract linked issue number from PR body
-        id: lookup
-        env:
-          PR_BODY: ${{ github.event.pull_request.body }}
-        run: |
-          set -euo pipefail
-          ISSUE_NUM="$(printf '%s' "$PR_BODY" | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
-          if [ -z "${ISSUE_NUM:-}" ]; then
-            echo "proceed=false" >> "$GITHUB_OUTPUT"
-          else
-            ISSUE_NUM="$(printf '%s' "$ISSUE_NUM" | tr -d '\r\n')"
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            echo "issue_number=${ISSUE_NUM}" >> "$GITHUB_OUTPUT"
-          fi
-
-  remove-developer-label:
-    needs: extract-issue-number
-    if: needs.extract-issue-number.outputs.proceed == 'true'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-pr-merged-reusable.yml@vX.Y.Z
     with:
-      issue-number: ${{ needs.extract-issue-number.outputs.issue_number }}
+      pr-number: ${{ github.event.pull_request.number }}
+      pr-body: ${{ github.event.pull_request.body }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 ```
 
 > **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` with
-> your developer-agent App's bot login. The issue-number extraction must happen
-> in the caller (not the reusable) because `github.event.pull_request.body` is
+> your developer-agent App's bot login. The reusable extracts the issue number
+> from the explicit `pr-body` input because `github.event.pull_request.body` is
 > only available to the calling workflow — reusable workflows receive the
 > `workflow_call` event, not the original `pull_request` event.
 

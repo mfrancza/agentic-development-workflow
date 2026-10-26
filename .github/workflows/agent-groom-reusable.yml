@@ -62,6 +62,10 @@ on:
       sender-login:
         required: true
         type: string
+      issue-state:
+        description: 'Issue state from the triggering event.'
+        required: true
+        type: string
     secrets:
       DEVELOPER_APP_ID:
         required: true
@@ -85,7 +89,15 @@ permissions:
   contents: read
 
 jobs:
+  gate:
+    # Keep lifecycle invariants in the reusable so every caller gets the same
+    # behavior, before either a concurrency slot or an installation token.
+    if: inputs.issue-state == 'open'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "Issue is open; proceeding."
   authorize:
+    needs: gate
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:
@@ -167,7 +179,7 @@ jobs:
           principal: ${{ inputs.sender-login }}
           resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
   groom:
-    needs: authorize
+    needs: [gate, authorize]
     concurrency:
       group: agent-groom-issue-${{ inputs.issue-number }}
       cancel-in-progress: false
