@@ -142,7 +142,10 @@ jobs:
         fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true && 'auto-developer-unblock' ||
         '' }}
     steps:
-      - run: echo "Routing evaluated from the original caller event."
+      - shell: bash
+        run: |
+          set -euo pipefail
+          echo "Routing evaluated from the original caller event."
 
   authorize:
     needs: route
