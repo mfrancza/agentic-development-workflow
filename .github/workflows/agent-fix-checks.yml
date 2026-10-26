@@ -15,56 +15,15 @@ on:
 permissions:
   contents: read
   checks: read
-  pull-requests: read  # for resolve-check-pr and the reusable trust gate
+  pull-requests: read  # for the reusable resolver and trust gate
 
 jobs:
-  resolve-pr:
-    # Missing, malformed, or [] policy must not reach token minting, image
-    # setup, or the container. The resolver applies the definitive JSON and
-    # canonical Checks API name validation for both event origins.
-    if: >
-      vars.FIX_CHECKS_ALLOW != '' &&
-      ((github.event_name == 'workflow_run' &&
-        (github.event.workflow_run.conclusion == 'failure' ||
-         github.event.workflow_run.conclusion == 'timed_out' ||
-         github.event.workflow_run.conclusion == 'action_required')) ||
-       (github.event_name == 'check_run' &&
-        (github.event.check_run.conclusion == 'failure' ||
-         github.event.check_run.conclusion == 'timed_out' ||
-         github.event.check_run.conclusion == 'action_required')))
-    runs-on: ubuntu-24.04
-    outputs:
-      pr_number: ${{ steps.resolve.outputs.pr_number }}
-      proceed: ${{ steps.resolve.outputs.proceed }}
-      head_sha: ${{ steps.resolve.outputs.head_sha }}
-    steps:
-      - name: Check out workflow helpers
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
-      - name: Resolve failing check to pull request
-        id: resolve
-        uses: ./.github/actions/resolve-check-pr
-        with:
-          event-name: ${{ github.event_name }}
-          token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          allowed-checks: ${{ vars.FIX_CHECKS_ALLOW }}
-
   fix-checks:
-    needs: resolve-pr
-    if: needs.resolve-pr.outputs.proceed == 'true'
-    # This must be job-level: needs outputs are unavailable to workflow-level
-    # concurrency, while a per-PR group serializes simultaneous check failures.
-    concurrency:
-      group: agent-fix-checks-pr-${{ needs.resolve-pr.outputs.pr_number }}
-      cancel-in-progress: false
     uses: ./.github/workflows/agent-fix-checks-reusable.yml
     with:
-      pr-number: ${{ fromJSON(needs.resolve-pr.outputs.pr_number) }}
-      head-sha-at-trigger: ${{ needs.resolve-pr.outputs.head_sha }}
+      event-name: ${{ github.event_name }}
+      event-conclusion: ${{ github.event.workflow_run.conclusion || github.event.check_run.conclusion }}
+      head-sha-at-trigger: ${{ github.event.workflow_run.head_sha || github.event.check_run.head_sha }}
       agent-login: mfrancza-developer-agent[bot]
       image: ''
       helpers-ref: ${{ github.sha }}

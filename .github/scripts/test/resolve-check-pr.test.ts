@@ -26,20 +26,14 @@ function makeOctokit(overrides: {
     rest: {
       repos: {
         listPullRequestsAssociatedWithCommit:
-          overrides.listPullRequestsAssociatedWithCommit ?? vi.fn(),
+          overrides.listPullRequestsAssociatedWithCommit ??
+          vi.fn().mockResolvedValue({
+            data: [{ number: 42, state: "open", head: { sha: SHA } }],
+          }),
       },
       checks: { listForRef: overrides.listForRef ?? vi.fn() },
     },
   } as unknown as Octokit;
-}
-
-function payload(eventName: "workflow_run" | "check_run", prNumber?: number) {
-  return {
-    [eventName]: {
-      head_sha: SHA,
-      pull_requests: prNumber === undefined ? [] : [{ number: prNumber }],
-    },
-  };
 }
 
 function checks(name = "Lint", conclusion = "failure") {
@@ -59,27 +53,7 @@ describe("parseAllowedChecks", () => {
 describe("resolveCheckPr", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it.each(["workflow_run", "check_run"] as const)(
-    "uses the PR supplied by a %s payload",
-    async (eventName) => {
-      const listForRef = vi.fn().mockResolvedValue(checks());
-      const lookup = vi.fn();
-      const result = await resolveCheckPr(
-        makeOctokit({ listForRef, listPullRequestsAssociatedWithCommit: lookup }),
-        OWNER,
-        REPO,
-        eventName,
-        payload(eventName, 42),
-        '["Lint"]'
-      );
-
-      expect(result).toEqual({ proceed: true, prNumber: 42, headSha: SHA });
-      expect(lookup).not.toHaveBeenCalled();
-      expect(listForRef).toHaveBeenCalledWith({ owner: OWNER, repo: REPO, ref: SHA });
-    }
-  );
-
-  it("falls back from an empty payload PR list to the first open matching PR", async () => {
+  it("resolves the first open PR whose head matches the supplied SHA", async () => {
     const lookup = vi.fn().mockResolvedValue({
       data: [
         { number: 2, state: "closed", head: { sha: SHA } },
@@ -94,8 +68,7 @@ describe("resolveCheckPr", () => {
       }),
       OWNER,
       REPO,
-      "check_run",
-      payload("check_run"),
+      SHA,
       '["Lint"]'
     );
 
@@ -114,8 +87,7 @@ describe("resolveCheckPr", () => {
       }),
       OWNER,
       REPO,
-      "workflow_run",
-      payload("workflow_run"),
+      SHA,
       '["Lint"]'
     );
 
@@ -130,8 +102,7 @@ describe("resolveCheckPr", () => {
         makeOctokit({ listForRef }),
         OWNER,
         REPO,
-        "check_run",
-        payload("check_run", 42),
+        SHA,
         allowedChecks
       );
 
@@ -147,8 +118,7 @@ describe("resolveCheckPr", () => {
         makeOctokit({ listForRef: vi.fn().mockResolvedValue(checks("Lint", conclusion)) }),
         OWNER,
         REPO,
-        "check_run",
-        payload("check_run", 42),
+        SHA,
         '["Lint"]'
       );
 
@@ -163,11 +133,18 @@ describe("resolveCheckPr", () => {
       }),
       OWNER,
       REPO,
-      "workflow_run",
-      payload("workflow_run", 42),
+      SHA,
       '["Lint"]'
     );
 
     expect(result).toEqual({ proceed: false, prNumber: 42, headSha: SHA });
+  });
+
+  it("skips when the trigger has no usable head SHA", async () => {
+    const lookup = vi.fn();
+    await expect(
+      resolveCheckPr(makeOctokit({ listPullRequestsAssociatedWithCommit: lookup }), OWNER, REPO, "", '["Lint"]')
+    ).resolves.toEqual({ proceed: false });
+    expect(lookup).not.toHaveBeenCalled();
   });
 });
