@@ -664,8 +664,8 @@ the review author. The `agent-review` `synchronize` path and the
 `agent-auto-trigger` `auto-review` transition set `skip-gate: true`; their
 same-repository and agent-authorship checks are the policy boundary. The
 review-response gate additionally supplies `additional-trusted-logins` for the
-known reviewer bots. Caller stubs retain only event, label, and trust-model
-predicates; they must not retain caller-side
+known reviewer bots. Install-invariant event and label predicates live in the
+reusable workflows' pre-lock authorization jobs; callers must not retain
 `contains(fromJSON(vars.AGENT_ALLOWLIST), ...)` checks or workflow/job
 `concurrency:` blocks for these gated workflows.
 
@@ -704,9 +704,6 @@ permissions:
 
 jobs:
   groom:
-    if: >
-      github.event.label.name == 'agent:groom' &&
-      github.event.issue.state == 'open'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-groom-reusable.yml@vX.Y.Z
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -778,9 +775,6 @@ permissions:
 
 jobs:
   call-design:
-    if: >
-      github.event.label.name == 'agent:design' &&
-      github.event.issue.state == 'open'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-design-reusable.yml@vX.Y.Z
     with:
       run-design: true
@@ -801,10 +795,6 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   call-undraft:
-    if: >
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'design/issue-') &&
-      github.event.pull_request.head.repo.full_name == github.repository
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-design-reusable.yml@vX.Y.Z
     with:
       run-undraft: true
@@ -862,9 +852,6 @@ permissions:
 
 jobs:
   implement:
-    if: >
-      github.event.label.name == 'agent:developer' &&
-      github.event.issue.state == 'open'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@vX.Y.Z
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -929,14 +916,7 @@ jobs:
   review:
     # Exclude fork-headed PRs on both event paths.
     if: >
-      github.event.pull_request.state == 'open' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (
-        (github.event.action == 'labeled' &&
-         github.event.label.name == 'agent:review') ||
-        (github.event.action == 'synchronize' &&
-         contains(github.event.pull_request.labels.*.name, 'agent:review'))
-      )
+      github.event.pull_request.head.repo.full_name == github.repository
     permissions:
       contents: write
       pull-requests: write
@@ -1013,12 +993,8 @@ jobs:
   respond-review:
     # Gate on the PR author (developer-agent bot).
     # Adjust the PR-author login to match your developer-agent App slug.
-    # The second line excludes reviews authored by the PR author itself: the
-    # developer agent can be trusted, so without it the agent's own
-    # thread replies would re-trigger this workflow indefinitely.
     if: >
-      github.event.pull_request.user.login == '<developer-agent-slug>[bot]' &&
-      github.event.review.user.login != github.event.pull_request.user.login
+      github.event.pull_request.user.login == '<developer-agent-slug>[bot]'
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-respond-review-reusable.yml@vX.Y.Z
     with:
       pr-number: ${{ github.event.pull_request.number }}
@@ -1043,9 +1019,8 @@ jobs:
 ```
 
 > **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` with
-> your actual App slug. Keep the `review.user.login != pull_request.user.login`
-> line and the `review-author` / `pr-author` inputs exactly as shown: together
-> they are the two layers of the self-trigger guard. The reusable authorizes
+> your actual App slug. Keep the `review-author` / `pr-author` inputs exactly
+> as shown: the reusable compares them for the self-trigger guard and authorizes
 > `review-author` against `AGENT_ALLOWLIST` before it enters its per-PR lock.
 
 **Trust considerations.** The developer-agent token has Contents (R/W) and
@@ -1485,12 +1460,6 @@ permissions:
 
 jobs:
   auto-groom:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'opened' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
-      !contains(github.event.issue.labels.*.name, 'draft')
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-groom
@@ -1504,12 +1473,6 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   auto-design:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'plan' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-design
@@ -1523,13 +1486,6 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   auto-developer-do:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'do' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      !contains(github.event.issue.labels.*.name, 'draft')
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-developer-do
@@ -1543,12 +1499,6 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   auto-developer-undraft:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'unlabeled' &&
-      github.event.label.name == 'draft' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-developer-undraft
@@ -1562,21 +1512,13 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   auto-review:
-    if: >
-      github.event_name == 'pull_request' &&
-      github.event.action == 'opened' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (startsWith(github.event.pull_request.head.ref, 'agent/') ||
-       startsWith(github.event.pull_request.head.ref, 'design/') ||
-       github.event.pull_request.user.login == '<developer-agent-slug>[bot]') &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).review == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-review
       pr-number: ${{ github.event.pull_request.number }}
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
+      developer-agent-login: <developer-agent-slug>[bot]
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -1584,11 +1526,6 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 
   auto-developer-unblock:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'closed' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
       transition: auto-developer-unblock
@@ -1602,12 +1539,11 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 ```
 
-> **Adapt the `auto-review` `if:` condition.** Replace `<developer-agent-slug>[bot]`
+> **Adapt the `auto-review` `developer-agent-login` input.** Replace `<developer-agent-slug>[bot]`
 > with your developer-agent App's bot login (e.g. `my-developer-agent[bot]`). The
 > developer-agent login predicate enrolls PRs opened by the bot regardless of branch
 > prefix (e.g. `validate/*`, `test/*`); without it, auto-review silently skips those
-> PRs when `AUTO_TRIGGER_AGENTS.review = true`. The head-repo guard sitting outside
-> the `(…)` OR block ensures fork PRs are excluded even if the bot login matches.
+> PRs when `AUTO_TRIGGER_AGENTS.review = true`. The reusable also excludes fork PRs.
 
 **Trust considerations.** Each transition mints a short-lived developer-agent
 token solely to write labels — no container is run, no code is compiled.
@@ -2354,18 +2290,17 @@ not used and can be left as-is for that run.
 ### `agent-auto-trigger` stub placeholder
 
 **Symptom:** The `agent-auto-trigger` caller stub's `auto-review` job contains
-`<developer-agent-slug>[bot]` as a literal placeholder in the `if:` condition.
+`<developer-agent-slug>[bot]` as a literal `developer-agent-login` input.
 With `AUTO_TRIGGER_AGENTS.review = true`, PRs opened by the developer-agent bot on
 non-standard branch prefixes (e.g. `validate/*`, `test/*`) are silently skipped
-because the branch-prefix predicates do not match and the bot-login predicate is
-never evaluated.
+because the branch-prefix predicates do not match and the configured bot login
+does not match.
 
-**Cause:** The developer-agent login predicate must be filled in before the workflow
-functions. It cannot be read from an Actions variable because it gates the workflow
-`if:` expression itself (before any variable lookup runs).
+**Cause:** The reusable needs the install-specific developer-agent login to evaluate
+the author fallback in its auto-review gate.
 
-**Fix:** Replace `<developer-agent-slug>[bot]` in the `auto-review` job's `if:`
-condition with your developer-agent App's bot login — for example,
+**Fix:** Replace `<developer-agent-slug>[bot]` in the `auto-review` job's
+`developer-agent-login` input with your developer-agent App's bot login — for example,
 `my-developer-agent[bot]`. The bot login appears in the first comment a bot posts
 after installation, or can be confirmed by checking the App's page on GitHub. The
 same slug value (without `[bot]`) is also used in the `agent-resolve-conflicts`

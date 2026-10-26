@@ -1,36 +1,20 @@
 name: agent-auto-trigger (reusable)
 
 # Reusable workflow extracted from agent-auto-trigger.yml.
-# Callers supply the event triggers, allowlist gates, label predicates, and
-# the AUTO_TRIGGER_AGENTS toggle checks; this workflow performs the actual
-# label mutations for the specified SDLC transition.
-#
-# NOTE on github.event in reusable workflows: within a reusable workflow
-# github.event is the workflow_call event payload, not the calling workflow's
-# original event. All event data that steps need (issue number, PR number)
-# must therefore be passed as explicit inputs.
+# Callers select a transition; this workflow owns its invariant event, label,
+# feature-flag, and allowlist gates and performs the corresponding mutation.
 #
 # Design choice — one reusable, dispatch by transition string:
-#   The caller's six jobs each evaluate their own if: conditions (event type,
-#   allowlist, draft guard, blocker check, etc.) and call this workflow with
-#   the matching transition: input and the relevant issue-number or pr-number.
-#   The reusable has six jobs, each guarded by
+#   The caller's six jobs call this workflow with the matching transition:
+#   input and relevant issue-number or pr-number. The reusable first evaluates
+#   that transition's routing and authorization gates, then has six jobs guarded by
 #   `if: inputs.transition == '<name>'`, so exactly one job runs per
-#   invocation. This keeps the caller's event-routing logic visible and
-#   auditable in one file while delegating the label-mutation mechanics here.
+#   invocation. This keeps install-invariant routing in the published workflow.
 #
 #   Tradeoff: six jobs are created per call, five of which are immediately
 #   skipped. This costs a small amount of scheduler overhead but keeps the
 #   file count low (one reusable instead of six) and makes the full
 #   transition inventory visible in a single file.
-#
-#   Alternative (discrete toggle inputs): expose boolean inputs
-#   enable-auto-groom, enable-auto-design, etc., and let the caller evaluate
-#   AUTO_TRIGGER_AGENTS once and pass the results in. Rejected because it
-#   requires passing all event data (issue number, PR number, label name,
-#   sender login, issue labels) as additional inputs — the caller already
-#   evaluates those conditions in its if: blocks, making the extra inputs
-#   redundant. The dispatch-by-name approach avoids this duplication.
 #
 # Composite actions are resolved from this workflow's own repository at the
 # exact SHA the caller pinned to (_agentic-workflow/ subdirectory).  See
@@ -75,6 +59,11 @@ on:
       sender-login:
         type: string
         required: true
+      developer-agent-login:
+        description: 'Developer-agent bot login used by the auto-review author fallback.'
+        type: string
+        required: false
+        default: ''
     secrets:
       DEVELOPER_APP_ID:
         required: true
@@ -90,6 +79,34 @@ permissions:
 
 jobs:
   authorize:
+    if: >
+      (inputs.transition == 'auto-groom' &&
+       github.event_name == 'issues' && github.event.action == 'opened' &&
+       vars.AUTO_TRIGGER_AGENTS != '' && fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
+       !contains(github.event.issue.labels.*.name, 'draft')) ||
+      (inputs.transition == 'auto-design' &&
+       github.event_name == 'issues' && github.event.action == 'labeled' &&
+       github.event.label.name == 'plan' && vars.AUTO_TRIGGER_AGENTS != '' &&
+       fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true) ||
+      (inputs.transition == 'auto-developer-do' &&
+       github.event_name == 'issues' && github.event.action == 'labeled' &&
+       github.event.label.name == 'do' && vars.AUTO_TRIGGER_AGENTS != '' &&
+       fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
+       !contains(github.event.issue.labels.*.name, 'draft')) ||
+      (inputs.transition == 'auto-developer-undraft' &&
+       github.event_name == 'issues' && github.event.action == 'unlabeled' &&
+       github.event.label.name == 'draft' && vars.AUTO_TRIGGER_AGENTS != '' &&
+       fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true) ||
+      (inputs.transition == 'auto-review' &&
+       github.event_name == 'pull_request' && github.event.action == 'opened' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       (startsWith(github.event.pull_request.head.ref, 'agent/') ||
+        startsWith(github.event.pull_request.head.ref, 'design/') ||
+        github.event.pull_request.user.login == inputs.developer-agent-login) &&
+       vars.AUTO_TRIGGER_AGENTS != '' && fromJSON(vars.AUTO_TRIGGER_AGENTS).review == true) ||
+      (inputs.transition == 'auto-developer-unblock' &&
+       github.event_name == 'issues' && github.event.action == 'closed' &&
+       vars.AUTO_TRIGGER_AGENTS != '' && fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true)
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:

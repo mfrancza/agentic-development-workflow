@@ -46,17 +46,10 @@ jobs:
     #   prevent an attacker-controlled push from triggering the reviewer with
     #   secrets in scope on every push. See docs/design/re-review-loop.md § 1.
     #
-    # Security: these trust-model checks live here in the caller stub, not in
-    # the reusable, so external callers cannot accidentally skip them.
+    # Security: the fork trust boundary stays in the caller so a fork event
+    # never starts the called workflow. Invariant routing lives downstream.
     if: >
-      github.event.pull_request.state == 'open' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (
-        (github.event.action == 'labeled' &&
-         github.event.label.name == 'agent:review') ||
-        (github.event.action == 'synchronize' &&
-         contains(github.event.pull_request.labels.*.name, 'agent:review'))
-      )
+      github.event.pull_request.head.repo.full_name == github.repository
     # contents: write + pull-requests: write are forwarded to the reusable so
     # the resolve-review-threads step in each matrix leg can call the
     # resolveReviewThread GraphQL mutation with the workflow GITHUB_TOKEN

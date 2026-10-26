@@ -118,7 +118,10 @@ permissions:
 
 jobs:
   authorize:
-    if: inputs.run-design
+    if: >
+      inputs.run-design &&
+      github.event.label.name == 'agent:design' &&
+      github.event.issue.state == 'open'
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:
@@ -321,7 +324,11 @@ jobs:
           if-no-files-found: warn
 
   undraft-sub-issues:
-    if: inputs.run-undraft
+    if: >
+      inputs.run-undraft &&
+      github.event.pull_request.merged == true &&
+      startsWith(github.event.pull_request.head.ref, 'design/issue-') &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 

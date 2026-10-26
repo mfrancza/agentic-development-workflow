@@ -86,6 +86,9 @@ permissions:
 
 jobs:
   authorize:
+    if: >
+      github.event.label.name == 'agent:groom' &&
+      github.event.issue.state == 'open'
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:

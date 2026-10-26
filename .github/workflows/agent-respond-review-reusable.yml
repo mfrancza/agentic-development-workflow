@@ -1,15 +1,10 @@
 name: agent-respond-review (reusable)
 
 # Reusable workflow extracted from agent-respond-review.yml.
-# Callers supply the event triggers and PR-author/self-trigger guard; this
-# workflow authorizes the review author before acquiring its concurrency lock.
+# Callers supply event values; this workflow applies the invariant self-trigger
+# guard and authorizes the review author before acquiring its concurrency lock.
 # It receives the event data as typed inputs plus the token secrets and
 # performs all the actual work.
-#
-# NOTE on github.event in reusable workflows: within a reusable workflow
-# github.event is the workflow_call event payload, not the calling workflow's
-# original event. All event data that steps need must therefore be passed
-# as explicit inputs: see the with: block in agent-respond-review.yml.
 #
 # External consumers: this workflow self-checks out helper actions into
 # _agentic-workflow/ before any composite-action step runs. The checkout ref
@@ -107,6 +102,7 @@ permissions:
 
 jobs:
   authorize:
+    if: inputs.review-author != inputs.pr-author
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:

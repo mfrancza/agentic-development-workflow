@@ -33,6 +33,12 @@ permissions: {}
 
 jobs:
   authorize:
+    if: >
+      github.event.pull_request.state == 'open' &&
+      ((github.event.action == 'labeled' &&
+        github.event.label.name == 'agent:review') ||
+       (github.event.action == 'synchronize' &&
+        contains(github.event.pull_request.labels.*.name, 'agent:review')))
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions: { contents: read }

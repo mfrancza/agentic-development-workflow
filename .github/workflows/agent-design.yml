@@ -23,11 +23,7 @@ jobs:
     # hardcoded in YAML — run `terraform apply` to update it.
     #
     # Security: the reusable's authorize job checks the sender allowlist before
-    # it enters its concurrency group. Keep this caller limited to event and
-    # state predicates so team-reference allowlist members can reach that gate.
-    if: >
-      github.event.label.name == 'agent:design' &&
-      github.event.issue.state == 'open'
+    # it enters its concurrency group. The reusable also owns label routing.
     uses: ./.github/workflows/agent-design-reusable.yml
     with:
       run-design: true
@@ -53,10 +49,6 @@ jobs:
     # head-branch check must live in the `if` condition instead. This cleanup
     # path does not use the design-run authorize job; sender-login is passed to
     # satisfy the reusable's shared workflow-call contract.
-    if: >
-      github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'design/issue-') &&
-      github.event.pull_request.head.repo.full_name == github.repository
     uses: ./.github/workflows/agent-design-reusable.yml
     with:
       run-undraft: true

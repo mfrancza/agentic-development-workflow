@@ -16,11 +16,7 @@ jobs:
     # hardcoded in YAML — run `terraform apply` to update it.
     #
     # Security: the reusable's authorize job checks the sender allowlist before
-    # it enters its concurrency group. Keep this caller limited to event and
-    # state predicates so team-reference allowlist members can reach that gate.
-    if: >
-      github.event.label.name == 'agent:groom' &&
-      github.event.issue.state == 'open'
+    # it enters its concurrency group. The reusable also owns label routing.
     uses: ./.github/workflows/agent-groom-reusable.yml
     with:
       issue-number: ${{ github.event.issue.number }}

@@ -44,12 +44,6 @@ jobs:
   # worst (see issue #284). The un-draft transition (auto-developer-undraft)
   # owns the hand-off for these issues once the design PR merges.
   auto-groom:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'opened' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
-      !contains(github.event.issue.labels.*.name, 'draft')
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-groom
@@ -69,12 +63,6 @@ jobs:
   # this check a non-allowlisted actor could apply 'plan' and cause the
   # developer-agent App (which IS in AGENT_ALLOWLIST) to trigger agent:design.
   auto-design:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'plan' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-design
@@ -102,13 +90,6 @@ jobs:
   # auto-developer-undraft (transition #4) is the sole path for design
   # sub-issues. See issue #284.
   auto-developer-do:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'do' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      !contains(github.event.issue.labels.*.name, 'draft')
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-developer-do
@@ -129,12 +110,6 @@ jobs:
   # sender in that case. Sender allowlist required: same no-per-label-permission
   # rationale as issues.labeled (transitions 2 and 3).
   auto-developer-undraft:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'unlabeled' &&
-      github.event.label.name == 'draft' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-developer-undraft
@@ -165,21 +140,13 @@ jobs:
   # reusable to avoid executing PR-authored local actions with secrets in scope.
   # See docs/design/auto-trigger-agents.md Decision 3.
   auto-review:
-    if: >
-      github.event_name == 'pull_request' &&
-      github.event.action == 'opened' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (startsWith(github.event.pull_request.head.ref, 'agent/') ||
-       startsWith(github.event.pull_request.head.ref, 'design/') ||
-       github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]') &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).review == true
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-review
       pr-number: ${{ github.event.pull_request.number }}
       helpers-ref: ${{ github.sha }}
       sender-login: ${{ github.event.sender.login }}
+      developer-agent-login: mfrancza-developer-agent[bot]
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -212,11 +179,6 @@ jobs:
   # silently no-oped (e.g. permissions failure that returned HTTP 200).
   # This matches the pattern in the undraft-sub-issues job in agent-design.yml.
   auto-developer-unblock:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'closed' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
       transition: auto-developer-unblock

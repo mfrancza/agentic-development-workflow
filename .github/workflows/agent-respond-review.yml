@@ -42,8 +42,7 @@ jobs:
     # The pull_request_review: submitted trigger already excludes pending/draft
     # reviews, so no need to repeat that check here.
     if: >
-      github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]' &&
-      github.event.review.user.login != github.event.pull_request.user.login
+      github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]'
     uses: ./.github/workflows/agent-respond-review-reusable.yml
     with:
       pr-number: ${{ github.event.pull_request.number }}
