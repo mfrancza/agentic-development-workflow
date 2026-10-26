@@ -44,13 +44,28 @@ runs:
         ACTION_PATH: ${{ github.action_path }}
       run: |
         set -euo pipefail
-        echo "dir=$(cd "$ACTION_PATH/../../scripts" && pwd)" >> "$GITHUB_OUTPUT"
+        scripts_dir="$(cd "$ACTION_PATH/../../scripts" && pwd)"
+        echo "dir=${scripts_dir}" >> "$GITHUB_OUTPUT"
+        # Enable npm caching only when the lockfile is inside GITHUB_WORKSPACE.
+        # setup-node uses @actions/glob, which cannot find files outside the
+        # workspace. When this action is referenced remotely (uses: owner/repo/
+        # .../action@ref), github.action_path resolves to the runner _actions
+        # cache outside GITHUB_WORKSPACE, causing the cache step to fail.
+        if [[ "${scripts_dir}" == "${GITHUB_WORKSPACE}"* ]]; then
+          echo "cache-key-path=${scripts_dir}/package-lock.json" >> "$GITHUB_OUTPUT"
+        fi
     - name: Set up Node.js
+      if: steps.scripts-dir.outputs.cache-key-path != ''
       uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
       with:
         node-version: '22'
         cache: npm
-        cache-dependency-path: ${{ steps.scripts-dir.outputs.dir }}/package-lock.json
+        cache-dependency-path: ${{ steps.scripts-dir.outputs.cache-key-path }}
+    - name: Set up Node.js
+      if: steps.scripts-dir.outputs.cache-key-path == ''
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
 
     - name: Install dependencies
       shell: bash
