@@ -552,12 +552,12 @@ be in GitHub's reusable-workflow form,
 caller stub fails at startup with zero jobs. The wiring snippet below
 allow-lists this repository's reusable workflows and composite actions at
 **any** ref (`@*`), so upgrading your pinned release never needs a policy
-change. Two calls depend on that wildcard even though they aren't in your
-stubs: `agent-review-reusable.yml` calls its internal
-`agent-review-worker-reusable.yml` at a fixed release of this repository, and
-the `agent-fix-checks` stubs (event-driven and polling) call this repository's
-`resolve-check-pr` and `find-failing-agent-prs` composite actions directly.
-The reusables otherwise only call GitHub-owned `actions/*` actions.
+change. The workflows entry also covers a call that isn't in your stubs:
+`agent-review-reusable.yml` calls its internal
+`agent-review-worker-reusable.yml` at a fixed release of this repository. The
+actions entry is needed only for the optional `agent-fix-checks-poll` stub,
+which calls the `find-failing-agent-prs` composite action directly. The
+reusables otherwise only call GitHub-owned `actions/*` actions.
 
 **Prerequisites.**
 
@@ -580,8 +580,8 @@ module "actions_policy" {
     # GitHub matches the full OWNER/REPO/PATH/FILE@REF string, so owner/repo
     # alone does not work.
     "mfrancza/agentic-development-workflow/.github/workflows/*@*",
-    # Required for the agent-fix-checks stubs, which call this repository's
-    # composite actions directly.
+    # Required only for the agent-fix-checks-poll stub, which calls this
+    # repository's find-failing-agent-prs composite action directly.
     "mfrancza/agentic-development-workflow/.github/actions/*@*",
     # Add any non-GitHub-owned action your own workflows use, as owner/repo@<sha>.
   ]
@@ -1051,8 +1051,9 @@ you trust.
 Responds to an allowed actionable check failure on a developer-agent–authored
 PR by re-invoking the developer agent with `AGENT_ACTION=fix-checks`. The
 reusable first verifies that the PR is authored by the developer-agent bot —
-it never runs for human-authored PRs. The caller resolves both same-repository
-Actions failures and eligible other check origins before calling the reusable.
+it never runs for human-authored PRs. The reusable resolves the failing check
+to its PR, checks the check name against `FIX_CHECKS_ALLOW`, and applies the
+author gate itself; the caller only forwards the event.
 
 **Prerequisites.**
 
@@ -1068,9 +1069,10 @@ Actions failures and eligible other check origins before calling the reusable.
 - Same-repository workflow names (for example, `"CI"`) listed in the caller's
   `workflow_run.workflows:` filter. This is a delivery subscription, not an
   allowlist substitute.
-- An actions-policy entry for this repository's composite actions
-  (`mfrancza/agentic-development-workflow/.github/actions/*@*`), because the
-  stubs call `resolve-check-pr` and `find-failing-agent-prs` directly. See the
+- If you use the optional polling stub: an actions-policy entry for this
+  repository's composite actions
+  (`mfrancza/agentic-development-workflow/.github/actions/*@*`), because it
+  calls `find-failing-agent-prs` directly. See the
   [`actions-policy` module](#actions-policy-module).
 
 **Caller stub.**
@@ -1091,41 +1093,14 @@ permissions:
   pull-requests: read
 
 jobs:
-  resolve-pr:
-    if: >
-      vars.FIX_CHECKS_ALLOW != '' &&
-      ((github.event_name == 'workflow_run' &&
-        (github.event.workflow_run.conclusion == 'failure' ||
-         github.event.workflow_run.conclusion == 'timed_out' ||
-         github.event.workflow_run.conclusion == 'action_required')) ||
-       (github.event_name == 'check_run' &&
-        (github.event.check_run.conclusion == 'failure' ||
-         github.event.check_run.conclusion == 'timed_out' ||
-         github.event.check_run.conclusion == 'action_required')))
-    runs-on: ubuntu-24.04
-    outputs:
-      pr_number: ${{ steps.resolve.outputs.pr_number }}
-      proceed: ${{ steps.resolve.outputs.proceed }}
-      head_sha: ${{ steps.resolve.outputs.head_sha }}
-    steps:
-      - id: resolve
-        uses: mfrancza/agentic-development-workflow/.github/actions/resolve-check-pr@vX.Y.Z
-        with:
-          event-name: ${{ github.event_name }}
-          token: ${{ github.token }}
-          repository: ${{ github.repository }}
-          allowed-checks: ${{ vars.FIX_CHECKS_ALLOW }}
-
   fix-checks:
-    needs: resolve-pr
-    if: needs.resolve-pr.outputs.proceed == 'true'
-    concurrency:
-      group: agent-fix-checks-pr-${{ needs.resolve-pr.outputs.pr_number }}
-      cancel-in-progress: false
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-fix-checks-reusable.yml@vX.Y.Z
     with:
-      pr-number: ${{ fromJSON(needs.resolve-pr.outputs.pr_number) }}
-      head-sha-at-trigger: ${{ needs.resolve-pr.outputs.head_sha }}
+      # Reusable workflows receive a workflow_call event, not this original
+      # event. Forward the values the reusable's gate needs explicitly.
+      event-name: ${{ github.event_name }}
+      event-conclusion: ${{ github.event.workflow_run.conclusion || github.event.check_run.conclusion }}
+      head-sha-at-trigger: ${{ github.event.workflow_run.head_sha || github.event.check_run.head_sha }}
       agent-login: <developer-agent-slug>[bot]
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
       helpers-ref: vX.Y.Z
@@ -1139,17 +1114,16 @@ jobs:
 
 > **Adapt `agent-login`** to your developer-agent App's bot login (e.g.
 > `acme-developer-agent[bot]`). The reusable uses this login to filter PRs —
-> it only runs for PRs authored by the developer-agent bot. Keep the
-> `fromJSON(...)` on `pr-number`: job outputs are strings and the reusable's
-> `pr-number` input is a number.
+> it only runs for PRs authored by the developer-agent bot. Don't add a
+> `concurrency:` block: the reusable takes the per-PR lock itself, and a
+> caller holding the same group would block it.
 
 **Optional polling backstop.** GitHub does not always deliver `check_run`
 events, for example for some third-party check origins. A scheduled poller
 catches allowed failing checks the event-driven workflow missed. It applies
 the same `FIX_CHECKS_ALLOW` allowlist, so an empty or missing allowlist
-dispatches nothing, and it shares the event-driven workflow's per-PR
-concurrency group, so a poll and a check event never run the agent on the
-same PR at once.
+dispatches nothing. The reusable takes the same per-PR lock for both stubs,
+so a poll and a check event never run the agent on the same PR at once.
 
 ```yaml
 name: agent-fix-checks-poll
@@ -1187,9 +1161,6 @@ jobs:
       fail-fast: false
       matrix:
         pr: ${{ fromJSON(needs.find-failing-agent-prs.outputs.prs) }}
-    concurrency:
-      group: agent-fix-checks-pr-${{ matrix.pr.number }}
-      cancel-in-progress: false
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-fix-checks-reusable.yml@vX.Y.Z
     with:
       pr-number: ${{ matrix.pr.number }}
@@ -1206,8 +1177,8 @@ jobs:
 ```
 
 Set `author` and `agent-login` to the same developer-agent bot login as the
-event-driven stub. Like the event-driven stub, it calls one of this
-repository's composite actions directly, so your actions policy needs the
+event-driven stub. It calls one of this repository's composite actions
+directly, so your actions policy needs the
 `mfrancza/agentic-development-workflow/.github/actions/*@*` entry (see the
 [`actions-policy` module](#actions-policy-module) wiring snippet).
 
