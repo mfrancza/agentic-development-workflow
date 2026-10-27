@@ -6,9 +6,7 @@ on:
   workflow_call:
     inputs:
       pr-number: { required: true, type: number }
-      repo: { required: true, type: string }
       image: { required: false, type: string, default: '' }
-      default-model: { required: false, type: string, default: '' }
       reviewer-models: { required: false, type: string, default: '' }
       logs-retention-days: { required: false, type: number, default: 30 }
       helpers-ref:
@@ -18,10 +16,6 @@ on:
         required: true
         type: string
       event-action:
-        required: true
-        type: string
-      pr-state:
-        description: 'Pull request state from the triggering event.'
         required: true
         type: string
     secrets:
@@ -39,12 +33,23 @@ jobs:
   gate:
     # The caller keeps fork and event-queue trust checks. This reusable gate
     # owns the lifecycle invariant before authorization or concurrency.
-    if: inputs.pr-state == 'open'
+    permissions: { pull-requests: read }
     runs-on: ubuntu-24.04
+    outputs:
+      proceed: ${{ steps.pr.outputs.proceed }}
     steps:
-      - run: echo "Pull request is open; proceeding."
+      - name: Check pull request lifecycle state
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+        run: |
+          set -euo pipefail
+          state="$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" --jq '.state')"
+          echo "proceed=$([[ "$state" == open ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
   authorize:
     needs: gate
+    if: needs.gate.outputs.proceed == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions: { contents: read }
@@ -119,6 +124,7 @@ jobs:
           resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
   review:
     needs: [gate, authorize]
+    if: needs.gate.outputs.proceed == 'true' && needs.authorize.result == 'success'
     concurrency:
       group: agent-review-pr-${{ inputs.pr-number }}
       cancel-in-progress: false
@@ -128,9 +134,7 @@ jobs:
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-review-worker-reusable.yml@v0.2.0
     with:
       pr-number: ${{ inputs.pr-number }}
-      repo: ${{ inputs.repo }}
       image: ${{ inputs.image }}
-      default-model: ${{ inputs.default-model }}
       reviewer-models: ${{ inputs.reviewer-models }}
       logs-retention-days: ${{ inputs.logs-retention-days }}
       helpers-ref: ${{ inputs.helpers-ref }}

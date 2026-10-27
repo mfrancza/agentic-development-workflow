@@ -22,21 +22,12 @@ on:
         description: 'Issue number to implement'
         required: true
         type: number
-      repo:
-        description: 'GitHub repository (owner/name), e.g. octocat/my-repo'
-        required: true
-        type: string
       image:
         description: >
           Pre-built developer image reference to pull and run (e.g.
           ghcr.io/mfrancza/agentic-development-workflow/developer:v1).
           Leave empty (the default) to build the developer image from the
           local source tree — this repo uses this mode.
-        required: false
-        type: string
-        default: ''
-      default-model:
-        description: 'Default Claude model when no model label is present on the issue'
         required: false
         type: string
         default: ''
@@ -63,10 +54,6 @@ on:
         type: string
       sender-login:
         description: 'Login of the actor that applied the label.'
-        required: true
-        type: string
-      issue-state:
-        description: 'Issue state from the triggering event.'
         required: true
         type: string
     secrets:
@@ -97,12 +84,23 @@ jobs:
   gate:
     # Lifecycle checks must complete before authorization acquires a resolver
     # token or work takes the per-issue concurrency lock.
-    if: inputs.issue-state == 'open'
+    permissions: { issues: read }
     runs-on: ubuntu-24.04
+    outputs:
+      proceed: ${{ steps.issue.outputs.proceed }}
     steps:
-      - run: echo "Issue is open; proceeding."
+      - name: Check issue lifecycle state
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+        run: |
+          set -euo pipefail
+          state="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --jq '.state')"
+          echo "proceed=$([[ "$state" == open ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
   authorize:
     needs: gate
+    if: needs.gate.outputs.proceed == 'true'
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:
@@ -174,6 +172,7 @@ jobs:
           resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
   implement:
     needs: [gate, authorize]
+    if: needs.gate.outputs.proceed == 'true' && needs.authorize.result == 'success'
     concurrency:
       group: agent-implement-issue-${{ inputs.issue-number }}
       cancel-in-progress: false
@@ -238,7 +237,7 @@ jobs:
         uses: ./_agentic-workflow/.github/actions/find-existing-pr
         with:
           token: ${{ steps.setup.outputs.token }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           branch: agent/issue-${{ inputs.issue-number }}
           owner: ${{ github.repository_owner }}
 
@@ -248,7 +247,7 @@ jobs:
         uses: ./_agentic-workflow/.github/actions/check-draft-label
         with:
           token: ${{ steps.setup.outputs.token }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           issue-number: ${{ inputs.issue-number }}
 
       - name: "Preflight: check for open blockers"
@@ -257,7 +256,7 @@ jobs:
         uses: ./_agentic-workflow/.github/actions/check-blockers
         with:
           token: ${{ steps.setup.outputs.token }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           issue-number: ${{ inputs.issue-number }}
 
       - name: "Preflight: fail if blockers are open"
@@ -278,8 +277,8 @@ jobs:
           token: ${{ steps.setup.outputs.token }}
           subject-type: issue
           subject-number: ${{ inputs.issue-number }}
-          repo: ${{ inputs.repo }}
-          default-model: ${{ inputs.default-model }}
+          repo: ${{ github.repository }}
+          default-model: ${{ vars.DEFAULT_MODEL }}
           agent-type: developer
 
       - name: Prepare agent log directory
@@ -299,7 +298,7 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           agent-action: implement
           issue-number: ${{ inputs.issue-number }}
           model: ${{ steps.model.outputs.claude_model }}

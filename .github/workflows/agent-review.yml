@@ -66,15 +66,12 @@ jobs:
     uses: ./.github/workflows/agent-review-reusable.yml
     with:
       pr-number: ${{ github.event.pull_request.number }}
-      repo: ${{ github.repository }}
       image: ${{ vars.REVIEWER_IMAGE }}
-      default-model: ${{ vars.DEFAULT_MODEL }}
       reviewer-models: ${{ vars.REVIEWER_MODELS }}
       logs-retention-days: 30
       helpers-ref: ${{ github.sha }}
       sender-login: ${{ github.event.sender.login }}
       event-action: ${{ github.event.action }}
-      pr-state: ${{ github.event.pull_request.state }}
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}

@@ -39,11 +39,6 @@ const tfvarsContent = readFileSync(
   "utf8",
 );
 
-const agentDesignContent = readFileSync(
-  new URL(".github/workflows/agent-design.yml", repoRoot),
-  "utf8",
-);
-
 const agentDesignReusableContent = readFileSync(
   new URL(".github/workflows/agent-design-reusable.yml", repoRoot),
   "utf8",
@@ -51,6 +46,11 @@ const agentDesignReusableContent = readFileSync(
 
 const agentReviewContent = readFileSync(
   new URL(".github/workflows/agent-review.yml", repoRoot),
+  "utf8",
+);
+
+const agentReviewWorkerContent = readFileSync(
+  new URL(".github/workflows/agent-review-worker-reusable.yml", repoRoot),
   "utf8",
 );
 
@@ -136,9 +136,9 @@ describe("Issue #669 policy — (1) repo-wide default is gpt-5.6-terra", () => {
     );
   });
 
-  it("agent-review.yml passes vars.DEFAULT_MODEL as the default-model input", () => {
+  it("review worker resolves the final fallback from vars.DEFAULT_MODEL", () => {
     // The reviewer waterfall uses DEFAULT_MODEL as its final fallback.
-    expect(agentReviewContent).toContain("default-model: ${{ vars.DEFAULT_MODEL }}");
+    expect(agentReviewWorkerContent).toContain("default-model: ${{ vars.DEFAULT_MODEL }}");
   });
 });
 
@@ -161,12 +161,12 @@ describe("Issue #669 policy — (2) design stage uses gpt-5.6-sol by default", (
     expect(modelClassesContent.modelToClass["gpt-5.6-sol"]).toBe("opus");
   });
 
-  it("agent-design.yml short-circuits to DESIGN_DEFAULT_MODEL when non-empty", () => {
+  it("agent-design reusable short-circuits to DESIGN_DEFAULT_MODEL when non-empty", () => {
     // The fallback expression `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL`
-    // is present in the design caller stub; when DESIGN_DEFAULT_MODEL is set to
+    // is present in the design reusable; when DESIGN_DEFAULT_MODEL is set to
     // "gpt-5.6-sol" the `||` short-circuits and the design workflow uses
     // gpt-5.6-sol rather than DEFAULT_MODEL (gpt-5.6-terra).
-    expect(agentDesignContent).toContain(
+    expect(agentDesignReusableContent).toContain(
       "vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL",
     );
   });
@@ -221,17 +221,17 @@ describe("Issue #669 policy — (3) per-design and generic labels override DESIG
 // ---------------------------------------------------------------------------
 
 describe("Issue #669 policy — (4) empty DESIGN_DEFAULT_MODEL falls back to DEFAULT_MODEL", () => {
-  it("agent-design.yml uses || so empty DESIGN_DEFAULT_MODEL evaluates to DEFAULT_MODEL", () => {
+  it("agent-design reusable uses || so empty DESIGN_DEFAULT_MODEL evaluates to DEFAULT_MODEL", () => {
     // The `||` operator in `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL`
     // evaluates the right side when the left side is empty ('').  This
     // preserves backward compatibility for repos that have not set
     // DESIGN_DEFAULT_MODEL.
-    expect(agentDesignContent).toContain(
+    expect(agentDesignReusableContent).toContain(
       "vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL",
     );
     // The pre-feature bare form must NOT be present on the default-model line
     // (confirmed also by the design-default-model.test.ts suite).
-    expect(agentDesignContent).not.toContain(
+    expect(agentDesignReusableContent).not.toContain(
       "default-model: ${{ vars.DEFAULT_MODEL }}",
     );
   });

@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   implement:
@@ -23,14 +24,11 @@ jobs:
     uses: ./.github/workflows/agent-implement-reusable.yml
     with:
       issue-number: ${{ github.event.issue.number }}
-      repo: ${{ github.repository }}
       image: ${{ vars.DEVELOPER_IMAGE }}
-      default-model: ${{ vars.DEFAULT_MODEL }}
       code-reviewers: ${{ vars.CODE_REVIEWERS }}
       logs-retention-days: 30
       helpers-ref: ${{ github.sha }}
       sender-login: ${{ github.event.sender.login }}
-      issue-state: ${{ github.event.issue.state }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
