@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   call-design:
@@ -31,13 +32,10 @@ jobs:
     with:
       run-design: true
       issue-number: ${{ github.event.issue.number }}
-      repo: ${{ github.repository }}
       image: ${{ vars.DEVELOPER_IMAGE }}
-      default-model: ${{ vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
       logs-retention-days: 30
       helpers-ref: ${{ github.sha }}
       sender-login: ${{ github.event.sender.login }}
-      issue-state: ${{ github.event.issue.state }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -58,7 +56,6 @@ jobs:
     with:
       run-undraft: true
       pr-head-ref: ${{ github.event.pull_request.head.ref }}
-      repo: ${{ github.repository }}
       helpers-ref: ${{ github.sha }}
       sender-login: ${{ github.event.sender.login }}
       pr-merged: ${{ github.event.pull_request.merged }}

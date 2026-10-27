@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 
 /**
  * Focused validation for the DESIGN_DEFAULT_MODEL → DEFAULT_MODEL fallback
- * wiring introduced in the agent-design caller stub.
+ * wiring introduced in the agent-design reusable workflow.
  *
  * Two behaviors under test:
  *
@@ -13,7 +13,7 @@ import { describe, expect, it } from "vitest";
  *                 `||` falls through and the design workflow uses DEFAULT_MODEL,
  *                 preserving behavior for repos that have not set the variable.
  *
- * Both behaviors depend on the caller stub expressing the model input as
+ * Both behaviors depend on the reusable expressing the model input as
  * `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL`.  These static tests
  * confirm that expression is present and that the prior bare-DEFAULT_MODEL
  * form is absent from the default-model input line.
@@ -23,8 +23,8 @@ const repoRoot = new URL("../../../", import.meta.url);
 const workflowsDir = new URL(".github/workflows/", repoRoot);
 const terraformDir = new URL("terraform/", repoRoot);
 
-const designCallerContent = readFileSync(
-  new URL("agent-design.yml", workflowsDir),
+const designReusableContent = readFileSync(
+  new URL("agent-design-reusable.yml", workflowsDir),
   "utf8",
 );
 
@@ -47,12 +47,12 @@ const agentVarsVariablesContent = readFileSync(
 // Workflow wiring tests
 // ---------------------------------------------------------------------------
 
-describe("agent-design.yml — DESIGN_DEFAULT_MODEL fallback wiring", () => {
+describe("agent-design-reusable.yml — DESIGN_DEFAULT_MODEL fallback wiring", () => {
   it("configured: uses vars.DESIGN_DEFAULT_MODEL preferred over vars.DEFAULT_MODEL", () => {
     // When DESIGN_DEFAULT_MODEL is non-empty the `||` short-circuits and the
     // design workflow uses the design-specific value.  The expression must be
-    // present verbatim in the caller stub.
-    expect(designCallerContent).toContain(
+    // present verbatim in the reusable workflow.
+    expect(designReusableContent).toContain(
       "vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL",
     );
   });
@@ -62,7 +62,7 @@ describe("agent-design.yml — DESIGN_DEFAULT_MODEL fallback wiring", () => {
     // replaced by the fallback expression above.  If the bare form is still
     // present, the design stage cannot be overridden independently of other
     // agent types.
-    expect(designCallerContent).not.toContain(
+    expect(designReusableContent).not.toContain(
       "default-model: ${{ vars.DEFAULT_MODEL }}",
     );
   });

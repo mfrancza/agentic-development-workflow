@@ -9,7 +9,7 @@ name: agent-review worker (reusable)
 #   1. Per-PR model:review:* labels.
 #   2. Repo-wide REVIEWER_MODELS list (inputs.reviewer-models).
 #   3. Single-reviewer fallback: generic model:* label on the PR →
-#      inputs.default-model.
+#      vars.DEFAULT_MODEL.
 # The matrix review job (review) fans out over the resolved set with
 # fail-fast: false so one leg's failure does not cancel the others.  Each
 # matrix leg mints its own reviewer-agent installation token, dismisses stale
@@ -35,21 +35,12 @@ on:
         description: 'Pull request number to review'
         required: true
         type: number
-      repo:
-        description: 'GitHub repository (owner/name), e.g. octocat/my-repo'
-        required: true
-        type: string
       image:
         description: >
           Pre-built reviewer image reference to pull and run (e.g.
           ghcr.io/mfrancza/agentic-development-workflow/reviewer:v1).
           Leave empty (the default) to build the reviewer image from
           ./docker/reviewer — this repo uses this mode.
-        required: false
-        type: string
-        default: ''
-      default-model:
-        description: 'Default Claude model when no model label is present on the PR'
         required: false
         type: string
         default: ''
@@ -102,7 +93,7 @@ jobs:
   # Preflight job: resolves the reviewer set once per workflow run and fetches
   # the PR head SHA, then passes both to the matrix review job via outputs.
   # Fails loudly if the resolved set is empty (should not occur — the resolver
-  # always yields at least inputs.default-model).
+  # always yields at least vars.DEFAULT_MODEL).
   resolve:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -167,7 +158,7 @@ jobs:
         uses: ./_agentic-workflow/.github/actions/find-authored-by-model
         with:
           token: ${{ github.token }}
-          repository: ${{ inputs.repo }}
+          repository: ${{ github.repository }}
           pr-number: ${{ inputs.pr-number }}
 
       - name: Compute available providers
@@ -196,9 +187,9 @@ jobs:
         with:
           token: ${{ github.token }}
           pr-number: ${{ inputs.pr-number }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           reviewer-models: ${{ inputs.reviewer-models }}
-          default-model: ${{ inputs.default-model }}
+          default-model: ${{ vars.DEFAULT_MODEL }}
           pair-policy: ${{ vars.REVIEW_MODEL_PAIRING }}
           authoring-model: ${{ steps.author.outputs.authoring_model }}
           available-providers: ${{ steps.providers.outputs.list }}
@@ -222,7 +213,7 @@ jobs:
         id: pr-head
         env:
           GH_TOKEN: ${{ github.token }}
-          REPO: ${{ inputs.repo }}
+          REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr-number }}
         run: |
           set -euo pipefail
@@ -329,7 +320,7 @@ jobs:
         uses: ./_agentic-workflow/.github/actions/dismiss-stale-reviewer-reviews
         with:
           token: ${{ steps.setup.outputs.token }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           pr-number: ${{ inputs.pr-number }}
           head-sha: ${{ needs.resolve.outputs.head-sha }}
 
@@ -354,7 +345,7 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           pr-number: ${{ inputs.pr-number }}
           model: ${{ matrix.model }}
           output-dir: ${{ runner.temp }}/reviewer-output-${{ strategy.job-index }}
@@ -383,5 +374,5 @@ jobs:
         with:
           token: ${{ github.token }}
           pr-number: ${{ inputs.pr-number }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           resolve-file: ${{ runner.temp }}/reviewer-output-${{ strategy.job-index }}/resolve-threads.txt

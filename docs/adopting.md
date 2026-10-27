@@ -679,7 +679,7 @@ Runs the grooming agent on a GitHub issue. The agent classifies the issue
 `dependency upgrade` labels), asks clarifying questions if the issue is
 ambiguous, and removes the `agent:groom` routing label on success. Model
 selection follows the waterfall: `model:<type>:*` label → generic `model:*`
-label → `default-model` input → `vars.DEFAULT_MODEL`.
+label → `vars.DEFAULT_MODEL`.
 
 **Prerequisites.**
 
@@ -701,6 +701,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   groom:
@@ -709,14 +710,11 @@ jobs:
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-groom-reusable.yml@vX.Y.Z
     with:
       issue-number: ${{ github.event.issue.number }}
-      repo: ${{ github.repository }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
-      default-model: ${{ vars.DEFAULT_MODEL }}
       admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}
       logs-retention-days: 30
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
-      issue-state: ${{ github.event.issue.state }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -775,6 +773,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   call-design:
@@ -784,13 +783,10 @@ jobs:
     with:
       run-design: true
       issue-number: ${{ github.event.issue.number }}
-      repo: ${{ github.repository }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
-      default-model: ${{ vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
       logs-retention-days: 30
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
-      issue-state: ${{ github.event.issue.state }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -807,7 +803,6 @@ jobs:
     with:
       run-undraft: true
       pr-head-ref: ${{ github.event.pull_request.head.ref }}
-      repo: ${{ github.repository }}
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
       pr-merged: ${{ github.event.pull_request.merged }}
@@ -858,6 +853,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   implement:
@@ -866,14 +862,11 @@ jobs:
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-implement-reusable.yml@vX.Y.Z
     with:
       issue-number: ${{ github.event.issue.number }}
-      repo: ${{ github.repository }}
       image: ghcr.io/mfrancza/agentic-development-workflow/developer:vX.Y.Z
-      default-model: ${{ vars.DEFAULT_MODEL }}
       code-reviewers: ${{ vars.CODE_REVIEWERS }}
       logs-retention-days: 30
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
-      issue-state: ${{ github.event.issue.state }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
@@ -941,15 +934,12 @@ jobs:
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-review-reusable.yml@vX.Y.Z
     with:
       pr-number: ${{ github.event.pull_request.number }}
-      repo: ${{ github.repository }}
       image: ghcr.io/mfrancza/agentic-development-workflow/reviewer:vX.Y.Z
-      default-model: ${{ vars.DEFAULT_MODEL }}
       reviewer-models: ${{ vars.REVIEWER_MODELS }}
       logs-retention-days: 30
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
       event-action: ${{ github.event.action }}
-      pr-state: ${{ github.event.pull_request.state }}
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}

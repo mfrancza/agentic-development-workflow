@@ -55,10 +55,6 @@ on:
         required: false
         type: string
         default: ''
-      repo:
-        description: 'GitHub repository (owner/name), e.g. octocat/my-repo'
-        required: true
-        type: string
       image:
         description: >
           Pre-built developer image reference to pull and run (e.g.
@@ -67,13 +63,6 @@ on:
           local source tree — this repo uses this mode.
           Only used by the design job; undraft-sub-issues does not run a
           container.
-        required: false
-        type: string
-        default: ''
-      default-model:
-        description: >
-          Default Claude model when no model label is present on the issue
-          (design job only).
         required: false
         type: string
         default: ''
@@ -94,11 +83,6 @@ on:
       sender-login:
         required: true
         type: string
-      issue-state:
-        description: 'Issue state from the triggering event (design path only).'
-        required: false
-        type: string
-        default: ''
       pr-merged:
         description: 'Whether the triggering PR was merged (undraft path only).'
         required: false
@@ -130,10 +114,21 @@ jobs:
   design-gate:
     # Lifecycle predicates belong here so external callers cannot bypass them
     # and rejected work acquires neither a lock nor an installation token.
-    if: inputs.run-design && inputs.issue-state == 'open'
+    if: inputs.run-design
+    permissions: { issues: read }
     runs-on: ubuntu-24.04
+    outputs:
+      proceed: ${{ steps.issue.outputs.proceed }}
     steps:
-      - run: echo "Open issue accepted for design."
+      - name: Check issue lifecycle state
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue-number }}
+        run: |
+          set -euo pipefail
+          state="$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --jq '.state')"
+          echo "proceed=$([[ "$state" == open ]] && echo true || echo false)" >> "$GITHUB_OUTPUT"
   undraft-gate:
     if: inputs.run-undraft && inputs.pr-merged && startsWith(inputs.pr-head-ref, 'design/issue-')
     runs-on: ubuntu-24.04
@@ -141,7 +136,7 @@ jobs:
       - run: echo "Merged design PR accepted for undrafting."
   authorize:
     needs: design-gate
-    if: inputs.run-design && needs.design-gate.result == 'success'
+    if: inputs.run-design && needs.design-gate.outputs.proceed == 'true'
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:
@@ -212,7 +207,7 @@ jobs:
           principal: ${{ inputs.sender-login }}
           resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
   design:
-    if: inputs.run-design && needs.design-gate.result == 'success' && needs.authorize.result == 'success'
+    if: inputs.run-design && needs.design-gate.outputs.proceed == 'true' && needs.authorize.result == 'success'
     needs: [design-gate, authorize]
     concurrency:
       group: agent-design-issue-${{ inputs.issue-number }}
@@ -278,7 +273,7 @@ jobs:
         uses: ./_agentic-workflow/.github/actions/find-existing-pr
         with:
           token: ${{ steps.setup.outputs.token }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           branch: design/issue-${{ inputs.issue-number }}
           owner: ${{ github.repository_owner }}
 
@@ -288,7 +283,7 @@ jobs:
         uses: ./_agentic-workflow/.github/actions/check-blockers
         with:
           token: ${{ steps.setup.outputs.token }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           issue-number: ${{ inputs.issue-number }}
 
       - name: "Preflight: fail if blockers are open"
@@ -309,8 +304,8 @@ jobs:
           token: ${{ steps.setup.outputs.token }}
           subject-type: issue
           subject-number: ${{ inputs.issue-number }}
-          repo: ${{ inputs.repo }}
-          default-model: ${{ inputs.default-model }}
+          repo: ${{ github.repository }}
+          default-model: ${{ vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
           agent-type: design
 
       - name: Prepare agent log directory
@@ -328,7 +323,7 @@ jobs:
           anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           xai-api-key: ${{ secrets.XAI_API_KEY }}
-          repo: ${{ inputs.repo }}
+          repo: ${{ github.repository }}
           agent-action: design
           issue-number: ${{ inputs.issue-number }}
           model: ${{ steps.model.outputs.claude_model }}
@@ -371,7 +366,7 @@ jobs:
       - name: Remove draft label from sub-issues on design-PR merge
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
-          GITHUB_REPO: ${{ inputs.repo }}
+          GITHUB_REPO: ${{ github.repository }}
           HEAD_REF: ${{ inputs.pr-head-ref }}
         run: |
           set -euo pipefail
