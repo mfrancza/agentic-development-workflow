@@ -1,36 +1,19 @@
 name: agent-auto-trigger (reusable)
 
-# Reusable workflow extracted from agent-auto-trigger.yml.
-# Callers supply the event triggers, allowlist gates, label predicates, and
-# the AUTO_TRIGGER_AGENTS toggle checks; this workflow performs the actual
-# label mutations for the specified SDLC transition.
+# Reusable workflow for agent-auto-trigger.yml. The caller forwards the
+# original event fields because reusable workflows receive a workflow_call
+# event. This workflow routes those fields to one of the six supported SDLC
+# transitions, enforces its invariant predicates and AUTO_TRIGGER_AGENTS flag,
+# then performs the corresponding label mutation.
 #
 # NOTE on github.event in reusable workflows: within a reusable workflow
 # github.event is the workflow_call event payload, not the calling workflow's
 # original event. All event data that steps need (issue number, PR number)
 # must therefore be passed as explicit inputs.
 #
-# Design choice — one reusable, dispatch by transition string:
-#   The caller's six jobs each evaluate their own if: conditions (event type,
-#   allowlist, draft guard, blocker check, etc.) and call this workflow with
-#   the matching transition: input and the relevant issue-number or pr-number.
-#   The reusable has six jobs, each guarded by
-#   `if: inputs.transition == '<name>'`, so exactly one job runs per
-#   invocation. This keeps the caller's event-routing logic visible and
-#   auditable in one file while delegating the label-mutation mechanics here.
-#
-#   Tradeoff: six jobs are created per call, five of which are immediately
-#   skipped. This costs a small amount of scheduler overhead but keeps the
-#   file count low (one reusable instead of six) and makes the full
-#   transition inventory visible in a single file.
-#
-#   Alternative (discrete toggle inputs): expose boolean inputs
-#   enable-auto-groom, enable-auto-design, etc., and let the caller evaluate
-#   AUTO_TRIGGER_AGENTS once and pass the results in. Rejected because it
-#   requires passing all event data (issue number, PR number, label name,
-#   sender login, issue labels) as additional inputs — the caller already
-#   evaluates those conditions in its if: blocks, making the extra inputs
-#   redundant. The dispatch-by-name approach avoids this duplication.
+# The route job is intentionally the sole owner of the transition inventory.
+# It is cheap to skip all later jobs for unrelated events, while preserving the
+# six discrete jobs that make label mutation and blocker behavior easy to audit.
 #
 # Composite actions are resolved from this workflow's own repository at the
 # exact SHA the caller pinned to (_agentic-workflow/ subdirectory).  See
@@ -41,11 +24,12 @@ name: agent-auto-trigger (reusable)
 on:
   workflow_call:
     inputs:
-      transition:
-        description: >
-          The SDLC transition to execute. One of: auto-groom, auto-design,
-          auto-developer-do, auto-developer-undraft, auto-review,
-          auto-developer-unblock.
+      event-name:
+        description: Original caller event name.
+        type: string
+        required: true
+      event-action:
+        description: Original caller event action.
         type: string
         required: true
       issue-number:
@@ -63,6 +47,35 @@ on:
         type: number
         required: false
         default: 0
+      issue-label-name:
+        description: Label named by the original issues labeled/unlabeled event.
+        type: string
+        required: false
+        default: ''
+      issue-labels:
+        description: JSON array of label names currently on the original issue.
+        type: string
+        required: false
+        default: '[]'
+      pr-head-repository:
+        description: Full repository name of the original PR head repository.
+        type: string
+        required: false
+        default: ''
+      pr-head-ref:
+        description: Head branch name of the original pull request.
+        type: string
+        required: false
+        default: ''
+      pr-author-login:
+        description: Author login of the original pull request.
+        type: string
+        required: false
+        default: ''
+      developer-bot-login:
+        description: Installation-specific developer App bot login for auto-review.
+        type: string
+        required: true
       helpers-ref:
         description: >
           Git ref (tag, branch, or full commit SHA) of
@@ -89,7 +102,54 @@ permissions:
   contents: read
 
 jobs:
+  route:
+    runs-on: ubuntu-24.04
+    outputs:
+      transition: >-
+        ${{
+        inputs.event-name == 'issues' &&
+        inputs.event-action == 'opened' &&
+        vars.AUTO_TRIGGER_AGENTS != '' &&
+        fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
+        !contains(fromJSON(inputs.issue-labels), 'draft') && 'auto-groom' ||
+        inputs.event-name == 'issues' &&
+        inputs.event-action == 'labeled' &&
+        inputs.issue-label-name == 'plan' &&
+        vars.AUTO_TRIGGER_AGENTS != '' &&
+        fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true && 'auto-design' ||
+        inputs.event-name == 'issues' &&
+        inputs.event-action == 'labeled' &&
+        inputs.issue-label-name == 'do' &&
+        vars.AUTO_TRIGGER_AGENTS != '' &&
+        fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
+        !contains(fromJSON(inputs.issue-labels), 'draft') && 'auto-developer-do' ||
+        inputs.event-name == 'issues' &&
+        inputs.event-action == 'unlabeled' &&
+        inputs.issue-label-name == 'draft' &&
+        vars.AUTO_TRIGGER_AGENTS != '' &&
+        fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true && 'auto-developer-undraft' ||
+        inputs.event-name == 'pull_request' &&
+        inputs.event-action == 'opened' &&
+        inputs.pr-head-repository == github.repository &&
+        (startsWith(inputs.pr-head-ref, 'agent/') ||
+         startsWith(inputs.pr-head-ref, 'design/') ||
+         inputs.pr-author-login == inputs.developer-bot-login) &&
+        vars.AUTO_TRIGGER_AGENTS != '' &&
+        fromJSON(vars.AUTO_TRIGGER_AGENTS).review == true && 'auto-review' ||
+        inputs.event-name == 'issues' &&
+        inputs.event-action == 'closed' &&
+        vars.AUTO_TRIGGER_AGENTS != '' &&
+        fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true && 'auto-developer-unblock' ||
+        '' }}
+    steps:
+      - shell: bash
+        run: |
+          set -euo pipefail
+          echo "Routing evaluated from the original caller event."
+
   authorize:
+    needs: route
+    if: needs.route.outputs.transition != ''
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:
@@ -158,13 +218,13 @@ jobs:
         with:
           allowlist: ${{ vars.AGENT_ALLOWLIST }}
           principal: ${{ inputs.sender-login }}
-          skip-gate: ${{ inputs.transition == 'auto-review' }}
+          skip-gate: ${{ needs.route.outputs.transition == 'auto-review' }}
           resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
   # ── Transition 1 ─────────────────────────────────────────────────────────────
   # issues.opened → agent:groom
   auto-groom:
-    needs: authorize
-    if: inputs.transition == 'auto-groom'
+    needs: [route, authorize]
+    if: needs.route.outputs.transition == 'auto-groom'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -232,8 +292,8 @@ jobs:
   # ── Transition 2 ─────────────────────────────────────────────────────────────
   # issues.labeled (plan) → agent:design
   auto-design:
-    needs: authorize
-    if: inputs.transition == 'auto-design'
+    needs: [route, authorize]
+    if: needs.route.outputs.transition == 'auto-design'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -301,8 +361,8 @@ jobs:
   # ── Transition 3 ─────────────────────────────────────────────────────────────
   # issues.labeled (do) → agent:developer
   auto-developer-do:
-    needs: authorize
-    if: inputs.transition == 'auto-developer-do'
+    needs: [route, authorize]
+    if: needs.route.outputs.transition == 'auto-developer-do'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -389,8 +449,8 @@ jobs:
   # ── Transition 4 ─────────────────────────────────────────────────────────────
   # issues.unlabeled (draft) → agent:developer
   auto-developer-undraft:
-    needs: authorize
-    if: inputs.transition == 'auto-developer-undraft'
+    needs: [route, authorize]
+    if: needs.route.outputs.transition == 'auto-developer-undraft'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -481,8 +541,8 @@ jobs:
   # executing PR-authored local actions with secrets in scope. See
   # docs/design/auto-trigger-agents.md Decision 3.
   auto-review:
-    needs: authorize
-    if: inputs.transition == 'auto-review'
+    needs: [route, authorize]
+    if: needs.route.outputs.transition == 'auto-review'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
@@ -506,8 +566,8 @@ jobs:
   # ── Transition 6 ─────────────────────────────────────────────────────────────
   # issues.closed → agent:developer (cascade on newly-unblocked issues)
   auto-developer-unblock:
-    needs: authorize
-    if: inputs.transition == 'auto-developer-unblock'
+    needs: [route, authorize]
+    if: needs.route.outputs.transition == 'auto-developer-unblock'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:

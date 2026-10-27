@@ -1456,115 +1456,22 @@ permissions:
   contents: read
 
 jobs:
-  auto-groom:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'opened' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
-      !contains(github.event.issue.labels.*.name, 'draft')
+  auto-trigger:
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
     with:
-      transition: auto-groom
-      issue-number: ${{ github.event.issue.number }}
-      helpers-ref: vX.Y.Z
-      sender-login: ${{ github.event.sender.login }}
-    secrets:
-      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
-      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-  auto-design:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'plan' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
-    with:
-      transition: auto-design
-      issue-number: ${{ github.event.issue.number }}
-      helpers-ref: vX.Y.Z
-      sender-login: ${{ github.event.sender.login }}
-    secrets:
-      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
-      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-  auto-developer-do:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'do' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      !contains(github.event.issue.labels.*.name, 'draft')
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
-    with:
-      transition: auto-developer-do
-      issue-number: ${{ github.event.issue.number }}
-      helpers-ref: vX.Y.Z
-      sender-login: ${{ github.event.sender.login }}
-    secrets:
-      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
-      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-  auto-developer-undraft:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'unlabeled' &&
-      github.event.label.name == 'draft' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
-    with:
-      transition: auto-developer-undraft
-      issue-number: ${{ github.event.issue.number }}
-      helpers-ref: vX.Y.Z
-      sender-login: ${{ github.event.sender.login }}
-    secrets:
-      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
-      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-  auto-review:
-    if: >
-      github.event_name == 'pull_request' &&
-      github.event.action == 'opened' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (startsWith(github.event.pull_request.head.ref, 'agent/') ||
-       startsWith(github.event.pull_request.head.ref, 'design/') ||
-       github.event.pull_request.user.login == '<developer-agent-slug>[bot]') &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).review == true
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
-    with:
-      transition: auto-review
-      pr-number: ${{ github.event.pull_request.number }}
-      helpers-ref: vX.Y.Z
-      sender-login: ${{ github.event.sender.login }}
-    secrets:
-      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
-      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-  auto-developer-unblock:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'closed' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-auto-trigger-reusable.yml@vX.Y.Z
-    with:
-      transition: auto-developer-unblock
-      issue-number: ${{ github.event.issue.number }}
+      # Reusable workflows receive a workflow_call event, not this original
+      # event. Forward the values used for transition routing explicitly.
+      event-name: ${{ github.event_name }}
+      event-action: ${{ github.event.action }}
+      issue-number: ${{ github.event.issue.number || 0 }}
+      issue-label-name: ${{ github.event.label.name || '' }}
+      issue-labels: ${{ toJSON(github.event.issue.labels.*.name || fromJSON('[]')) }}
+      pr-number: ${{ github.event.pull_request.number || 0 }}
+      pr-head-repository: ${{ github.event.pull_request.head.repo.full_name || '' }}
+      pr-head-ref: ${{ github.event.pull_request.head.ref || '' }}
+      pr-author-login: ${{ github.event.pull_request.user.login || '' }}
+      # Set this to your installation-specific developer App bot login.
+      developer-bot-login: <developer-agent-slug>[bot]
       helpers-ref: vX.Y.Z
       sender-login: ${{ github.event.sender.login }}
     secrets:
@@ -1574,12 +1481,11 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 ```
 
-> **Adapt the `auto-review` `if:` condition.** Replace `<developer-agent-slug>[bot]`
-> with your developer-agent App's bot login (e.g. `my-developer-agent[bot]`). The
-> developer-agent login predicate enrolls PRs opened by the bot regardless of branch
-> prefix (e.g. `validate/*`, `test/*`); without it, auto-review silently skips those
-> PRs when `AUTO_TRIGGER_AGENTS.review = true`. The head-repo guard sitting outside
-> the `(…)` OR block ensures fork PRs are excluded even if the bot login matches.
+> **Set `developer-bot-login`.** Replace `<developer-agent-slug>[bot]` with your
+> developer-agent App's bot login (e.g. `my-developer-agent[bot]`). This lets the
+> reusable enroll PRs opened by the bot regardless of branch prefix (e.g.
+> `validate/*`, `test/*`). The reusable keeps the same-repository guard, so fork PRs
+> remain excluded even if the bot login matches.
 
 **Trust considerations.** Each transition mints a short-lived developer-agent
 token solely to write labels — no container is run, no code is compiled.

@@ -1,226 +1,34 @@
 name: agent-auto-trigger
 
-# Applies the next-stage agent:* label at each SDLC transition, gated on the
-# per-label switches in vars.AUTO_TRIGGER_AGENTS (a JSON object managed by
-# Terraform). All gates default to false (opt-in); see
-# docs/design/auto-trigger-agents.md for the full design.
-#
-# Six transitions (see design doc "The six transitions we are gating" table):
-#   1. auto-groom             — issues.opened                   → agent:groom
-#   2. auto-design            — issues.labeled (plan)           → agent:design
-#   3. auto-developer-do      — issues.labeled (do)             → agent:developer
-#   4. auto-developer-undraft — issues.unlabeled (draft)        → agent:developer
-#   5. auto-review            — pull_request.opened (agent/… or design/… or bot-authored) → agent:review
-#   6. auto-developer-unblock — issues.closed                   → agent:developer (cascade)
-#
-# No agent container is run in this workflow — each job only mints a token
-# and applies a label. The downstream agent workflows (agent-groom.yml,
-# agent-design.yml, agent-implement.yml, agent-review.yml) do the actual work.
-
+# Routes each supported issue or pull-request event to the next SDLC stage.
+# The reusable owns all transition predicates and label mutations so callers
+# have one auditable forwarding contract instead of six near-identical jobs.
 on:
   issues:
     types: [opened, labeled, unlabeled, closed]
   pull_request:
     types: [opened]
 
-# Label writes go through the minted App token; the workflow itself only needs
-# contents: read to resolve local composite actions.
 permissions:
   contents: read
 
 jobs:
-  # ── Transition 1 ─────────────────────────────────────────────────────────────
-  # issues.opened → agent:groom
-  #
-  # Sender allowlist required: only actors on AGENT_ALLOWLIST may trigger
-  # agent workflows, including auto-groom. Without this check, any actor who
-  # opens an issue (including non-allowlisted collaborators or, on public repos,
-  # any GitHub user) would cause the auto-trigger job to apply agent:groom and
-  # thereby trigger an agent run.
-  #
-  # Draft guard: skip issues that already carry the 'draft' label. Design
-  # sub-issues are opened with 'draft' already applied and are fully scoped by
-  # construction — re-grooming them is a no-op at best and a deadlock source at
-  # worst (see issue #284). The un-draft transition (auto-developer-undraft)
-  # owns the hand-off for these issues once the design PR merges.
-  auto-groom:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'opened' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).groom == true &&
-      !contains(github.event.issue.labels.*.name, 'draft')
+  auto-trigger:
     uses: ./.github/workflows/agent-auto-trigger-reusable.yml
     with:
-      transition: auto-groom
-      issue-number: ${{ github.event.issue.number }}
-      helpers-ref: ${{ github.sha }}
-      sender-login: ${{ github.event.sender.login }}
-    secrets:
-      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
-      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-  # ── Transition 2 ─────────────────────────────────────────────────────────────
-  # issues.labeled (plan) → agent:design
-  #
-  # Sender allowlist required: any triage collaborator can apply labels; without
-  # this check a non-allowlisted actor could apply 'plan' and cause the
-  # developer-agent App (which IS in AGENT_ALLOWLIST) to trigger agent:design.
-  auto-design:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'plan' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).design == true
-    uses: ./.github/workflows/agent-auto-trigger-reusable.yml
-    with:
-      transition: auto-design
-      issue-number: ${{ github.event.issue.number }}
-      helpers-ref: ${{ github.sha }}
-      sender-login: ${{ github.event.sender.login }}
-    secrets:
-      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
-      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-  # ── Transition 3 ─────────────────────────────────────────────────────────────
-  # issues.labeled (do) → agent:developer
-  #
-  # Sender allowlist required: same rationale as transition 2 above.
-  #
-  # Draft guard: skip issues that carry the 'draft' label. When auto-groom is
-  # also on, the groomer runs on a draft sub-issue (opened by the design agent)
-  # and may classify it 'do', which would apply agent:developer while the issue
-  # is still draft. The agent-implement preflight skips the draft issue (defence
-  # in depth), but — critically — consumes the one-shot label event so that the
-  # un-draft transition's subsequent --add-label agent:developer is a no-op and
-  # emits no new event, deadlocking the issue. Skipping here ensures
-  # auto-developer-undraft (transition #4) is the sole path for design
-  # sub-issues. See issue #284.
-  auto-developer-do:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'labeled' &&
-      github.event.label.name == 'do' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true &&
-      !contains(github.event.issue.labels.*.name, 'draft')
-    uses: ./.github/workflows/agent-auto-trigger-reusable.yml
-    with:
-      transition: auto-developer-do
-      issue-number: ${{ github.event.issue.number }}
-      helpers-ref: ${{ github.sha }}
-      sender-login: ${{ github.event.sender.login }}
-    secrets:
-      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
-      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-  # ── Transition 4 ─────────────────────────────────────────────────────────────
-  # issues.unlabeled (draft) → agent:developer
-  #
-  # Fires when agent-design.yml removes the 'draft' label from sub-issues after
-  # the design PR merges — the developer-agent bot (in AGENT_ALLOWLIST) is the
-  # sender in that case. Sender allowlist required: same no-per-label-permission
-  # rationale as issues.labeled (transitions 2 and 3).
-  auto-developer-undraft:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'unlabeled' &&
-      github.event.label.name == 'draft' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
-    uses: ./.github/workflows/agent-auto-trigger-reusable.yml
-    with:
-      transition: auto-developer-undraft
-      issue-number: ${{ github.event.issue.number }}
-      helpers-ref: ${{ github.sha }}
-      sender-login: ${{ github.event.sender.login }}
-    secrets:
-      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
-      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-  # ── Transition 5 ─────────────────────────────────────────────────────────────
-  # pull_request.opened on an agent/… or design/… branch, or authored by the
-  # developer-agent bot (same-repo) → agent:review
-  #
-  # Enrollment uses an OR of three predicates: branch prefix starts with
-  # 'agent/', branch prefix starts with 'design/', or the PR was opened by the
-  # developer-agent bot identity ('mfrancza-developer-agent[bot]'). The prefix
-  # clauses cover agent/implement and design branches; the author-identity clause
-  # closes the silent-skip gap for agent-authored PRs opened from non-standard
-  # prefixes (e.g. validate/…, test/…) — see PR #557 and issue #559.
-  #
-  # The head-repo guard sits outside the OR so it applies to all three paths
-  # uniformly. Fork PRs cannot enroll regardless of branch name or claimed author.
-  #
-  # No checkout: actions/create-github-app-token is called directly in the
-  # reusable to avoid executing PR-authored local actions with secrets in scope.
-  # See docs/design/auto-trigger-agents.md Decision 3.
-  auto-review:
-    if: >
-      github.event_name == 'pull_request' &&
-      github.event.action == 'opened' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (startsWith(github.event.pull_request.head.ref, 'agent/') ||
-       startsWith(github.event.pull_request.head.ref, 'design/') ||
-       github.event.pull_request.user.login == 'mfrancza-developer-agent[bot]') &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).review == true
-    uses: ./.github/workflows/agent-auto-trigger-reusable.yml
-    with:
-      transition: auto-review
-      pr-number: ${{ github.event.pull_request.number }}
-      helpers-ref: ${{ github.sha }}
-      sender-login: ${{ github.event.sender.login }}
-    secrets:
-      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
-      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-  # ── Transition 6 ─────────────────────────────────────────────────────────────
-  # issues.closed → agent:developer (cascade on newly-unblocked issues)
-  #
-  # When an issue closes, it may unblock downstream issues that are waiting for
-  # it. This job fans out: it walks the closed issue's blocking list, and for
-  # each issue whose remaining blockers are all now closed — and which is
-  # groomed-ready (open, carries 'blocked', no existing 'agent:developer' label,
-  # no open agent/issue-{N} PR) — it applies agent:developer and removes blocked.
-  #
-  # Ordering: agent:developer is applied before blocked is removed so that the
-  # label transition emits an event; removing blocked second prevents the
-  # resulting issues.unlabeled event from matching the 'draft' condition in
-  # transition #4 and firing a spurious downstream run.
-  #
-  # Sender allowlist required: any actor in AGENT_ALLOWLIST may close issues
-  # that trigger this cascade (e.g. the developer-agent bot closing its own
-  # implementation issue when the PR merges). Without this check, any
-  # collaborator closing an issue could trigger a developer-agent run on
-  # unblocked downstream issues — spending Anthropic credits without being
-  # in the allowlist themselves.
-  #
-  # Fail-loud pattern: after each label mutation, re-check the actual label
-  # state via the API and exit non-zero with ::error:: if the mutation
-  # silently no-oped (e.g. permissions failure that returned HTTP 200).
-  # This matches the pattern in the undraft-sub-issues job in agent-design.yml.
-  auto-developer-unblock:
-    if: >
-      github.event_name == 'issues' &&
-      github.event.action == 'closed' &&
-      vars.AUTO_TRIGGER_AGENTS != '' &&
-      fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true
-    uses: ./.github/workflows/agent-auto-trigger-reusable.yml
-    with:
-      transition: auto-developer-unblock
-      issue-number: ${{ github.event.issue.number }}
+      # Reusable workflows receive a workflow_call event, not this original
+      # event. Forward the values used for transition routing explicitly.
+      event-name: ${{ github.event_name }}
+      event-action: ${{ github.event.action }}
+      issue-number: ${{ github.event.issue.number || 0 }}
+      issue-label-name: ${{ github.event.label.name || '' }}
+      issue-labels: ${{ toJSON(github.event.issue.labels.*.name || fromJSON('[]')) }}
+      pr-number: ${{ github.event.pull_request.number || 0 }}
+      pr-head-repository: ${{ github.event.pull_request.head.repo.full_name || '' }}
+      pr-head-ref: ${{ github.event.pull_request.head.ref || '' }}
+      pr-author-login: ${{ github.event.pull_request.user.login || '' }}
+      # Adopters set their installation-specific developer App bot login once.
+      developer-bot-login: mfrancza-developer-agent[bot]
       helpers-ref: ${{ github.sha }}
       sender-login: ${{ github.event.sender.login }}
     secrets:
