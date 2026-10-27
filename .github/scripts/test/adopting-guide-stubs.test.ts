@@ -107,11 +107,90 @@ function parseReusable(content: string): ReusableContract {
   };
 }
 
+/** Static prefixes of every concurrency group a reusable declares, at any level. */
+function reusableGroups(content: string): string[] {
+  return [...content.matchAll(/^\s*group:\s*(.+)$/gm)].map((m) => groupPrefix(m[1]));
+}
+
+interface ActionContract {
+  requiredInputs: string[];
+  allInputs: string[];
+}
+
+/** Parses a composite action's top-level `inputs:`. */
+function parseAction(content: string): ActionContract {
+  const lines = content.split("\n");
+  const inputsIdx = findLine(lines, /^inputs:$/, 0);
+  const inputs = inputsIdx >= 0 ? childBlocks(lines, inputsIdx, 2) : new Map<string, string[]>();
+  const isRequired = (block: string[]) => block.some((l) => /^\s*required:\s*true\s*$/.test(l));
+  return {
+    requiredInputs: [...inputs].filter(([, b]) => isRequired(b)).map(([k]) => k),
+    allInputs: [...inputs.keys()],
+  };
+}
+
+interface ActionStub {
+  action: string;
+  withKeys: string[];
+}
+
+/** Extracts every step in the guide's ```yaml blocks that `uses:` one of this repository's composite actions. */
+function parseGuideActionStubs(): ActionStub[] {
+  const stubs: ActionStub[] = [];
+  const blocks = [...guide.matchAll(/```yaml\n([\s\S]*?)```/g)].map((m) => m[1]);
+  const usesRe =
+    /^( *)(- )?uses:\s+mfrancza\/agentic-development-workflow\/\.github\/actions\/([A-Za-z0-9_-]+)@/;
+
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(usesRe);
+      if (!m) continue;
+      // Keys of this step sit at the indentation of `uses`, after any `- `.
+      const keyIndent = m[1].length + (m[2] ? 2 : 0);
+      let withKeys: string[] = [];
+      for (let j = i + 1; j < lines.length; j++) {
+        if (lines[j].trim() === "") continue;
+        if (indentOf(lines[j]) < keyIndent) break;
+        if (indentOf(lines[j]) === keyIndent && lines[j].trim() === "with:") {
+          withKeys = [...childBlocks(lines, j, keyIndent + 2).keys()];
+          break;
+        }
+      }
+      stubs.push({ action: m[3], withKeys });
+    }
+  }
+  return stubs;
+}
+
 interface Stub {
   reusable: string;
   job: string;
   withKeys: string[];
   secretKeys: string[];
+  /** Static prefixes of the concurrency groups the stub holds around this call. */
+  callerGroups: string[];
+}
+
+/** The fixed part of a concurrency group, before its first `${{`. */
+function groupPrefix(group: string): string {
+  return group.split("${{")[0].trim();
+}
+
+/**
+ * Static prefixes of `concurrency: { group: ... }` blocks at exactly `indent`
+ * within lines[start, end).
+ */
+function concurrencyGroups(lines: string[], start: number, end: number, indent: number): string[] {
+  const groups: string[] = [];
+  for (let i = start; i < end; i++) {
+    if (indentOf(lines[i]) !== indent || lines[i].trim() !== "concurrency:") continue;
+    for (let j = i + 1; j < end && (lines[j].trim() === "" || indentOf(lines[j]) > indent); j++) {
+      const m = lines[j].match(/^\s*group:\s*(.+)$/);
+      if (m && indentOf(lines[j]) === indent + 2) groups.push(groupPrefix(m[1]));
+    }
+  }
+  return groups;
 }
 
 /** Extracts every job in the guide's ```yaml blocks that `uses:` a published reusable. */
@@ -129,9 +208,11 @@ function parseGuideStubs(): Stub[] {
       const indent = m[1].length;
       // Walk back to the job key (the nearest line at indent-2 ending in ':').
       let job = "?";
+      let jobLine = -1;
       for (let j = i - 1; j >= 0; j--) {
         if (indentOf(lines[j]) === indent - 2 && /^[A-Za-z0-9_-]+:$/.test(lines[j].trim())) {
           job = lines[j].trim().slice(0, -1);
+          jobLine = j;
           break;
         }
       }
@@ -151,7 +232,17 @@ function parseGuideStubs(): Stub[] {
         secretsIdx >= 0 && siblings.has("secrets")
           ? [...childBlocks(lines, secretsIdx, indent + 2).keys()]
           : [];
-      stubs.push({ reusable: m[2], job, withKeys, secretKeys });
+      // Locks the stub holds around this call: workflow-level, plus the job's own.
+      let jobEnd = jobLine + 1;
+      while (
+        jobEnd < lines.length &&
+        (lines[jobEnd].trim() === "" || indentOf(lines[jobEnd]) > indent - 2)
+      ) jobEnd++;
+      const callerGroups = [
+        ...concurrencyGroups(lines, 0, lines.length, 0),
+        ...concurrencyGroups(lines, jobLine + 1, jobEnd, indent),
+      ];
+      stubs.push({ reusable: m[2], job, withKeys, secretKeys, callerGroups });
     }
   }
   return stubs;
@@ -196,6 +287,39 @@ describe("docs/adopting.md caller stubs match their reusable workflow contracts"
       it("names every secret the reusable declares", () => {
         const missing = contract.secrets.filter((k) => !stub.secretKeys.includes(k));
         expect(missing, "declared secrets missing from the guide stub").toEqual([]);
+      });
+
+      // A caller that holds the same concurrency group the reusable takes
+      // itself makes the reusable's job wait on a lock its own caller holds.
+      it("does not hold a concurrency group the reusable takes itself", () => {
+        const inner = reusableGroups(
+          readFileSync(new URL(stub.reusable, workflowsDir), "utf8"),
+        );
+        const conflicts = stub.callerGroups.filter((g) => g !== "" && inner.includes(g));
+        expect(conflicts, "stub holds a lock the reusable also takes; remove the stub's concurrency block").toEqual([]);
+      });
+    });
+  }
+});
+
+const actionsDir = new URL(".github/actions/", repoRoot);
+const actionStubs = parseGuideActionStubs();
+
+describe("docs/adopting.md composite-action calls match the action contracts", () => {
+  for (const stub of actionStubs) {
+    const contract = parseAction(
+      readFileSync(new URL(`${stub.action}/action.yml`, actionsDir), "utf8"),
+    );
+
+    describe(`${stub.action}`, () => {
+      it("passes every required input", () => {
+        const missing = contract.requiredInputs.filter((k) => !stub.withKeys.includes(k));
+        expect(missing, "required inputs missing from the guide step").toEqual([]);
+      });
+
+      it("passes only inputs the action declares", () => {
+        const unknown = stub.withKeys.filter((k) => !contract.allInputs.includes(k));
+        expect(unknown, "guide step passes inputs the action does not declare").toEqual([]);
       });
     });
   }
