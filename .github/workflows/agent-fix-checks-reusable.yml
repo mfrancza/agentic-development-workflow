@@ -1,9 +1,10 @@
 name: agent-fix-checks (reusable)
 
-# Reusable workflow extracted from agent-fix-checks.yml.
-# Callers supply trigger resolution, the universal FIX_CHECKS_ALLOW policy,
-# and the per-PR concurrency group; this workflow performs the actual trust
-# gate, token minting, and agent run.
+# Reusable workflow extracted from agent-fix-checks.yml. Event callers supply
+# only the trigger fields; this workflow applies the event, conclusion, and
+# universal FIX_CHECKS_ALLOW gates, resolves the check to a PR, then acquires
+# the per-PR lock only for accepted work. Poll callers retain their already
+# resolved PR entry path by omitting event-name.
 #
 # NOTE on github.event in reusable workflows: within a reusable workflow
 # github.event is the workflow_call event payload, not the calling workflow's
@@ -19,13 +20,29 @@ on:
   workflow_call:
     inputs:
       pr-number:
-        description: 'Pull request number resolved from the triggering check event.'
+        description: >
+          Pull request number for an already-resolved caller such as the poller.
+          Event callers omit this and let this workflow resolve the PR.
         type: number
-        required: true
+        required: false
+        default: 0
+      event-name:
+        description: >
+          Trigger event name for an event-driven caller. Supported values are
+          workflow_run and check_run. Omit for an already-resolved poll entry.
+        type: string
+        required: false
+        default: ''
+      event-conclusion:
+        description: 'Conclusion from the triggering workflow_run or check_run.'
+        type: string
+        required: false
+        default: ''
       head-sha-at-trigger:
         description: >
-          Head SHA observed by the caller's check resolver. Passed to the
-          container freshness guard as GITHUB_HEAD_SHA_AT_TRIGGER.
+          Head SHA observed by the caller. The event path resolves it to a PR;
+          it is also passed to the container freshness guard as
+          GITHUB_HEAD_SHA_AT_TRIGGER.
         type: string
         required: true
       agent-login:
@@ -72,13 +89,95 @@ on:
 
 permissions:
   contents: read
+  checks: read         # for resolve-check-pr in the event-delivery path
   pull-requests: read  # for pulls.get in the filter-agent-pr activity
 
 jobs:
+  resolve-trigger:
+    # Keep all event-specific delivery and authorization gates inside the
+    # reusable workflow. The resolver makes the definitive malformed/empty
+    # allowlist and canonical Checks API name decision.
+    if: >
+      vars.FIX_CHECKS_ALLOW != '' &&
+      (inputs.event-name == 'workflow_run' || inputs.event-name == 'check_run') &&
+      (inputs.event-conclusion == 'failure' ||
+       inputs.event-conclusion == 'timed_out' ||
+       inputs.event-conclusion == 'action_required')
+    runs-on: ubuntu-24.04
+    outputs:
+      proceed: ${{ steps.resolve.outputs.proceed }}
+      pr_number: ${{ steps.resolve.outputs.pr_number }}
+    steps:
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+
+      - name: Resolve failing check to pull request
+        id: resolve
+        uses: ./_agentic-workflow/.github/actions/resolve-check-pr
+        with:
+          head-sha: ${{ inputs.head-sha-at-trigger }}
+          token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          allowed-checks: ${{ vars.FIX_CHECKS_ALLOW }}
+
   fix-checks:
-    # No if: condition here — the caller resolves the workflow_run/check_run
-    # event and applies the fail-closed allowlist before this workflow call.
-    # Event payload fields are unavailable under the workflow_call event.
+    needs: resolve-trigger
+    # For event callers, the resolver must accept the work before this job can
+    # acquire its lock. The poller has already resolved and authorized its PR.
+    # always() permits the poll path to continue when resolve-trigger is
+    # intentionally skipped because no event-name was supplied.
+    if: >
+      always() &&
+      ((inputs.event-name == '' && inputs.pr-number > 0) ||
+       (inputs.event-name != '' && needs.resolve-trigger.outputs.proceed == 'true'))
+    # needs outputs are available here, unlike in a workflow-level
+    # concurrency declaration. This keeps rejected event deliveries out of
+    # the per-PR queue entirely.
+    concurrency:
+      group: agent-fix-checks-pr-${{ inputs.event-name == '' && inputs.pr-number || needs.resolve-trigger.outputs.pr_number }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -138,7 +237,7 @@ jobs:
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
-          pr-number: ${{ inputs.pr-number }}
+          pr-number: ${{ inputs.event-name == '' && inputs.pr-number || needs.resolve-trigger.outputs.pr_number }}
           agent-login: ${{ inputs.agent-login }}
 
       # Mint only after the trust gate — no installation token for runs we skip.
@@ -157,7 +256,7 @@ jobs:
         with:
           token: ${{ github.token }}
           repository: ${{ github.repository }}
-          pr-number: ${{ inputs.pr-number }}
+          pr-number: ${{ inputs.event-name == '' && inputs.pr-number || needs.resolve-trigger.outputs.pr_number }}
 
       - name: Resolve Claude model from issue labels
         if: steps.linked-issue.outputs.proceed == 'true'
@@ -195,7 +294,7 @@ jobs:
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           repo: ${{ github.repository }}
           agent-action: fix-checks
-          pr-number: ${{ inputs.pr-number }}
+          pr-number: ${{ inputs.event-name == '' && inputs.pr-number || needs.resolve-trigger.outputs.pr_number }}
           model: ${{ steps.model.outputs.claude_model || vars.DEFAULT_MODEL }}
           logs-dir: ${{ runner.temp }}/agent-logs
 
@@ -203,7 +302,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
-          name: agent-logs-fix-checks-pr-${{ inputs.pr-number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
+          name: agent-logs-fix-checks-pr-${{ inputs.event-name == '' && inputs.pr-number || needs.resolve-trigger.outputs.pr_number }}-run-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/agent-logs
           retention-days: 30
           if-no-files-found: warn

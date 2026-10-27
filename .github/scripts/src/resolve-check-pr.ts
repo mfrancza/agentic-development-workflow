@@ -1,5 +1,4 @@
 import * as core from "@actions/core";
-import { context } from "@actions/github";
 import { parseAllowedChecks } from "./lib/allowed-checks.js";
 import { getOctokit } from "./lib/octokit.js";
 
@@ -17,51 +16,17 @@ export interface ResolveCheckPrResult {
   headSha?: string;
 }
 
-type EventPayload = {
-  workflow_run?: PayloadRun;
-  check_run?: PayloadRun;
-};
-
-type PayloadRun = {
-  head_sha?: unknown;
-  pull_requests?: Array<{ number?: unknown }>;
-};
-
 export { parseAllowedChecks } from "./lib/allowed-checks.js";
 
-function eventDetails(
-  eventName: string,
-  payload: EventPayload
-): { headSha: string; prNumber?: number } | undefined {
-  const event =
-    eventName === "workflow_run"
-      ? payload.workflow_run
-      : eventName === "check_run"
-        ? payload.check_run
-        : undefined;
-
-  if (!event || typeof event.head_sha !== "string" || !event.head_sha) {
-    return undefined;
-  }
-
-  const number = event.pull_requests?.[0]?.number;
-  return {
-    headSha: event.head_sha,
-    ...(typeof number === "number" ? { prNumber: number } : {}),
-  };
-}
-
 /**
- * Resolves a workflow_run or check_run event to an open pull request and
- * authorises it only when the current Checks API state contains an allowed,
- * actionable check run.
+ * Resolves a check head SHA to an open pull request and authorises it only
+ * when the current Checks API state contains an allowed, actionable check run.
  */
 export async function resolveCheckPr(
   octokit: Octokit,
   owner: string,
   repo: string,
-  eventName: string,
-  payload: EventPayload,
+  headSha: string,
   allowedChecksInput: string
 ): Promise<ResolveCheckPrResult> {
   const allowedChecks = parseAllowedChecks(allowedChecksInput);
@@ -70,35 +35,30 @@ export async function resolveCheckPr(
     return { proceed: false };
   }
 
-  const details = eventDetails(eventName, payload);
-  if (!details) {
-    core.info(`Event '${eventName}' has no usable head SHA; skipping.`);
+  if (!headSha) {
+    core.info("Trigger has no usable head SHA; skipping.");
     return { proceed: false };
   }
 
-  let prNumber = details.prNumber;
-  if (prNumber === undefined) {
-    const response = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
-      owner,
-      repo,
-      commit_sha: details.headSha,
-    });
-    const pr = response.data.find(
-      (candidate) =>
-        candidate.state === "open" && candidate.head.sha === details.headSha
-    );
-    prNumber = pr?.number;
-  }
+  const response = await octokit.rest.repos.listPullRequestsAssociatedWithCommit({
+    owner,
+    repo,
+    commit_sha: headSha,
+  });
+  const pr = response.data.find(
+    (candidate) => candidate.state === "open" && candidate.head.sha === headSha
+  );
+  const prNumber = pr?.number;
 
   if (prNumber === undefined) {
-    core.info(`No open PR found for SHA ${details.headSha}; skipping.`);
+    core.info(`No open PR found for SHA ${headSha}; skipping.`);
     return { proceed: false };
   }
 
   const checkRuns = await octokit.rest.checks.listForRef({
     owner,
     repo,
-    ref: details.headSha,
+    ref: headSha,
   });
   const actionableAllowedCheck = checkRuns.data.check_runs.find(
     (checkRun) =>
@@ -108,21 +68,21 @@ export async function resolveCheckPr(
 
   if (!actionableAllowedCheck) {
     core.info(
-      `No allowed actionable check run remains for PR #${prNumber} at ${details.headSha}; skipping.`
+      `No allowed actionable check run remains for PR #${prNumber} at ${headSha}; skipping.`
     );
-    return { proceed: false, prNumber, headSha: details.headSha };
+    return { proceed: false, prNumber, headSha };
   }
 
   core.info(
-    `Resolved PR #${prNumber} at ${details.headSha}; allowed actionable check '${actionableAllowedCheck.name}' found.`
+    `Resolved PR #${prNumber} at ${headSha}; allowed actionable check '${actionableAllowedCheck.name}' found.`
   );
-  return { proceed: true, prNumber, headSha: details.headSha };
+  return { proceed: true, prNumber, headSha };
 }
 
 async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
   const repository = core.getInput("repository", { required: true });
-  const eventName = core.getInput("event_name", { required: true });
+  const headSha = core.getInput("head_sha", { required: true });
   const allowedChecks = core.getInput("allowed_checks", { required: true });
   const separatorIndex = repository.indexOf("/");
   if (separatorIndex === -1) {
@@ -134,8 +94,7 @@ async function run(): Promise<void> {
     getOctokit(token),
     repository.slice(0, separatorIndex),
     repository.slice(separatorIndex + 1),
-    eventName,
-    context.payload as EventPayload,
+    headSha,
     allowedChecks
   );
   core.setOutput("proceed", result.proceed ? "true" : "false");
