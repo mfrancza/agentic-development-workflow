@@ -88,95 +88,21 @@ locals {
       description = "Run agents on this issue with the latest Claude Haiku (overrides DEFAULT_MODEL)."
     }
 
-    # Anthropic — generic series aliases. Each resolves to the latest snapshot
-    # of that named series (backwards-compatible with unqualified names per
-    # issue #202). Prefer these when a run must stay on a specific series but
-    # can float across snapshots within it.
-    "model:claude-opus-4-5" = {
+    # Anthropic — current fixed model IDs. Anthropic's 4.6 generation and
+    # later uses dateless canonical IDs, but each remains a pinned snapshot.
+    # The entrypoints accept any `claude-*` ID, so ad hoc IDs continue to work;
+    # these labels provide the current lineup in the GitHub label picker.
+    "model:claude-opus-5-5" = {
       color       = "1d76db"
-      description = "Run agents with the latest Claude Opus 4.5 snapshot (overrides DEFAULT_MODEL)."
+      description = "Run agents pinned to Claude Opus 5.5 (overrides DEFAULT_MODEL)."
     }
-    "model:claude-opus-4-1" = {
+    "model:claude-sonnet-5-5" = {
       color       = "1d76db"
-      description = "Run agents with the latest Claude Opus 4.1 snapshot (overrides DEFAULT_MODEL)."
+      description = "Run agents pinned to Claude Sonnet 5.5 (overrides DEFAULT_MODEL)."
     }
-    "model:claude-opus-4" = {
+    "model:claude-haiku-5-5" = {
       color       = "1d76db"
-      description = "Run agents with the latest Claude Opus 4 snapshot (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-sonnet-4-5" = {
-      color       = "1d76db"
-      description = "Run agents with the latest Claude Sonnet 4.5 snapshot (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-sonnet-4" = {
-      color       = "1d76db"
-      description = "Run agents with the latest Claude Sonnet 4 snapshot (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-haiku-4-5" = {
-      color       = "1d76db"
-      description = "Run agents with the latest Claude Haiku 4.5 snapshot (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-3-7-sonnet-latest" = {
-      color       = "1d76db"
-      description = "Run agents with the latest Claude 3.7 Sonnet snapshot (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-3-5-sonnet-latest" = {
-      color       = "1d76db"
-      description = "Run agents with the latest Claude 3.5 Sonnet snapshot (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-3-5-haiku-latest" = {
-      color       = "1d76db"
-      description = "Run agents with the latest Claude 3.5 Haiku snapshot (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-3-opus-latest" = {
-      color       = "1d76db"
-      description = "Run agents with the latest Claude 3 Opus snapshot (overrides DEFAULT_MODEL)."
-    }
-
-    # Anthropic — pinned snapshot IDs. Prefer these when a run must be
-    # reproducible against a specific Anthropic snapshot. Additional pinned
-    # snapshots can be applied ad hoc by name — the developer/reviewer
-    # entrypoint accepts any `claude-*` model ID; only the labels that appear
-    # here are pre-populated in the GitHub label picker.
-    "model:claude-opus-4-1-20250805" = {
-      color       = "1d76db"
-      description = "Run agents pinned to Claude Opus 4.1 snapshot 2025-08-05 (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-opus-4-20250514" = {
-      color       = "1d76db"
-      description = "Run agents pinned to Claude Opus 4 snapshot 2025-05-14 (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-sonnet-4-5-20250929" = {
-      color       = "1d76db"
-      description = "Run agents pinned to Claude Sonnet 4.5 snapshot 2025-09-29 (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-sonnet-4-20250514" = {
-      color       = "1d76db"
-      description = "Run agents pinned to Claude Sonnet 4 snapshot 2025-05-14 (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-haiku-4-5-20251001" = {
-      color       = "1d76db"
-      description = "Run agents pinned to Claude Haiku 4.5 snapshot 2025-10-01 (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-3-7-sonnet-20250219" = {
-      color       = "1d76db"
-      description = "Run agents pinned to Claude 3.7 Sonnet snapshot 2025-02-19 (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-3-5-sonnet-20241022" = {
-      color       = "1d76db"
-      description = "Run agents pinned to Claude 3.5 Sonnet snapshot 2024-10-22 (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-3-5-haiku-20241022" = {
-      color       = "1d76db"
-      description = "Run agents pinned to Claude 3.5 Haiku snapshot 2024-10-22 (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-3-opus-20240229" = {
-      color       = "1d76db"
-      description = "Run agents pinned to Claude 3 Opus snapshot 2024-02-29 (overrides DEFAULT_MODEL)."
-    }
-    "model:claude-3-haiku-20240307" = {
-      color       = "1d76db"
-      description = "Run agents pinned to Claude 3 Haiku snapshot 2024-03-07 (overrides DEFAULT_MODEL)."
+      description = "Run agents pinned to Claude Haiku 5.5 (overrides DEFAULT_MODEL)."
     }
 
     # OpenAI models — flat allowlist kept in one-to-one sync with the openai)
