@@ -7,6 +7,12 @@ function workflow(name: string): string {
   return readFileSync(new URL(name, workflowsDir), "utf8");
 }
 
+function workflowCallContract(content: string): string {
+  const start = content.indexOf("on:\n  workflow_call:");
+  const end = content.indexOf("\npermissions:", start);
+  return content.slice(start, end < 0 ? undefined : end);
+}
+
 const contracts = [
   "agent-groom-reusable.yml",
   "agent-implement-reusable.yml",
@@ -19,10 +25,11 @@ describe("agent reusable workflow-call contracts", () => {
   it("derives repository and default-model context internally", () => {
     for (const name of contracts) {
       const content = workflow(name);
-      expect(content, `${name} must not accept a repository input`).not.toMatch(
+      const contract = workflowCallContract(content);
+      expect(contract, `${name} must not accept a repository input`).not.toMatch(
         /^ {6}repo:/m,
       );
-      expect(content, `${name} must not accept a default-model input`).not.toMatch(
+      expect(contract, `${name} must not accept a default-model input`).not.toMatch(
         /^ {6}default-model:/m,
       );
     }
@@ -76,6 +83,16 @@ describe("agent reusable workflow-call contracts", () => {
         /if:.*needs\.(gate|design-gate)\.outputs\.proceed == 'true'[\s\S]*concurrency:/,
       );
     }
+  });
+
+  it("adapts the pinned review-worker contract internally", () => {
+    const review = workflow("agent-review-reusable.yml");
+    expect(review).toContain(
+      "agent-review-worker-reusable.yml@v0.2.0",
+    );
+    expect(review).toMatch(
+      /uses: mfrancza\/agentic-development-workflow\/\.github\/workflows\/agent-review-worker-reusable\.yml@v0\.2\.0[\s\S]*?repo: \$\{\{ github\.repository \}\}[\s\S]*?default-model: \$\{\{ vars\.DEFAULT_MODEL \}\}/,
+    );
   });
 });
 

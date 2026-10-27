@@ -25,6 +25,17 @@ for groom, implement, design, and review, and that the three label-routed
 callers retain their owned-label guards. This is supporting structural
 evidence, not a substitute for the live queue exercise below.
 
+During this validation, the same-repository auto-review transition on the
+validation PR correctly added `agent:review`, but both resulting
+[`agent-review` runs](https://github.com/mfrancza/agentic-development-workflow/actions/runs/40436778644)
+failed at workflow startup before creating a job. The wrapper had stopped
+passing `repo` and `default-model` while it still called the pinned `v0.2.0`
+review worker, whose released contract requires both. This PR restores those
+two values *inside the wrapper* from `github.repository` and
+`vars.DEFAULT_MODEL`; it does not restore either public caller input. The
+regression assertion in `workflow-call-contracts.test.ts` locks that adapter
+in place.
+
 ## Required maintainer-run matrix
 
 Run the following in a disposable same-organization repository configured

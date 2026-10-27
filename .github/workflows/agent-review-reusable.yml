@@ -134,7 +134,12 @@ jobs:
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-review-worker-reusable.yml@v0.2.0
     with:
       pr-number: ${{ inputs.pr-number }}
+      # The published v0.2.0 worker still requires these inputs. Keep the
+      # public caller contract simplified by deriving them here until the
+      # worker's released contract is updated.
+      repo: ${{ github.repository }}
       image: ${{ inputs.image }}
+      default-model: ${{ vars.DEFAULT_MODEL }}
       reviewer-models: ${{ inputs.reviewer-models }}
       logs-retention-days: ${{ inputs.logs-retention-days }}
       helpers-ref: ${{ inputs.helpers-ref }}
