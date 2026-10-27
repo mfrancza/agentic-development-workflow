@@ -12,24 +12,20 @@ name: agent-pr-merged (reusable)
 # pinned SHA (an external published action, not a local one). This is a
 # permanent exception.
 #
-# NOTE on github.event in reusable workflows: within a reusable workflow
-# github.event is the workflow_call event payload, not the calling workflow's
-# original event. The PR body parsing (which requires github.event.pull_request.body)
-# is therefore performed in the caller's extract-issue-number job and the
-# resulting issue number is passed here as the issue-number input.
-#
-# Callers supply:
-#   - The pull_request.closed trigger and the PR-author gate (if: condition)
-#   - The extract-issue-number job that parses the PR body via env var
-#   - The issue-number input (output from extract-issue-number)
+# The caller retains the developer-agent author security check. The reusable
+# gate parses the event body and rejects unlinked PRs before concurrency or
+# token minting.
 
 on:
   workflow_call:
     inputs:
-      issue-number:
+      pr-number:
         description: >
-          The issue number extracted from the PR body "Closes #N" reference.
-          Passed from the caller's extract-issue-number job.
+          Pull request number used for the preserved per-PR concurrency key.
+        type: number
+        required: true
+      pr-body:
+        description: 'Pull request body used to find the linked "Closes #N" issue.'
         type: string
         required: true
     secrets:
@@ -42,7 +38,38 @@ permissions:
   contents: read
 
 jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      proceed: ${{ steps.lookup.outputs.proceed }}
+      issue_number: ${{ steps.lookup.outputs.issue_number }}
+    steps:
+      - name: Extract linked issue number from PR body
+        id: lookup
+        env:
+          PR_BODY: ${{ inputs.pr-body }}
+        run: |
+          set -euo pipefail
+          # Keep untrusted PR body content in an environment variable rather
+          # than interpolating it into shell source.
+          ISSUE_NUM="$(printf '%s' "$PR_BODY" | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
+          if [ -z "${ISSUE_NUM:-}" ]; then
+            echo "PR body does not contain a 'Closes #N' reference; skipping."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            ISSUE_NUM="$(printf '%s' "$ISSUE_NUM" | tr -d '\r\n')"
+            echo "Found linked issue #${ISSUE_NUM}."
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+            echo "issue_number=${ISSUE_NUM}" >> "$GITHUB_OUTPUT"
+          fi
+
   remove-developer-label:
+    needs: gate
+    if: needs.gate.outputs.proceed == 'true'
+    concurrency:
+      group: agent-pr-merged-pr-${{ inputs.pr-number }}
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -62,7 +89,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
           GITHUB_REPO: ${{ github.repository }}
-          ISSUE_NUMBER: ${{ inputs.issue-number }}
+          ISSUE_NUMBER: ${{ needs.gate.outputs.issue_number }}
         run: |
           set -euo pipefail
           echo "Removing agent:developer label from issue #${ISSUE_NUMBER}."

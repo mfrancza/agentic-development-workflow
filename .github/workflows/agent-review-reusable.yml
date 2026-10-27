@@ -20,6 +20,10 @@ on:
       event-action:
         required: true
         type: string
+      pr-state:
+        description: 'Pull request state from the triggering event.'
+        required: true
+        type: string
     secrets:
       REVIEWER_APP_ID: { required: true }
       REVIEWER_APP_PRIVATE_KEY: { required: true }
@@ -32,7 +36,15 @@ on:
 permissions: {}
 
 jobs:
+  gate:
+    # The caller keeps fork and event-queue trust checks. This reusable gate
+    # owns the lifecycle invariant before authorization or concurrency.
+    if: inputs.pr-state == 'open'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "Pull request is open; proceeding."
   authorize:
+    needs: gate
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions: { contents: read }
@@ -106,7 +118,7 @@ jobs:
           skip-gate: ${{ inputs.event-action == 'synchronize' }}
           resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
   review:
-    needs: authorize
+    needs: [gate, authorize]
     concurrency:
       group: agent-review-pr-${{ inputs.pr-number }}
       cancel-in-progress: false

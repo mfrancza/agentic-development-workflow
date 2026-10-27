@@ -16,11 +16,10 @@ jobs:
     # work in org repos (it's the org login, not a user).
     #
     # Security: the reusable's authorize job checks the sender allowlist before
-    # it enters its concurrency group. Keep this caller limited to event and
-    # state predicates so team-reference allowlist members can reach that gate.
+    # it enters its concurrency group. Keep this caller limited to queue
+    # predicates; lifecycle state is checked by the reusable gate.
     if: >
-      github.event.label.name == 'agent:developer' &&
-      github.event.issue.state == 'open'
+      github.event.label.name == 'agent:developer'
     uses: ./.github/workflows/agent-implement-reusable.yml
     with:
       issue-number: ${{ github.event.issue.number }}
@@ -31,6 +30,7 @@ jobs:
       logs-retention-days: 30
       helpers-ref: ${{ github.sha }}
       sender-login: ${{ github.event.sender.login }}
+      issue-state: ${{ github.event.issue.state }}
     secrets:
       DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
       DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}

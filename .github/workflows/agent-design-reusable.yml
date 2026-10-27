@@ -94,6 +94,16 @@ on:
       sender-login:
         required: true
         type: string
+      issue-state:
+        description: 'Issue state from the triggering event (design path only).'
+        required: false
+        type: string
+        default: ''
+      pr-merged:
+        description: 'Whether the triggering PR was merged (undraft path only).'
+        required: false
+        type: boolean
+        default: false
     secrets:
       DEVELOPER_APP_ID:
         required: true
@@ -117,8 +127,21 @@ permissions:
   contents: read
 
 jobs:
+  design-gate:
+    # Lifecycle predicates belong here so external callers cannot bypass them
+    # and rejected work acquires neither a lock nor an installation token.
+    if: inputs.run-design && inputs.issue-state == 'open'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "Open issue accepted for design."
+  undraft-gate:
+    if: inputs.run-undraft && inputs.pr-merged && startsWith(inputs.pr-head-ref, 'design/issue-')
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo "Merged design PR accepted for undrafting."
   authorize:
-    if: inputs.run-design
+    needs: design-gate
+    if: inputs.run-design && needs.design-gate.result == 'success'
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:
@@ -189,8 +212,8 @@ jobs:
           principal: ${{ inputs.sender-login }}
           resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
   design:
-    if: inputs.run-design && needs.authorize.result == 'success'
-    needs: authorize
+    if: inputs.run-design && needs.design-gate.result == 'success' && needs.authorize.result == 'success'
+    needs: [design-gate, authorize]
     concurrency:
       group: agent-design-issue-${{ inputs.issue-number }}
       cancel-in-progress: false
@@ -321,7 +344,8 @@ jobs:
           if-no-files-found: warn
 
   undraft-sub-issues:
-    if: inputs.run-undraft
+    needs: undraft-gate
+    if: inputs.run-undraft && needs.undraft-gate.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 

@@ -46,10 +46,9 @@ jobs:
     #   prevent an attacker-controlled push from triggering the reviewer with
     #   secrets in scope on every push. See docs/design/re-review-loop.md § 1.
     #
-    # Security: these trust-model checks live here in the caller stub, not in
-    # the reusable, so external callers cannot accidentally skip them.
+    # Security and queue checks stay in this caller stub; the reusable owns the
+    # PR-open lifecycle gate so external callers receive the same behavior.
     if: >
-      github.event.pull_request.state == 'open' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (
         (github.event.action == 'labeled' &&
@@ -75,6 +74,7 @@ jobs:
       helpers-ref: ${{ github.sha }}
       sender-login: ${{ github.event.sender.login }}
       event-action: ${{ github.event.action }}
+      pr-state: ${{ github.event.pull_request.state }}
     secrets:
       REVIEWER_APP_ID: ${{ secrets.REVIEWER_APP_ID }}
       REVIEWER_APP_PRIVATE_KEY: ${{ secrets.REVIEWER_APP_PRIVATE_KEY }}

@@ -106,7 +106,76 @@ permissions:
   pull-requests: read   # for check-reviewer-feedback activity (review threads + inline comments)
 
 jobs:
+  feedback-gate:
+    # Decide whether a response is required before acquiring the per-PR lock
+    # or minting either resolver or developer-agent installation tokens.
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      proceed: ${{ steps.feedback.outputs.proceed }}
+    steps:
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+      - name: Check for reviewer feedback
+        id: feedback
+        uses: ./_agentic-workflow/.github/actions/check-reviewer-feedback
+        with:
+          token: ${{ github.token }}
+          review-state: ${{ inputs.review-state }}
+          review-body: ${{ inputs.review-body }}
+          review-id: ${{ inputs.review-id }}
+          pr-number: ${{ inputs.pr-number }}
+          repo-owner: ${{ github.repository_owner }}
+          repo-name: ${{ inputs.repo-name }}
+          review-author: ${{ inputs.review-author }}
+          pr-author: ${{ inputs.pr-author }}
+          head-sha: ${{ inputs.head-sha }}
+          review-commit-id: ${{ inputs.review-commit-id }}
+
   authorize:
+    needs: feedback-gate
+    if: needs.feedback-gate.outputs.proceed == 'true'
     runs-on: ubuntu-24.04
     permissions: { contents: read }
     steps:
@@ -178,7 +247,7 @@ jobs:
           additional-trusted-logins: '["mfrancza-reviewer-agent[bot]","Copilot","copilot-pull-request-reviewer[bot]","github-copilot[bot]"]'
           resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
   respond-review:
-    needs: authorize
+    needs: [feedback-gate, authorize]
     concurrency:
       group: agent-respond-review-pr-${{ inputs.pr-number }}
       cancel-in-progress: false
@@ -231,45 +300,7 @@ jobs:
           fi
           echo "Helper checkout HEAD verified: ${actual_sha}"
 
-      # Skip cleanly when there is nothing to respond to.
-      # Checks are applied in order:
-      #   0. PR is not open (closed or merged): skip immediately. A review on a
-      #      closed or merged PR never needs a response. This guards against a
-      #      race where the human approves-and-merges within seconds and the
-      #      head branch is deleted before the container can check it out.
-      #      On API error the check fails open (proceeds to the feedback checks).
-      # Non-approval states (changes_requested, commented) always proceed — they
-      # signal the reviewer wants something changed or opened a discussion.
-      # For approved reviews two additional skip conditions apply, checked in order:
-      #   1. Zero unresolved PR review threads (primary check): threads are the
-      #      ground truth for outstanding feedback. Skip even when the review
-      #      carries body text or inline comments — those are advisory when
-      #      nothing remains unresolved. This check runs first so a
-      #      summary-carrying clean approval (e.g. "Resolved 3 threads; all
-      #      clean.") still skips. On GraphQL errors, falls through to the
-      #      bare-approval fallback below rather than failing open.
-      #   2. Bare approval (no body, no inline comments): fallback reached only
-      #      when the GraphQL call above errored or returned a non-numeric value.
-      #      Skip when there is provably nothing to respond to.
-      - name: Check for reviewer feedback
-        id: feedback
-        uses: ./_agentic-workflow/.github/actions/check-reviewer-feedback
-        with:
-          token: ${{ github.token }}
-          review-state: ${{ inputs.review-state }}
-          review-body: ${{ inputs.review-body }}
-          review-id: ${{ inputs.review-id }}
-          pr-number: ${{ inputs.pr-number }}
-          repo-owner: ${{ github.repository_owner }}
-          repo-name: ${{ inputs.repo-name }}
-          review-author: ${{ inputs.review-author }}
-          pr-author: ${{ inputs.pr-author }}
-          head-sha: ${{ inputs.head-sha }}
-          review-commit-id: ${{ inputs.review-commit-id }}
-
-      # Mint only after we've decided to proceed — no installation token for runs we skip.
       - name: Mint installation token for developer-agent
-        if: steps.feedback.outputs.proceed == 'true'
         id: setup
         uses: ./_agentic-workflow/.github/actions/agent-token
         with:
@@ -277,7 +308,6 @@ jobs:
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
       - name: Resolve linked issue from PR body
-        if: steps.feedback.outputs.proceed == 'true'
         id: linked-issue
         uses: ./_agentic-workflow/.github/actions/find-linked-issue
         with:
@@ -304,7 +334,6 @@ jobs:
           chmod 0777 "${RUNNER_TEMP}/agent-logs"
 
       - name: Run agent
-        if: steps.feedback.outputs.proceed == 'true'
         uses: ./_agentic-workflow/.github/actions/run-agent
         with:
           image: ${{ inputs.image }}
