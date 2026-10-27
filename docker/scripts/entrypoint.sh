@@ -40,9 +40,8 @@ resolve_provider() {
     case "$model" in
         # Anthropic — top-level aliases (Claude Code CLI resolves to the latest
         # snapshot of each series) plus every model ID that begins with the
-        # stable `claude-` namespace. This covers generic series tags
-        # (e.g. `claude-sonnet-4-5`, `claude-3-5-haiku-latest`) and pinned
-        # snapshots (e.g. `claude-sonnet-4-5-20250929`) alike. See
+        # stable `claude-` namespace. This covers current dateless fixed IDs
+        # (e.g. `claude-sonnet-5-5`) and legacy dated snapshots alike. See
         # docs/design/anthropic-model-labels.md for the rationale — the
         # explicit-allowlist trade-off from docs/design/multi-provider-models.md
         # is inverted here because the Anthropic model list grows every quarter
@@ -61,7 +60,7 @@ resolve_provider() {
             echo "xai"
             ;;
         *)
-            log "ERROR: Unknown model '${model}'. Anthropic models must be one of the aliases 'sonnet', 'opus', 'haiku', or a model ID beginning with 'claude-' (e.g. 'claude-sonnet-4-5', 'claude-sonnet-4-5-20250929', 'claude-3-5-haiku-latest'). Other supported values: gpt-6-astra, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, grok-4.20-0309-non-reasoning, grok-4.20-0309-reasoning, grok-4.20-multi-agent-0309, grok-4.3, grok-4.5, grok-4.6, grok-build-0.1" >&2
+            log "ERROR: Unknown model '${model}'. Anthropic models must be one of the aliases 'sonnet', 'opus', 'haiku', or a model ID beginning with 'claude-' (e.g. 'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'). Other supported values: gpt-6-astra, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, grok-4.20-0309-non-reasoning, grok-4.20-0309-reasoning, grok-4.20-multi-agent-0309, grok-4.3, grok-4.5, grok-4.6, grok-build-0.1" >&2
             exit 1
             ;;
     esac
