@@ -150,4 +150,17 @@ describe("check-protected-approval-gate", () => {
   it("uses the GitHub token and Checks API", async () => {
     await run(); expect(vi.mocked(github.getOctokit)).toHaveBeenCalledWith("test-token");
   });
+
+  it("posts success for a non-protected author PR that is the sole open PR on its head", async () => {
+    // A sweep or backfill run posts success in the Checks API for a non-protected PR.
+    // Note: when the PR's Actions suite has already completed, GitHub attaches the
+    // new check run to that completed suite and the merge box shows "Expected —
+    // Waiting for status to be reported" regardless of the check conclusion.
+    // Only a new commit (which starts a fresh in-progress suite) clears Expected.
+    // See Decision 7 and Decision 9 item 19 in docs/design/protected-approval-gate.md.
+    getPull.mockResolvedValue({ data: pr(42, "human") });
+    listPulls.mockResolvedValue({ data: [pr(42, "human")] });
+    await run();
+    expect(callsFor("live-sha")[0].conclusion).toBe("success");
+  });
 });

@@ -829,10 +829,14 @@ now 1-not-2.
 
 To make activation safe across the full cycle, the enforcing context
 keeps a **fixed name** and stale results are **replaced**, not hidden.
-GitHub evaluates the most recent check-run with the required name on
-the head SHA, so re-publishing the current evaluation under the same
-name supersedes any earlier result. Two paths re-publish on every open
-PR, documented in
+A later `checks.create` under the same context name supersedes the
+previous run in the Checks API, so `gh pr checks` and the Checks tab
+reflect the new result. **However, when GitHub attaches the new check
+run to an already-completed Actions suite, the merge box shows
+"Expected — Waiting for status to be reported" regardless of the check
+conclusion. A new commit is the only way to clear Expected, because
+the publisher runs while the new head's suite is still open.** Two
+paths re-publish on every open PR through the Checks API, documented in
 [`terraform/modules/branch-protection/README.md`](../../terraform/modules/branch-protection/README.md)
 and `docs/adopting.md`:
 
@@ -848,19 +852,28 @@ and `docs/adopting.md`:
    out across `gh pr list --state open --json number,headRefOid` and
    runs the publisher activity once per distinct head SHA).
    It publishes the current evaluation under the enforcing context on
-   every open PR's live head SHA. That overwrites any `success` left
-   from an earlier ON interval (cases (a) and (c)) and posts a result on
-   PRs that had none (case (b), fail-closed until then).
+   every open PR's live head SHA through the Checks API. That overwrites
+   any `success` left from an earlier ON interval (cases (a) and (c))
+   and posts a result on PRs that had none (case (b), fail-closed until
+   then). Open PRs on a head whose Actions suite has already completed
+   receive the updated Checks API result but stay in "Expected" in the
+   merge box until a new commit. Merge or close those PRs before
+   requiring the check; do not rely on the backfill to clear Expected on
+   existing heads. Confirm the merge box — not `gh pr checks` — to
+   verify a PR is actually unblocked.
 
 **Automatic catch-up.** If the operator skips step 2, the Decision 8a
 reconcile sweep (`protected-approval-gate-reconcile.yml`)
 re-publishes the enforcing context on every open PR once every
 `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` (default 10) while
 the gate is ON. A stale `success` from a prior ON interval is therefore
-exposed for at most one sweep interval after a re-enable, and the
-backfill closes that window immediately. The first enable has no
-exposure at all: OFF mode never publishes the enforcing context, so no
-prior result exists.
+replaced in the Checks API within at most one sweep interval after a
+re-enable, and the backfill closes that window immediately. The first
+enable has no exposure at all: OFF mode never publishes the enforcing
+context, so no prior result exists. The same completed-suite limitation
+applies to the sweep: PRs on a head whose Actions suite has already
+finished remain in "Expected" in the merge box even after the sweep
+re-posts their result.
 
 **Disable procedure (ON → OFF).** Set
 `enable_protected_approval_gate = false` and `terraform apply`. The
@@ -1284,11 +1297,14 @@ rejected in the Alternatives table below with their reasons.
 - When the departing path (close or synchronize to a new head) does
   happen on the dev-agent PR, the departed-SHA reconciliation
   described above republishes the shared-SHA check-run with the
-  departing PR removed — so the human PR is unblocked promptly
-  without needing any subsequent activity on its own branch. This
-  is a specific lifecycle gap the reviewer identified in the
-  previous draft (which had no `closed` trigger and only published
-  against the live head on `synchronize`).
+  departing PR removed. If the human PR's head SHA has a completed
+  Actions suite when the reconciliation occurs, the new check run is
+  attached to that completed suite and the merge box shows "Expected"
+  rather than reflecting the new conclusion; a new commit on the human
+  PR's branch is needed to clear Expected in that case. This is a
+  specific lifecycle gap the reviewer identified in the previous draft
+  (which had no `closed` trigger and only published against the live
+  head on `synchronize`).
 - An attacker cannot borrow a non-dev PR's `success` to merge a
   shared-SHA dev-agent PR with 0 approvals, because the shared-SHA
   publisher strictly intersects per-PR outcomes.
@@ -1541,6 +1557,22 @@ end-to-end validation on a scratch PR under Issue #665.
     latest opinionated review, etc.), including an `APPROVED` review followed
     by a `COMMENTED` review from the same login: the earlier approval must
     still count as one qualifying approval.
+19. **Sweep on a completed-suite head (non-protected author)** — open a
+    non-protected pull request (human author, not in
+    `PROTECTED_PR_AUTHOR_LOGINS`). Let its Actions suite for the current
+    head SHA complete and reach a terminal state. Dispatch the backfill
+    (or the reconcile sweep). Assert (19a) `gh pr checks` and the Checks
+    tab show a `success` conclusion for `protected-approval-gate` on that
+    head SHA. Assert (19b) the merge box still shows "Expected — Waiting
+    for status to be reported"; the Checks API update attaches the check
+    run to the completed suite and does not clear Expected. Then push a
+    new commit. Assert (19c) the publisher posts `success` under the new
+    head SHA while the new suite is in progress and the merge box clears.
+    This case documents the Checks API vs. merge-box split that acceptance
+    tests 6 and 8 do not cover — those tests involve a protected author
+    whose blocked state is correct whether the box shows `failure` or
+    Expected, so neither catches a successful sweep that does not actually
+    unblock a PR's merge box.
 
 ### Decision 10 — Documentation surfaces
 

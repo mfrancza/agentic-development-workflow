@@ -1789,17 +1789,25 @@ Enable in this order:
 
 - Set `ENABLE_PROTECTED_APPROVAL_GATE` to `true`, with
   `PROTECTED_PR_AUTHOR_LOGINS` and `REQUIRED_APPROVAL_COUNT` set.
-- Dispatch `protected-approval-gate-backfill` and wait for it to finish, so
-  every open pull request has a current result.
+- Dispatch `protected-approval-gate-backfill` and wait for it to finish.
+  This gives each open pull request a current conclusion in the Checks tab
+  and registers the context name for the branch-protection picker. The
+  publisher or the reconcile sweep can also produce that first report.
+- Merge or close open pull requests that should land before requiring the
+  check. A pull request on a head whose Actions suite has already finished
+  stays "Expected — Waiting for status to be reported" in the merge box
+  even after the backfill posts `success` — the Checks API update attaches
+  to the completed suite and does not clear Expected. Only a new commit
+  clears it. Confirm the merge box, not `gh pr checks`.
 - Require the `protected-approval-gate` status check on your default branch,
   with **GitHub Actions** as its source:
   - **With this project's `branch-protection` Terraform module:** set
     `enable_protected_approval_gate = true` (it also sets the Actions variable
     through `agent-vars`) and apply. The module pins the check's source to
-    GitHub Actions (`integration_id = 15368`). Because the variable and the
-    rule change in one apply, dispatch the backfill immediately afterwards;
-    open pull requests without a current result stay blocked until it
-    finishes.
+    GitHub Actions (`integration_id = 15368`). Dispatch the backfill
+    immediately after apply so each open pull request has a result in the
+    Checks tab; merge or close remaining open pull requests before requiring
+    the check.
   - **With a repository or organization ruleset:** edit the ruleset that
     targets your default branch, enable **Require status checks to pass**, add
     the check `protected-approval-gate`, and select **GitHub Actions** as its
@@ -1822,9 +1830,13 @@ request to the branch is blocked. With the Terraform modules, setting
 **Re-enabling the gate.** Follow the enabling steps again. While the gate was
 disabled, only the preview check was updated, so an open pull request whose
 head has not changed can still carry an enforcing result from the earlier
-enabled period. The backfill replaces it, and the reconcile sweep replaces it
-within `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` if the backfill is
-skipped.
+enabled period. The backfill and the reconcile sweep update the Checks API
+with the current result, replacing the stale entry visible in `gh pr checks`
+and the Checks tab. However, a pull request on a head whose Actions suite has
+already completed stays "Expected — Waiting for status to be reported" in the
+merge box even after the sweep re-posts the result; only a new commit clears
+it. Merge or close open pull requests before re-requiring the check if their
+Actions suite has finished.
 
 **Limitations.** Merge queues are not supported. The publisher does not run on
 `merge_group` events, so requiring `protected-approval-gate` on a branch that
