@@ -131,7 +131,12 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
-    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-review-worker-reusable.yml@v0.2.0
+    # Full reference, not ./ (which resolves against the caller's repository).
+    # uses: cannot read inputs, so this pins a release tag. Any change to the
+    # worker's inputs/secrets, or to what this job passes it, must bump this
+    # pin to the next release and be tagged promptly: until then the call
+    # fails at startup. See README "Releasing".
+    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-review-worker-reusable.yml@v0.3.0
     with:
       pr-number: ${{ inputs.pr-number }}
       image: ${{ inputs.image }}
