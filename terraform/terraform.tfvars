@@ -11,8 +11,8 @@ agent_allowlist = [
   "mfrancza-developer-agent[bot]",
 ]
 
-default_model        = "gpt-5.6-terra"
-design_default_model = "gpt-5.6-sol"
+default_model        = "sonnet"
+design_default_model = "opus"
 
 # Humans to assign to issues and PRs when the agent applies the human-required
 # label (e.g. escalations requiring security, billing, or permission decisions).
@@ -43,6 +43,23 @@ auto_trigger_agents = {
   review    = true
 }
 
-# Multi-reviewer model pair: one Anthropic Sonnet and one xAI Grok,
-# so each PR gets a perspective from two different providers.
-reviewer_models = ["sonnet", "grok-4.6"]
+# Reviewer selection via explicit pairing: each Anthropic authoring model is
+# reviewed by its same-class OpenAI equivalent (see the Cross-Vendor Class
+# Table in docs/model-guidance.md). reviewer_models must stay empty — a
+# non-empty REVIEWER_MODELS list takes precedence over pairing.
+reviewer_models = []
+
+review_model_pairing = {
+  enabled           = true
+  policy            = "explicit-map"
+  preferred_vendors = ["openai", "xai", "anthropic"]
+  explicit_map = {
+    "haiku"             = "gpt-5.6-luna"
+    "sonnet"            = "gpt-5.6-terra"
+    "opus"              = "gpt-5.6-sol"
+    "claude-haiku-5-5"  = "gpt-5.6-luna"
+    "claude-sonnet-5-5" = "gpt-5.6-terra"
+    "claude-opus-5-5"   = "gpt-5.6-sol"
+  }
+  fallback_chain = ["different-vendor-same-class", "same-vendor-different-model", "default-model"]
+}
