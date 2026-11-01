@@ -49,7 +49,12 @@ Translated into design intent:
    `DESIGN_DEFAULT_MODEL`) lets a maintainer set a grooming-specific default
    without disturbing `DEFAULT_MODEL`. The grooming workflow prefers
    `GROOM_DEFAULT_MODEL` when set and falls through to `DEFAULT_MODEL`
-   otherwise. The vendor-anchor rule reads from the same effective value.
+   otherwise. The vendor-anchor rule, however, reads from the downstream
+   workflow's effective default (`DEFAULT_MODEL` or
+   `DESIGN_DEFAULT_MODEL || DEFAULT_MODEL`) rather than from
+   `GROOM_DEFAULT_MODEL`, so grooming can be cheap without silently
+   redirecting matched tasks away from the configured implementation /
+   design preference (see Decisions 1 and 2).
 
 The present repository state after PR #752 (merged 2026-11-01) is
 `default_model = "sonnet"` and `design_default_model = "opus"`, both
@@ -67,26 +72,41 @@ today when `GROOM_DEFAULT_MODEL` is unset.
 
 ### 1. Vendor-anchored grooming selection with no-label-when-matched
 
-When no `model:*` label is already present on the issue, the groomer resolves
-the **anchor model** as `GROOM_DEFAULT_MODEL || DEFAULT_MODEL` (same precedence
-as the workflow fallback), infers its vendor
+When no `model:*` label is already present on the issue, the groomer first
+classifies the task's complexity against the Task-Class Matrix in
+[`docs/model-guidance.md`](../model-guidance.md), then resolves the **anchor
+model** as whichever downstream workflow will actually run the task:
+
+- Design tasks → `DESIGN_DEFAULT_MODEL || DEFAULT_MODEL` (matching
+  `agent-design.yml`'s fallback).
+- All other tasks → `DEFAULT_MODEL` (matching `agent-implementation.yml`'s
+  fallback).
+
+This deliberately **does not** include `GROOM_DEFAULT_MODEL` in the anchor
+resolution. `GROOM_DEFAULT_MODEL` only governs the model the groomer itself
+runs on; it does not change what `agent-design.yml` or
+`agent-implementation.yml` will fall through to when no `model:*` label is
+present. Tying the anchor to the groomer's own execution model would break the
+no-label rule whenever `GROOM_DEFAULT_MODEL` is set to a different capability
+class than `DEFAULT_MODEL` / `DESIGN_DEFAULT_MODEL` — exactly the
+`haiku` / `sonnet` split this repository configures (see Decision 3).
+
+The groomer then infers the chosen anchor's vendor
 (`anthropic` / `openai` / `xai`) via the same `claude-*`-prefix /
-explicit-allowlist rules the entrypoints use, and classifies the task's
-complexity against the Task-Class Matrix in
-[`docs/model-guidance.md`](../model-guidance.md).
+explicit-allowlist rules the entrypoints use.
 
 Behavior from there:
 
 - If the task's capability class matches the anchor model's class, the groomer
-  **does not emit a `model:*` label**. The downstream workflows then fall
+  **does not emit a `model:*` label**. The downstream workflow then falls
   through the generic / per-agent resolution waterfall to the anchor model
   via `DEFAULT_MODEL` (or `DESIGN_DEFAULT_MODEL` for design), honoring the
   configured preference.
 - If the task's capability class differs from the anchor's class, the groomer
   emits exactly one same-vendor label from that task's Task-Class Matrix row.
-  For an Anthropic anchor that is `sonnet` and a mechanical task class, this
-  is `model:haiku`; for an OpenAI `gpt-5.6-terra` anchor and a plan task, this
-  is `model:gpt-5.6-sol`.
+  For an Anthropic implementation anchor that is `sonnet` and a mechanical
+  task class, this is `model:haiku`; for an OpenAI `gpt-5.6-terra` anchor and
+  a plan task, this is `model:gpt-5.6-sol`.
 
 The capability-class mapping used for the "matches" check is the Cross-Vendor
 Class Table (`.github/scripts/data/model-classes.json` and the mirror section
@@ -128,10 +148,20 @@ following the exact pattern `agent-design.yml` already uses for
 `GROOM_DEFAULT_MODEL` keep their current behavior because the `||` operator
 treats the absent-or-empty variable as falsy and falls through.
 
-The anchor used by the groom prompt is **the same effective string** that is
-passed to `resolve-model`. The container prompt reads this value from an
-explicit env var (see Decision 4) rather than re-deriving it, so the policy
-and the model actually running the groomer never disagree.
+The groom reusable workflow continues to pass `GROOM_DEFAULT_MODEL ||
+DEFAULT_MODEL` to `resolve-model` as `default-model` — that is the model the
+groomer itself runs on. Separately, the workflow passes **two anchor env vars**
+into the groom container (see Decision 4):
+
+- `GROOM_IMPL_ANCHOR_MODEL` = `${{ vars.DEFAULT_MODEL }}`
+- `GROOM_DESIGN_ANCHOR_MODEL` = `${{ vars.DESIGN_DEFAULT_MODEL ||
+  vars.DEFAULT_MODEL }}`
+
+The prompt picks between them based on the task's dominant class. Keeping the
+groomer's execution model distinct from the downstream anchors is what lets a
+cheap `GROOM_DEFAULT_MODEL = haiku` coexist with a Sonnet implementation
+default and an Opus design default without the no-label-when-matched rule
+silently routing matched tasks to the wrong model.
 
 **Alternatives considered.** Overloading `DEFAULT_MODEL` to carry grooming
 preferences was rejected because the maintainer asked for a dedicated
@@ -141,6 +171,12 @@ before they can call the updated reusable workflow. Picking the anchor from
 `AGENT_MODEL` inside the container was rejected because `AGENT_MODEL` is
 influenced by per-agent `model:groom:*` labels; the anchor must come from the
 workflow-level variables so it is stable regardless of per-run overrides.
+Using `GROOM_DEFAULT_MODEL || DEFAULT_MODEL` as a single anchor — matching
+the groomer's own execution model — was rejected because it conflates
+"what model runs the groomer" with "what model will run the downstream task"
+and produces the wrong no-label behavior whenever those two values live in
+different capability classes (as this repo's `haiku` groomer against a
+Sonnet implementation default demonstrates).
 
 ### 3. Set this repository's `groom_default_model` to `haiku`
 
@@ -149,14 +185,19 @@ Grooming is a short, bounded classification pass: read the issue, read
 comment. The current `DEFAULT_MODEL = sonnet` runs grooming on Sonnet, which
 is more capability than the groomer needs. Setting `groom_default_model =
 "haiku"` for this repository runs grooming on Haiku (Anthropic, same vendor
-as `DEFAULT_MODEL`) and leaves the vendor anchor on Anthropic for the
-label-selection step.
+as `DEFAULT_MODEL` and `DESIGN_DEFAULT_MODEL`) without changing either
+downstream anchor.
 
-Because the anchor's **class** is now `haiku`, the vendor-anchor rule emits
-`model:sonnet` or `model:opus` only when the task is clearly beyond mechanical
-work, and emits nothing when the task is well-suited to Haiku. This matches
-the task-class matrix guidance and makes the configured preference visible on
-downstream runs.
+Because the implementation anchor remains `DEFAULT_MODEL = sonnet` and the
+design anchor remains `DESIGN_DEFAULT_MODEL = opus`, the
+no-label-when-matched rule still routes plan tasks to Sonnet via
+`DEFAULT_MODEL` and design tasks to Opus via `DESIGN_DEFAULT_MODEL`. The rule
+emits `model:haiku` only for a mechanical task (whose class differs from
+Sonnet) and `model:opus` only if a non-design task is classified above
+Sonnet. Grooming on Haiku never collapses the no-label decision onto Haiku,
+because the anchors the prompt consults are the downstream workflows'
+effective defaults, not `GROOM_DEFAULT_MODEL`. This is the practical payoff
+of the execution-vs-anchor split described in Decision 2.
 
 **Alternatives considered.** Leaving `groom_default_model` unset was rejected
 because the maintainer's grooming comment explicitly includes "adding a
@@ -173,16 +214,20 @@ confusing cross-vendor labels on every issue.
 The groom prompt (`docker/scripts/prompts/groom.md`) step 3 is rewritten to:
 
 1. Preserve any existing `model:*` label (unchanged).
-2. Resolve the anchor from an explicit env var the workflow passes in
-   (`GROOM_VENDOR_ANCHOR_MODEL` — the same string the workflow fed into
-   `resolve-model` as `default-model`), infer its vendor via the same
+2. Classify the task using the Task-Class Matrix row for the issue's
+   dominant task class.
+3. Select the anchor env var based on the classified task family:
+   `GROOM_DESIGN_ANCHOR_MODEL` for design tasks and `GROOM_IMPL_ANCHOR_MODEL`
+   for every other class. Infer the chosen anchor's vendor via the same
    `claude-*`-prefix / explicit-allowlist rules documented in
    [`docs/model-guidance.md`](../model-guidance.md) § "Provider Notes".
-3. Classify the task using the Task-Class Matrix row for the issue's
-   dominant task class. If the task's class matches the anchor's class
-   (via the Cross-Vendor Class Table), emit no `model:*` label. Otherwise
-   emit the single same-vendor label named in that matrix row.
-4. If the anchor-inferred provider is not known to the container (unknown
+   `GROOM_DEFAULT_MODEL` is deliberately not consulted here — it only
+   controls which model actually runs the groomer, not which model the
+   downstream workflow will fall through to.
+4. If the task's class matches the selected anchor's class (via the
+   Cross-Vendor Class Table), emit no `model:*` label. Otherwise emit the
+   single same-vendor label named in that matrix row.
+5. If the anchor-inferred provider is not known to the container (unknown
    model identifier), fall back to posting a `question` and skip model
    selection, consistent with the existing "if preferences conflict, ask"
    stance.
@@ -193,11 +238,13 @@ as the fallback" sentence is removed. A new short paragraph in § "Repo
 Defaults" documents `GROOM_DEFAULT_MODEL` next to `DEFAULT_MODEL` and
 `DESIGN_DEFAULT_MODEL`.
 
-The grooming comment the agent posts on each run must now record **the
-anchor model, its inferred vendor, the task class, and whether a label was
-applied or omitted** — the current "provider, task class, and reason" line
-is extended with the anchor to make the policy decision auditable from the
-issue comments.
+The grooming comment the agent posts on each run must now record **the task
+family (design vs. implementation), the selected anchor model, its inferred
+vendor, the task class, and whether a label was applied or omitted** — the
+current "provider, task class, and reason" line is extended with the task
+family and selected anchor so the policy decision is auditable from the
+issue comments and so an operator can tell at a glance which of the two
+anchor env vars was in play.
 
 **Alternatives considered.** Deriving the anchor from `AGENT_MODEL` inside
 the prompt was rejected (see Decision 2). Rewriting the entire
@@ -272,9 +319,9 @@ the end-to-end validation close the loop after the plumbing is reviewable.
 
 | Issue | Task | Dependencies |
 |---|---|---|
-| Issue #775 | Add `GROOM_DEFAULT_MODEL` Terraform input, agent-vars resource and output, module README entries, and reusable-workflow `default-model` fallback + explicit anchor env var passthrough. Add Vitest coverage mirroring the existing `DESIGN_DEFAULT_MODEL` tests. | — |
-| Issue #776 | Rewrite `docs/model-guidance.md` § "Provider selection during grooming" step 2 to describe the vendor-anchor rule, add a `GROOM_DEFAULT_MODEL` entry under § "Repo Defaults", and update `docker/scripts/prompts/groom.md` step 3 to read the anchor env var, use the Cross-Vendor Class Table, and emit a label only when the task class differs from the anchor's class. Extend the grooming-comment template to record the anchor model, vendor, task class, and label outcome. | Issue #775 |
+| Issue #775 | Add `GROOM_DEFAULT_MODEL` Terraform input, agent-vars resource and output, module README entries, and reusable-workflow `default-model` fallback (`GROOM_DEFAULT_MODEL \|\| DEFAULT_MODEL`). Separately, pass **two anchor env vars** into the groom container — `GROOM_IMPL_ANCHOR_MODEL = vars.DEFAULT_MODEL` and `GROOM_DESIGN_ANCHOR_MODEL = vars.DESIGN_DEFAULT_MODEL \|\| vars.DEFAULT_MODEL` — so the prompt consumes the downstream workflows' effective defaults rather than the groomer's own execution model. Add Vitest coverage mirroring the existing `DESIGN_DEFAULT_MODEL` tests, including a case where `GROOM_DEFAULT_MODEL` differs in class from `DEFAULT_MODEL`. | — |
+| Issue #776 | Rewrite `docs/model-guidance.md` § "Provider selection during grooming" step 2 to describe the vendor-anchor rule (classify first, then anchor on `DEFAULT_MODEL` for non-design tasks and `DESIGN_DEFAULT_MODEL \|\| DEFAULT_MODEL` for design tasks — never on `GROOM_DEFAULT_MODEL`), add a `GROOM_DEFAULT_MODEL` entry under § "Repo Defaults" that calls out the execution-vs-anchor split, and update `docker/scripts/prompts/groom.md` step 3 to classify first and then read whichever of `GROOM_IMPL_ANCHOR_MODEL` / `GROOM_DESIGN_ANCHOR_MODEL` matches the task family, use the Cross-Vendor Class Table, and emit a label only when the task class differs from the selected anchor's class. Extend the grooming-comment template to record the task family, selected anchor model, inferred vendor, task class, and label outcome. | Issue #775 |
 | Issue #777 | Rewrite the `model:<name>` bullet in `AGENTS.md` to describe current multi-provider grooming and point at `docs/model-guidance.md` instead of restating the tier list; remove the "always one of the three tier aliases" sentence. | — |
 | Issue #778 | Retarget Issue #461 criterion 7 to assert the current post-#567 label-criteria lineup against the Terraform-managed label set rather than the obsolete three-alias invariant, and link the updated criterion to the `label-criteria.json` and `docs/model-guidance.md` sources. | — |
 | Issue #779 | Set `groom_default_model = "haiku"` in `terraform/terraform.tfvars` to opt this repository into the new mechanism and keep grooming cheap while anchoring on Anthropic. | Issue #775 |
-| Issue #781 | End-to-end validation: run `terraform validate` / `plan` with the new variable, exercise the grooming container locally against representative Anthropic / OpenAI / xAI anchor values, confirm the groomer emits no label when the task matches the anchor class and emits the correct same-vendor label when it does not, and verify that AGENTS.md, `docs/model-guidance.md`, `docker/scripts/prompts/groom.md`, and Issue #461 criterion 7 all describe the same policy. | Issues #775, #776, #777, #778, #779 |
+| Issue #781 | End-to-end validation: run `terraform validate` / `plan` with the new variable, exercise the grooming container locally against representative Anthropic / OpenAI / xAI anchor values (including a run where `GROOM_DEFAULT_MODEL` differs in class from `DEFAULT_MODEL` — e.g., `haiku` groomer against `sonnet` default — to confirm the no-label rule still routes matched tasks to the downstream default rather than to the groomer's execution model), confirm the groomer emits no label when the task matches the selected anchor's class and emits the correct same-vendor label when it does not, and verify that AGENTS.md, `docs/model-guidance.md`, `docker/scripts/prompts/groom.md`, and Issue #461 criterion 7 all describe the same policy. | Issues #775, #776, #777, #778, #779 |
