@@ -281,10 +281,12 @@ jobs:
       #
       # Non-helper-consuming exceptions (no bootstrap; external-consumer patterns
       # do not apply):
-      #   ci-reusable.yml            — runs tsc + vitest; no local composite actions
-      #   secret-scan-reusable.yml   — runs gitleaks; no local composite actions
-      #   agent-pr-merged-reusable.yml — no checkout; permanent security exception
-      #   terraform-ci-reusable.yml  — consumer-only; scoped to this repo's Terraform
+      #   ci-reusable.yml                              — runs tsc + vitest; no local composite actions
+      #   secret-scan-reusable.yml                     — runs gitleaks; no local composite actions
+      #   agent-pr-merged-reusable.yml                 — no checkout; permanent security exception
+      #   terraform-ci-reusable.yml                    — consumer-only; scoped to this repo's Terraform
+      #   protected-approval-gate-sweep-reusable.yml   — triggers publisher reruns via Actions API;
+      #                                                  no composite actions, no helpers-ref input
       - name: Fail if any helper-consuming reusable is missing helpers-ref with required:true
         run: |
           set -euo pipefail
@@ -297,6 +299,7 @@ jobs:
             "agent-pr-merged-reusable.yml"
             "terraform-ci-reusable.yml"
             "test-helper-ref-reusable.yml"
+            "protected-approval-gate-sweep-reusable.yml"
           )
 
           for f in .github/workflows/*-reusable.yml; do
@@ -476,6 +479,7 @@ jobs:
             "agent-pr-merged-reusable.yml"
             "terraform-ci-reusable.yml"
             "test-helper-ref-reusable.yml"
+            "protected-approval-gate-sweep-reusable.yml"
           )
 
           for f in .github/workflows/*-reusable.yml; do

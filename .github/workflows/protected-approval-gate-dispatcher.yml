@@ -1,0 +1,56 @@
+name: protected-approval-gate-dispatcher
+
+# Triggers a publisher rerun whenever a notifier run completes. This workflow
+# runs on the default-branch SHA (workflow_run behaviour), so it must not
+# publish checks directly — doing so would attach the auto-emitted job check to
+# the default branch instead of the reviewed PR head. Instead it locates the
+# latest pull_request_target publisher run for the affected PR and calls the
+# rerun API so the publisher re-executes under its original pull_request_target
+# context and the resulting check attaches to the PR head SHA.
+# See docs/design/protected-approval-gate-job-check.md, Decision 5.
+on:
+  workflow_run:
+    workflows: ["protected-approval-gate-notify"]
+    types: [completed]
+
+# actions: write is required to call POST /actions/runs/{run_id}/rerun.
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  # Fallback to run id prevents unrelated PR-less notifier runs from sharing
+  # one empty concurrency key. The job guard below skips when there is no PR.
+  group: protected-approval-gate-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    # Skip if the notifier could not associate a PR (e.g. pull_requests is empty
+    # for some fork events where GitHub omits the pull_requests array).
+    if: github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: .github/scripts/package-lock.json
+
+      - name: Install dependencies
+        working-directory: .github/scripts
+        run: npm ci
+
+      - name: Find and rerun latest publisher run for PR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PUBLISHER_WORKFLOW_FILE: protected-approval-gate-publisher.yml
+        working-directory: .github/scripts
+        run: npx --no-install tsx src/rerun-publisher-for-pr.ts

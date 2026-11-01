@@ -273,8 +273,7 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 | `agent-respond-review-reusable.yml`          | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
 | `agent-review-reusable.yml`                  | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`                   | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
 | `ci-reusable.yml`                            | —                                                               | —                                                                 |
-| `protected-approval-gate-reusable.yml`       | —                                                               | `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
-| `protected-approval-gate-sweep-reusable.yml` | —                                                               | `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
+| `protected-approval-gate-sweep-reusable.yml` | —                                                               | —                                                                 |
 | `secret-scan-reusable.yml`                   | —                                                               | —                                                                 |
 | `terraform-ci-reusable.yml`                  | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | —                                                                 |
 | `test-helper-ref-reusable.yml`               | —                                                               | —                                                                 |
@@ -1545,17 +1544,23 @@ An opt-in required status check that blocks merging a pull request authored
 by a protected login (for example your developer-agent App,
 `<your-developer-app-slug>[bot]`) until it has `REQUIRED_APPROVAL_COUNT`
 approvals from someone other than its author. Pull requests from other authors
-pass immediately. Two reusable workflows implement it:
+pass immediately. The implementation uses one reusable workflow plus a
+publisher you copy into your repo:
 
-- `protected-approval-gate-reusable.yml` evaluates one pull request. Your
-  publisher calls it on pull request and review events.
 - `protected-approval-gate-sweep-reusable.yml` re-evaluates every open pull
-  request. Your backfill and reconcile workflows call it.
+  request by locating and rerunning each PR's latest `pull_request_target`
+  publisher run. Your backfill and reconcile workflows call it.
 
-Both publish the result through the Checks API under the name
-`protected-approval-gate` while the gate is enabled, and
-`protected-approval-gate (preview)` while it is disabled. The preview check
-shows what the gate would decide and is never required.
+The publisher publishes the result via its auto-emitted job check under the
+name `protected-approval-gate` while the gate is enabled (enforcing job), and
+`protected-approval-gate (preview)` while it is disabled (preview job). The
+preview check shows what the gate would decide and is never required.
+
+> **`protected-approval-gate-sweep-reusable.yml` does not accept
+> `helpers-ref`.** It triggers publisher reruns via the Actions API rather than
+> running composite actions itself, so it has no helper-checkout bootstrap step
+> and no `helpers-ref` input. Do not pass `helpers-ref` to your backfill or
+> reconcile stubs.
 
 **Prerequisites.**
 
@@ -1570,18 +1575,20 @@ shows what the gate would decide and is never required.
   `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` secrets of an `allowlist-resolver`
   GitHub App are required (see below). Everything else uses the workflow
   `GITHUB_TOKEN`.
-- All four caller workflows below. The backfill and reconcile are what keep
+- All five caller workflows below. The backfill and reconcile are what keep
   results current after the gate is re-enabled, so do not skip them.
 
 **Caller stubs.**
 
-The publisher runs on `pull_request_target` and on completion of the notifier,
-so it always executes trusted base-branch code and can publish results for fork
-pull requests. Do not run it on `pull_request` or `pull_request_review`: those
-events load workflow YAML from the pull request and cannot publish Checks API
-results for forks. The notifier executes nothing; its completion is the signal
-the publisher listens for. Its `name:` must exactly match the publisher's
-`workflow_run.workflows` filter.
+The publisher runs on `pull_request_target` only, so it always executes
+trusted base-branch code and can publish results for fork pull requests. Do
+not run it on `pull_request` or `pull_request_review`: those events load
+workflow YAML from the pull request and cannot publish results for forks.
+Review events are handled by the dispatcher, which reruns the publisher under
+its original `pull_request_target` context so the check attaches to the PR
+head SHA rather than the default branch. The notifier executes nothing; its
+completion is the signal the dispatcher listens for. Its `name:` must exactly
+match the dispatcher's `workflow_run.workflows` filter.
 
 `.github/workflows/protected-approval-gate-publisher.yml`:
 
@@ -1591,37 +1598,213 @@ name: protected-approval-gate-publisher
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, edited, ready_for_review, closed]
-  workflow_run:
-    workflows: ["protected-approval-gate-notify"]
-    types: [completed]
 
+# contents: read — helper checkout.
+# actions: write — departed-SHA sibling rerun helper
+#   (listWorkflowRuns + reRunWorkflow in check-protected-approval-gate).
 permissions:
   contents: read
   pull-requests: read
-  checks: write
+  actions: write
 
 concurrency:
-  group: protected-approval-gate-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  group: protected-approval-gate-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
-  check-protected-approvals:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
-    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-reusable.yml@vX.Y.Z
-    secrets:
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-    with:
-      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
-      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
-      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
-      pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
-      head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
-      repo: ${{ github.repository }}
-      helpers-ref: vX.Y.Z
-      departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
-      departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
+  # Enforcing job — runs only when the gate is enabled and the PR is not a draft.
+  # Job name must match the ruleset's required-status-check context exactly.
+  # Skipped when the gate is disabled; the preview job runs instead.
+  protected-approval-gate:
+    if: vars.ENABLE_PROTECTED_APPROVAL_GATE == 'true' && github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Pin vX.Y.Z to the same release used in the dispatcher, backfill, and
+      # reconcile stubs.  Use an exact tag (not a branch) so the ref is
+      # immutable; the resolve step verifies the checkout HEAD before any
+      # composite action runs.
+      - name: Validate helpers-ref
+        env:
+          HELPERS_REF: vX.Y.Z
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref is required and must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: vX.Y.Z
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+
+      # Mint the allowlist-resolver token only when qualifying-reviewers
+      # contains a team reference (org/team) and the resolver secrets are
+      # configured.  A missing secret or failed mint leaves the token empty;
+      # the activity then fails protected PRs with an explanation rather than
+      # silently passing them.
+      - name: Detect team references in qualifying reviewers
+        id: reviewer-teams
+        env:
+          QUALIFYING_REVIEWERS: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
+          HAS_RESOLVER: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID != '' }}
+        run: |
+          set -euo pipefail
+          teams=false
+          if jq -e 'type == "array" and any(.[]; type == "string" and contains("/"))' <<<"${QUALIFYING_REVIEWERS:-[]}" >/dev/null 2>&1; then
+            teams=true
+          fi
+          if [[ "$teams" == "true" && "$HAS_RESOLVER" == "true" ]]; then
+            echo 'mint=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'mint=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint allowlist-resolver token
+        id: resolver-token
+        if: steps.reviewer-teams.outputs.mint == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
+
+      - name: Publish protected-approval-gate check
+        uses: ./_agentic-workflow/.github/actions/check-protected-approval-gate
+        with:
+          enabled: 'true'
+          protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
+          required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
+          qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
+          resolver-token: ${{ steps.resolver-token.outputs.token }}
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          repo: ${{ github.repository }}
+          departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
+          departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
+
+  # Preview job — diagnostic only, never blocks merges.
+  protected-approval-gate-preview:
+    name: protected-approval-gate (preview)
+    if: vars.ENABLE_PROTECTED_APPROVAL_GATE != 'true' && github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Validate helpers-ref
+        env:
+          HELPERS_REF: vX.Y.Z
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref is required and must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: vX.Y.Z
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+
+      - name: Detect team references in qualifying reviewers
+        id: reviewer-teams
+        env:
+          QUALIFYING_REVIEWERS: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
+          HAS_RESOLVER: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID != '' }}
+        run: |
+          set -euo pipefail
+          teams=false
+          if jq -e 'type == "array" and any(.[]; type == "string" and contains("/"))' <<<"${QUALIFYING_REVIEWERS:-[]}" >/dev/null 2>&1; then
+            teams=true
+          fi
+          if [[ "$teams" == "true" && "$HAS_RESOLVER" == "true" ]]; then
+            echo 'mint=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'mint=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint allowlist-resolver token
+        id: resolver-token
+        if: steps.reviewer-teams.outputs.mint == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
+
+      - name: Publish protected-approval-gate (preview) check
+        uses: ./_agentic-workflow/.github/actions/check-protected-approval-gate
+        with:
+          enabled: 'false'
+          protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
+          required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
+          qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
+          resolver-token: ${{ steps.resolver-token.outputs.token }}
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          repo: ${{ github.repository }}
+          departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
+          departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
 ```
 
 `departed-sha` and `departed-pr-number` re-evaluate the commit a pull request
@@ -1650,6 +1833,64 @@ jobs:
       - run: 'true'
 ```
 
+`.github/workflows/protected-approval-gate-dispatcher.yml` (reruns the
+publisher for the reviewed PR under the original `pull_request_target`
+context, so the resulting check attaches to the PR head SHA):
+
+```yaml
+name: protected-approval-gate-dispatcher
+
+on:
+  workflow_run:
+    workflows: ["protected-approval-gate-notify"]
+    types: [completed]
+
+# actions: write is required to call POST /actions/runs/{run_id}/rerun.
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: protected-approval-gate-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Find and rerun latest publisher run for PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_id=""
+          page=1
+          while true; do
+            response="$(gh api \
+              "repos/${REPO}/actions/workflows/protected-approval-gate-publisher.yml/runs?event=pull_request_target&per_page=100&page=${page}")"
+            run_id="$(jq -r --argjson pr "${PR_NUMBER}" \
+              '[.workflow_runs[] | select((.pull_requests // [])[] | .number == $pr) | .id] | .[0] // ""' \
+              <<<"$response")"
+            if [[ -n "$run_id" ]]; then
+              break
+            fi
+            count="$(jq '.workflow_runs | length' <<<"$response")"
+            if (( count < 100 )); then
+              break
+            fi
+            (( page++ ))
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "::warning::No prior publisher run found for PR #${PR_NUMBER}. The scheduled sweep will reconcile it."
+            exit 0
+          fi
+          gh api -X POST "repos/${REPO}/actions/runs/${run_id}/rerun"
+```
+
 `.github/workflows/protected-approval-gate-backfill.yml` (dispatch it by hand
 after enabling the gate):
 
@@ -1661,23 +1902,14 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
   pull-requests: read
-  checks: write
 
 jobs:
   sweep:
     uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@vX.Y.Z
-    secrets:
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
     with:
-      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
-      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
-      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       repo: ${{ github.repository }}
-      helpers-ref: vX.Y.Z
 ```
 
 `.github/workflows/protected-approval-gate-reconcile.yml` (scheduled safety
@@ -1697,9 +1929,8 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
   pull-requests: read
-  checks: write
 
 concurrency:
   group: protected-approval-gate-reconcile
@@ -1708,16 +1939,8 @@ concurrency:
 jobs:
   sweep:
     uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@vX.Y.Z
-    secrets:
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
     with:
-      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
-      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
-      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       repo: ${{ github.repository }}
-      helpers-ref: vX.Y.Z
       interval-minutes: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES }}
 ```
 
@@ -1761,24 +1984,24 @@ Enable in this order:
 - Set `ENABLE_PROTECTED_APPROVAL_GATE` to `true`, with
   `PROTECTED_PR_AUTHOR_LOGINS` and `REQUIRED_APPROVAL_COUNT` set.
 - Dispatch `protected-approval-gate-backfill` and wait for it to finish.
-  This gives each open pull request a current conclusion in the Checks tab
-  and registers the context name for the branch-protection picker. The
-  publisher or the reconcile sweep can also produce that first report.
+  For each open pull request the backfill locates the most-recent
+  `pull_request_target` publisher run and triggers a rerun via the Actions
+  API. The rerun executes under the original `pull_request_target` context,
+  so the auto-emitted `protected-approval-gate` job check attaches to the
+  PR head SHA inside the publisher suite and clears the merge box directly —
+  no new commit is required. The publisher or the reconcile sweep can also
+  produce that first check if a manual backfill dispatch is not convenient.
 - Merge or close open pull requests that should land before requiring the
-  check. A pull request on a head whose Actions suite has already finished
-  stays "Expected — Waiting for status to be reported" in the merge box
-  even after the backfill posts `success` — the Checks API update attaches
-  to the completed suite and does not clear Expected. Only a new commit
-  clears it. Confirm the merge box, not `gh pr checks`.
+  check (for project reasons, not because of a stale check state).
 - Require the `protected-approval-gate` status check on your default branch,
   with **GitHub Actions** as its source:
   - **With this project's `branch-protection` Terraform module:** set
     `enable_protected_approval_gate = true` (it also sets the Actions variable
     through `agent-vars`) and apply. The module pins the check's source to
     GitHub Actions (`integration_id = 15368`). Dispatch the backfill
-    immediately after apply so each open pull request has a result in the
-    Checks tab; merge or close remaining open pull requests before requiring
-    the check.
+    immediately after apply so each open pull request gets a fresh publisher
+    run with the current gate result; the rerun clears the merge box without
+    requiring a new commit.
   - **With a repository or organization ruleset:** edit the ruleset that
     targets your default branch, enable **Require status checks to pass**, add
     the check `protected-approval-gate`, and select **GitHub Actions** as its
@@ -1801,13 +2024,12 @@ request to the branch is blocked. With the Terraform modules, setting
 **Re-enabling the gate.** Follow the enabling steps again. While the gate was
 disabled, only the preview check was updated, so an open pull request whose
 head has not changed can still carry an enforcing result from the earlier
-enabled period. The backfill and the reconcile sweep update the Checks API
-with the current result, replacing the stale entry visible in `gh pr checks`
-and the Checks tab. However, a pull request on a head whose Actions suite has
-already completed stays "Expected — Waiting for status to be reported" in the
-merge box even after the sweep re-posts the result; only a new commit clears
-it. Merge or close open pull requests before re-requiring the check if their
-Actions suite has finished.
+enabled period. Dispatching the backfill (or waiting for the reconcile sweep)
+reruns the publisher for each open pull request; the rerun executes under the
+original `pull_request_target` context and emits a fresh `protected-approval-gate`
+job check at the PR head SHA, replacing the stale result in the merge box
+without requiring a new commit. Merge or close open pull requests before
+re-requiring the check if needed for project reasons unrelated to check state.
 
 **Limitations.** Merge queues are not supported. The publisher does not run on
 `merge_group` events, so requiring `protected-approval-gate` on a branch that
@@ -1815,9 +2037,12 @@ uses a merge queue stalls entries waiting for a check that is never posted.
 
 **Trust considerations.** The publisher and sweep run trusted base-branch code
 and never check out pull request content. The required check's GitHub Actions
-source restricts who can satisfy it, but any workflow in your repository with
-`checks: write` could post a check under the same name; see the residual-risk
-discussion in
+source restricts who can satisfy it: the check is now the auto-emitted job
+check produced by the publisher's `protected-approval-gate` job (not a Checks
+API write), so it can only be satisfied by a GitHub Actions workflow run that
+has a top-level job named `protected-approval-gate`. Any workflow in your
+repository that declares such a job could emit a result under the same name;
+see the residual-risk discussion in
 [`docs/design/protected-approval-gate.md`](design/protected-approval-gate.md)
 (Decision 5).
 

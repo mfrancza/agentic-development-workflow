@@ -1,6 +1,7 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { expandTeamRefs } from "./lib/expand-team-refs.js";
+import { rerunPublisher } from "./lib/rerun-publisher.js";
 
 const OPINIONATED_STATES = new Set(["APPROVED", "CHANGES_REQUESTED", "DISMISSED"]);
 type Octokit = ReturnType<typeof github.getOctokit>;
@@ -49,14 +50,6 @@ function splitRepository(repository: string): [string, string] {
   const [owner, repo, ...rest] = repository.split("/");
   if (!owner || !repo || rest.length > 0) throw new Error(`Invalid repo format: "${repository}". Expected "owner/name".`);
   return [owner, repo];
-}
-
-// Fixed context name. Stale results from an earlier ON interval are replaced by
-// the backfill on enable and by the reconcile sweep (see Decision 7).
-const CHECK_NAME = "protected-approval-gate";
-
-function checkName(preview: boolean): string {
-  return `${CHECK_NAME}${preview ? " (preview)" : ""}`;
 }
 
 function parseConfig(): Config {
@@ -109,10 +102,6 @@ export async function resolveQualifyingReviewers(entries: string[], owner: strin
   return { kind: "listed", logins: new Set(expanded.map(login => login.toLowerCase())) };
 }
 
-async function publishResult(octokit: Octokit, owner: string, repo: string, headSha: string, name: string, result: ApprovalResult): Promise<void> {
-  await octokit.rest.checks.create({ owner, repo, name, head_sha: headSha, status: "completed", conclusion: result.conclusion, output: { title: name, summary: result.summary } });
-}
-
 async function listCandidates(octokit: Octokit, owner: string, repo: string, headSha: string, excludedPr?: number): Promise<number[]> {
   const candidates: number[] = [];
   for (let page = 1; ; page += 1) {
@@ -122,9 +111,38 @@ async function listCandidates(octokit: Octokit, owner: string, repo: string, hea
   }
 }
 
-async function evaluateSha(octokit: Octokit, owner: string, repo: string, headSha: string, config: Config, reviewers: QualifyingReviewers, excludedPr?: number): Promise<ApprovalResult | null> {
-  const numbers = await listCandidates(octokit, owner, repo, headSha, excludedPr);
+/**
+ * Evaluates the strictest-wins conclusion for all open PRs sharing the given head SHA.
+ *
+ * Decision 8 fallback: whenever `fallbackPrNumber` is provided and absent from the
+ * listing (whether the listing is empty **or** contains other PRs that were indexed
+ * faster), it is appended as an additional candidate. The evaluation loop validates
+ * the PR's actual state and SHA via a direct `pulls.get`, so a stale listing that
+ * omits the triggering PR is corrected while a genuinely absent PR (closed or on a
+ * different SHA) is still skipped. This covers both the empty-listing race and the
+ * mixed-list race where another PR sharing the SHA is indexed before the triggering PR.
+ *
+ * Returns `null` when there are genuinely no open PRs at `headSha` (after the fallback
+ * check). This occurs for departed-SHA evaluations when all siblings have moved away.
+ */
+async function evaluateSha(
+  octokit: Octokit, owner: string, repo: string, headSha: string,
+  config: Config, reviewers: QualifyingReviewers,
+  excludedPr?: number, fallbackPrNumber?: number,
+): Promise<ApprovalResult | null> {
+  let numbers = await listCandidates(octokit, owner, repo, headSha, excludedPr);
+
+  // Decision 8 fallback: inject the fallback PR whenever it is absent from the listing,
+  // not only when the listing is empty. If another PR on the same SHA was indexed first
+  // the listing is nonempty but still missing the triggering PR, so we must add it here.
+  // The evaluation loop below validates each candidate's live state and SHA via
+  // pulls.get, so a stale omission is corrected while a genuinely absent PR is skipped.
+  if (fallbackPrNumber !== undefined && !numbers.includes(fallbackPrNumber)) {
+    numbers = [...numbers, fallbackPrNumber];
+  }
+
   if (numbers.length === 0) return null;
+
   const results: string[] = [];
   let failed = false;
   for (const number of numbers) {
@@ -141,50 +159,102 @@ async function evaluateSha(octokit: Octokit, owner: string, repo: string, headSh
   return { conclusion: failed ? "failure" : "success", summary: `Shared SHA candidates:\n${results.map(line => `- ${line}`).join("\n") || "none"}` };
 }
 
-async function publishFailure(octokit: Octokit, owner: string, repo: string, sha: string, name: string, error: unknown): Promise<void> {
-  const message = error instanceof Error ? error.message : String(error);
-  core.error(message);
-  await publishResult(octokit, owner, repo, sha, name, { conclusion: "failure", summary: `Unable to evaluate all pull requests sharing this SHA: ${message}` });
-}
-
 export async function run(): Promise<void> {
   const enabled = core.getInput("enabled", { required: true }).trim() === "true";
   const prNumber = Number(core.getInput("pr_number", { required: true }));
   const [owner, repo] = splitRepository(core.getInput("repo", { required: true }));
+  const publisherWorkflowFile = core.getInput("publisher_workflow_file").trim() || "protected-approval-gate-publisher.yml";
   const token = process.env.GITHUB_TOKEN;
-  if (!token) throw new Error("GITHUB_TOKEN is required to list pull requests and publish the check run.");
+  if (!token) throw new Error("GITHUB_TOKEN is required to list pull requests and evaluate approvals.");
   if (!Number.isSafeInteger(prNumber) || prNumber < 1) throw new Error("pr-number must be a positive integer.");
   const octokit = github.getOctokit(token);
+
   let config: Config;
   try { config = parseConfig(); } catch (error) {
-    const { data: pr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
-    if (enabled) await publishFailure(octokit, owner, repo, pr.head.sha, checkName(false), error);
-    else core.error(error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
+    core.error(message);
+    await core.summary.addHeading("Configuration error", 2).addRaw(message).write();
+    // Both the enforcing job and the preview job fail loudly on misconfiguration
+    // so operators see the problem regardless of whether the gate is currently enabled.
+    core.setFailed(message);
     if (enabled) throw error;
     return;
   }
+
   const reviewers = await resolveQualifyingReviewers(config.reviewerEntries, owner, core.getInput("resolver_token").trim());
   if (reviewers.kind === "unresolved") core.error(reviewers.message);
+
   const { data: triggeringPr } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
   const liveHeadSha = triggeringPr.head.sha;
-  const name = checkName(!enabled);
+
+  // Evaluate all open PRs sharing the live head SHA (Decision 8a strictest-wins intersection).
+  // Pass the triggering PR number as the fallback so the Decision 8 race is handled.
+  let mainResult: ApprovalResult;
   try {
-    const result = await evaluateSha(octokit, owner, repo, liveHeadSha, config, reviewers);
-    if (result) await publishResult(octokit, owner, repo, liveHeadSha, name, result);
+    const evalResult = await evaluateSha(octokit, owner, repo, liveHeadSha, config, reviewers, undefined, prNumber);
+    // evalResult is null only when both the listing and the fallback find no open PR at liveHeadSha.
+    // This is theoretically possible (PR closed between fetches) but extremely rare; treat as failure
+    // so the gate never silently passes when the evaluation could not run.
+    mainResult = evalResult ?? { conclusion: "failure", summary: "No open pull requests found at the live head SHA; cannot evaluate." };
   } catch (error) {
-    await publishFailure(octokit, owner, repo, liveHeadSha, name, error);
+    const message = error instanceof Error ? error.message : String(error);
+    core.error(`Unable to evaluate pull requests sharing SHA ${liveHeadSha}: ${message}`);
+    await core.summary.addHeading("Evaluation error", 2).addRaw(`Unable to evaluate pull requests sharing SHA ${liveHeadSha}: ${message}`).write();
     throw error;
   }
+
+  // Write the main result to the job log and step summary (Decision 9).
+  if (mainResult.conclusion === "success") {
+    core.notice(mainResult.summary);
+  } else {
+    core.error(mainResult.summary);
+  }
+  await core.summary
+    .addHeading(enabled ? "Approval gate result" : "Approval gate preview", 2)
+    .addRaw(mainResult.summary)
+    .write();
+
+  // Departed-SHA sibling reconciliation (Decision 7): trigger publisher reruns for
+  // all open PRs remaining on the departed SHA so their job checks reflect the updated
+  // candidate set. Only runs when the gate is enabled (preview runs skip sibling reruns).
   const departedSha = core.getInput("departed_sha").trim();
   const departedNumber = Number(core.getInput("departed_pr_number").trim()) || undefined;
   if (enabled && departedSha && !(departedSha === liveHeadSha && triggeringPr.state === "open")) {
+    let siblings: number[];
     try {
-      const result = await evaluateSha(octokit, owner, repo, departedSha, config, reviewers, departedNumber);
-      if (result) await publishResult(octokit, owner, repo, departedSha, checkName(false), result);
+      // Fail loudly if the listing fails: do not silently drop siblings (Decision 7).
+      siblings = await listCandidates(octokit, owner, repo, departedSha, departedNumber);
     } catch (error) {
-      await publishFailure(octokit, owner, repo, departedSha, checkName(false), error);
+      const message = error instanceof Error ? error.message : String(error);
+      core.error(`Failed to list siblings on departed SHA ${departedSha}: ${message}`);
       throw error;
     }
+
+    if (siblings.length > 0) {
+      const rerunLines: string[] = [`Departed SHA ${departedSha} — sibling rerun targets:`];
+      for (const siblingNumber of siblings) {
+        const rerunResult = await rerunPublisher(octokit, owner, repo, siblingNumber, publisherWorkflowFile);
+        if (rerunResult.status === "rerun-triggered") {
+          core.notice(`Triggered publisher rerun (run ${rerunResult.runId}) for sibling PR #${siblingNumber} on departed SHA ${departedSha}.`);
+          rerunLines.push(`- PR #${siblingNumber}: rerun triggered (run ${rerunResult.runId})`);
+        } else if (rerunResult.status === "no-prior-run") {
+          core.warning(`No prior pull_request_target publisher run found for sibling PR #${siblingNumber}; the scheduled reconcile sweep will reconcile it.`);
+          rerunLines.push(`- PR #${siblingNumber}: no prior run found — skipped; scheduled sweep will reconcile`);
+        } else {
+          core.warning(`Rerun API error for sibling PR #${siblingNumber}: ${rerunResult.message}; the scheduled reconcile sweep will reconcile it.`);
+          rerunLines.push(`- PR #${siblingNumber}: rerun API error (${rerunResult.message}) — scheduled sweep will reconcile`);
+        }
+      }
+      await core.summary.addRaw(rerunLines.join("\n")).write();
+    }
+  }
+
+  // Map conclusion to exit code (Decision 3): non-zero exits cause the auto-emitted
+  // job check to conclude "failure", which satisfies the required-check enforcement.
+  // core.setFailed sets process.exitCode = 1 without throwing, so run() resolves normally
+  // and the .catch(core.setFailed) at the bottom is not invoked for this path.
+  if (mainResult.conclusion === "failure") {
+    core.setFailed(mainResult.summary);
   }
 }
 
