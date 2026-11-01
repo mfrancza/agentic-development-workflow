@@ -12,11 +12,13 @@ on:
 
 # contents: read is required only to retrieve the trusted helper checkout in
 # the reusable workflow. The composite action uses pull-request metadata and
-# publishes its result through the Checks API; it never checks out PR content.
+# exits non-zero to publish its result via the auto-emitted job check; it never
+# checks out PR content. actions: write is required for the departed-SHA
+# sibling rerun helper (listWorkflowRuns + reRunWorkflow).
 permissions:
   contents: read
   pull-requests: read
-  checks: write
+  actions: write
 
 concurrency:
   # The workflow_run fallback prevents unrelated PR-less notifier runs from
