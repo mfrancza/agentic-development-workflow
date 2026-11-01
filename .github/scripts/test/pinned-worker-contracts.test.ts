@@ -28,7 +28,7 @@
  */
 
 import { readFileSync, readdirSync } from "node:fs";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -55,8 +55,9 @@ function allWorkflowFiles(): string[] {
  */
 function gitShow(ref: string, gitPath: string): string | null {
   try {
-    return execSync(
-      `git -C "${repoRoot}" show "${ref}:${gitPath}"`,
+    return execFileSync(
+      "git",
+      ["-C", repoRoot, "show", `${ref}:${gitPath}`],
       { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] },
     );
   } catch {
