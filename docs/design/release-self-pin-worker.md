@@ -52,10 +52,13 @@ grooming thread (Option A — dedicated release App identity):
    nothing from this flow lands on `main`. `main`'s pin stays at the
    latest already-published tag, and the #745 contract test continues to
    guard that pin between releases.
-3. **Rewrite is scoped to self-references.** Only
+3. **Rewrite is scoped to self-references and is anchor-driven.** Only
    `mfrancza/agentic-development-workflow/.github/workflows/*@<ref>` lines
-   are rewritten. External `uses:` lines (e.g.
-   `actions/checkout@…`), local `uses:` (e.g. `./…`), and non-workflow
+   are rewritten, and only when the line is **explicitly marked** by a
+   sentinel comment (`# release-self-pin`) on the line directly above it
+   (see Decision 2). External `uses:` lines (e.g. `actions/checkout@…`),
+   local `uses:` (e.g. `./…`), unanchored self-pins (none today, but if
+   one were added the completeness test fails on PR), and non-workflow
    self-references (`.github/actions/…` paths — which do not appear in a
    `uses:` for a workflow) are left untouched.
 4. **No-op is a no-op.** When the rewrite finds nothing to change
@@ -197,58 +200,129 @@ hand, just performed inside the workflow with no human toil.
   commit does — a chicken-and-egg that the dangling-commit approach is
   the only clean resolution for.
 
-### Decision 2 — Rewrite logic lives in a TypeScript activity
+### Decision 2 — Anchor-driven rewrite in a TypeScript activity
 
 **Decision.** The rewrite is implemented as
 `.github/scripts/src/rewrite-self-ref-pins.ts` with
 `.github/scripts/test/rewrite-self-ref-pins.test.ts`, wrapped by a
 composite action at
-`.github/actions/rewrite-self-ref-pins/action.yml`. The activity:
+`.github/actions/rewrite-self-ref-pins/action.yml`. Crucially the
+rewrite target is **declared in-source** by a sentinel anchor
+comment, not inferred from a global pattern scan. The pattern on
+every self-pin is:
 
-1. Takes two inputs: `workflows-dir` (default
-   `.github/workflows`) and `target-version` (`vX.Y.Z`).
-2. Enumerates every `.yml`/`.yaml` file in the directory.
-3. For each file, scans line-by-line and applies the same
-   `PINNED_SELF_REF_RE` pattern that `pinned-worker-contracts.test.ts`
-   already uses:
-   `/uses:\s+mfrancza\/agentic-development-workflow\/\.github\/workflows\/([\w.-]+\.ya?ml)@(\S+)/`.
-4. Skips lines whose first non-whitespace character is `#` (comment
-   lines must never be rewritten; this matches the #745 test's own
-   skip rule).
-5. Rewrites each match's `@<ref>` to `@<target-version>` in place.
-6. Emits two outputs: `changed=true|false` and `files-changed=<count>`.
+```yaml
+# release-self-pin: <worker-filename>  # rewritten at release by .github/actions/rewrite-self-ref-pins
+uses: mfrancza/agentic-development-workflow/.github/workflows/<worker-filename>@v0.3.0
+```
+
+The activity:
+
+1. Takes two inputs: `workflows-dir` (default `.github/workflows`)
+   and `target-version` (`vX.Y.Z`).
+2. Enumerates every `.yml`/`.yaml` file in the directory and, for
+   each file, scans only for the anchor comment pattern
+   `# release-self-pin: <worker-filename>` (first non-whitespace `#`,
+   literal `release-self-pin:` tag).
+3. For each anchor hit, examines the **next non-blank line**. It
+   must be a `uses:` line that matches
+   `mfrancza/agentic-development-workflow/.github/workflows/<worker-filename>@<ref>`
+   where `<worker-filename>` equals what the anchor declared. If it
+   does not, the activity **aborts with a diagnostic** citing the
+   file and line — the anchor is a hard contract, not a hint.
+4. Rewrites each matched `@<ref>` to `@<target-version>` in place.
+   An anchor that is already at the target version is a no-op (and
+   counts toward `changed=false`).
+5. Emits two outputs: `changed=true|false` and `files-changed=<count>`.
+
+The anchor comment is added to `agent-review-reusable.yml` in the
+same PR as the rewrite activity (Task 2); the completeness test
+below guards that no future self-pin can be added without one.
+
+**Why anchor-driven, not pattern-scanned.** A broad "find every
+`uses: mfrancza/…@<ref>` and rewrite it" step is hard to review in
+isolation — a reader of a workflow file cannot tell which lines the
+release process will mutate. The anchor flips that: every
+rewrite-target is marked in-source and names the worker it is
+pinning, so the rewrite surface is auditable from the workflow file
+alone. The rewriter's own logic shrinks to "find the anchor, verify
+the next line, swap the `@<ref>` suffix" — a function with a tiny
+test matrix (match / anchor-without-matching-uses / already-at-target
+/ unrelated `uses:` left alone).
+
+The version itself cannot be factored out of the `uses:` line into a
+variable: GitHub Actions does not interpolate expressions in `uses:`
+values, so the version must physically live inside the pin string.
+What *can* be factored out is the **location** of the pin — which is
+exactly what the anchor does.
+
+**Companion completeness test (co-located with the #745 test).** A
+test added alongside `pinned-worker-contracts.test.ts` enumerates
+every `uses: mfrancza/agentic-development-workflow/.github/workflows/*@<ref>`
+line in the repo (reusing the existing `PINNED_SELF_REF_RE` scan)
+and asserts each is immediately preceded by a matching
+`# release-self-pin: <worker-filename>` anchor. A new self-pin added
+without an anchor fails on PR before merge, and the rewriter can
+rely on the invariant that every self-pin it should touch is
+anchored.
+
+The regex `PINNED_SELF_REF_RE` thus has two consumers (the #745
+contract test and the new completeness test). It is extracted into
+`.github/scripts/src/lib/` so both import the same source; the
+rewriter itself does not use the regex because its target is the
+anchor, not the pattern.
 
 **Rationale.** This crosses the AGENTS.md shell-vs-TypeScript
-threshold on at least two axes: it must parse YAML lines, apply a
-regex pattern that must stay in step with the #745 test's regex, and
-make a conditional "nothing to do" decision that becomes a shell
-`if:` in the workflow. The repo pattern for this shape is a
-TypeScript activity with Vitest coverage.
-
-Co-locating the rewrite pattern as a TypeScript constant also lets
-`rewrite-self-ref-pins.ts` and `pinned-worker-contracts.test.ts` share
-the regex via `.github/scripts/src/lib/`, so a change to the matcher
-cannot drift between the rewriter and its verifier.
+threshold on at least two axes: it must parse YAML lines, enforce
+the anchor-matches-next-line contract with a clear diagnostic on
+violation, and make a conditional "nothing to do" decision that
+becomes a shell `if:` in the workflow. The repo pattern for this
+shape is a TypeScript activity with Vitest coverage. Fixture-based
+tests (anchor + matching uses: line → rewrite; anchor + mismatched
+next line → abort; uses: line without anchor → ignored; anchor +
+already-target → no-op; etc.) are self-contained and don't require
+constructing realistic full workflow files.
 
 **Alternatives considered.**
 
-- **Inline `sed -i -E 's|…|…|'` in `release.yml`.** Rejected: the
-  pattern already contains `/`, `.`, and `@`, so the sed escaping
-  would be unreadable; a zero-match substitution would silently
-  succeed without indicating that nothing was done (the "no changes"
-  path then relies on `git diff --quiet`, which is fine for correctness
-  but gives no diagnostic when the regex is subtly wrong); and the
-  regex pattern lives in two places with no cross-check.
-- **Inline shell with `yq` + jq.** Rejected: `yq` is not installed on
-  `ubuntu-24.04` by default and would need an extra setup step. The
-  value yq would add over the regex approach (full YAML parsing) is
-  not needed — the self-pin line is a single-line scalar; there is no
-  anchor/alias/multiline wrapping to worry about.
+- **Broad regex scan with no anchor** (original design in this
+  doc's first draft). Rejected per maintainer review feedback: the
+  rewrite surface is implicit and un-auditable from workflow files.
+  Any `uses:` matching the pattern would be rewritten whether that
+  was the author's intent or not. The anchor makes intent explicit
+  and keeps a reader of the workflow file in the loop.
+- **Factor the version into a separate file (e.g.
+  `.github/release-pin-version`) that `uses:` lines reference.**
+  Rejected because GitHub Actions does not interpolate expressions
+  in `uses:`; the version must be a literal substring of the pin
+  string. A separate version file would still require a rewrite
+  step to propagate the value into `uses:` lines, so it adds a
+  surface without removing one.
+- **Workflow-template generation** (`agent-review-reusable.yml.template`
+  → `agent-review-reusable.yml` at release). Rejected as
+  disproportionate: every day-to-day edit to a workflow would need
+  to go through the template and be regenerated. The anchor
+  approach achieves the same reviewability (humans see what the
+  release will change) with zero day-to-day friction.
+- **Explicit pin manifest** (`.github/release-pins.yaml` listing
+  `(file, workflow)` targets). Rejected as a second source of
+  truth: a reader of `agent-review-reusable.yml` would still not
+  know the line is rewrite-managed without opening the manifest.
+  The in-source anchor is where that information actually belongs,
+  and the completeness test substitutes for the manifest's role of
+  enumerating expected targets.
+- **Inline `sed -i -E 's|…|…|'` in `release.yml`.** Rejected: no
+  diagnostic on zero-match, no anchor contract to enforce, and
+  escaping of `/`, `.`, and `@` makes the one-liner unreadable.
+- **Inline shell with `yq` + jq.** Rejected: `yq` is not installed
+  on `ubuntu-24.04` by default and the self-pin line is a
+  single-line scalar; full YAML parsing adds no value.
 - **Reuse the existing `pinned-worker-contracts.test.ts` parser
   verbatim.** Rejected: the test file is scoped to assertions and
-  does not expose the parse-rewrite primitive. Extract the shared
-  regex and site-finding logic into `.github/scripts/src/lib/` and
-  consume it from both; otherwise the two code paths drift.
+  does not expose the parse-rewrite primitive. The regex extraction
+  into `.github/scripts/src/lib/` covers the shared piece (used by
+  the #745 test and by the new completeness test); the rewriter
+  itself does not consume the regex.
 
 ### Decision 3 — Dedicated `release-agent` GitHub App (Option A)
 
@@ -509,7 +583,7 @@ the terraform-ci App sub-issue #424).
 | Task # | Issue | Task | Depends on |
 |--------|-------|------|------------|
 | 1 | Issue [#754](https://github.com/mfrancza/agentic-development-workflow/issues/754) | **Create the `release-agent` GitHub App identity (human, `human-required`).** Create the App in Settings → Developer settings → GitHub Apps with Repository permissions: Contents (R/W), Workflows (R/W), Metadata (R). Subscribe to no events. Uncheck the Webhook "Active" box. Install the App on this repository. Add `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` as repo Actions secrets. Update README §1 (App creation list) and §3 (secrets list) following the terraform-ci App's structure. Comment the App's slug (e.g. `mfrancza-release-agent[bot]`) and installation ID on the parent design-doc PR so Task 3 can wire it in. | — |
-| 2 | Issue [#755](https://github.com/mfrancza/agentic-development-workflow/issues/755) | **Rewrite activity + tests.** Add `.github/scripts/src/rewrite-self-ref-pins.ts` with the inputs/outputs described in Decision 2, extract the shared `PINNED_SELF_REF_RE` pattern into `.github/scripts/src/lib/` and update `pinned-worker-contracts.test.ts` to import it (same regex, one source), add `.github/scripts/test/rewrite-self-ref-pins.test.ts` with Vitest coverage for: single-match file, multi-match file, no-match file, file with the pattern only inside a comment (must not rewrite), unrelated `uses:` lines (must not rewrite), unchanged pin (output `changed=false`). Add the composite wrapper `.github/actions/rewrite-self-ref-pins/action.yml` using the shared-scripts bootstrap pattern (per AGENTS.md § "Working-directory portability"). | — |
+| 2 | Issue [#755](https://github.com/mfrancza/agentic-development-workflow/issues/755) | **Anchor + rewrite activity + completeness test.** (a) Add the `# release-self-pin: agent-review-worker-reusable.yml` anchor comment immediately above the existing self-pin line in `.github/workflows/agent-review-reusable.yml` (the one line of code change this release design puts on `main`). (b) Extract `PINNED_SELF_REF_RE` from `pinned-worker-contracts.test.ts` into `.github/scripts/src/lib/` and update the #745 test to import it. (c) Add `.github/scripts/test/anchor-completeness.test.ts` co-located with the #745 test, which uses the shared regex to scan every workflow file and asserts each self-pin `uses:` line is immediately preceded by a matching `# release-self-pin: <worker-filename>` anchor (fails the PR if any new self-pin lacks an anchor). (d) Add `.github/scripts/src/rewrite-self-ref-pins.ts` implementing the anchor-driven rewrite from Decision 2 (anchor locator → verify next non-blank line is the declared worker's `uses:` self-pin → rewrite the `@<ref>` suffix; abort on anchor-without-matching-uses). (e) Add `.github/scripts/test/rewrite-self-ref-pins.test.ts` with fixture coverage for: anchor + matching uses: → rewrite, anchor + already-target → no-op, anchor + mismatched next line → abort with diagnostic, uses: without anchor → left alone, multiple anchors in one file → all rewritten, no anchors in a file → file untouched. (f) Add the composite wrapper `.github/actions/rewrite-self-ref-pins/action.yml` using the shared-scripts bootstrap pattern (per AGENTS.md § "Working-directory portability"). | — |
 | 3 | Issue [#756](https://github.com/mfrancza/agentic-development-workflow/issues/756) | **Wire the rewrite + release commit + verification into `release.yml`.** After the existing checkout step, invoke the rewrite activity with `target-version: ${{ inputs.version }}`. When `changed == 'true'`, configure the `github-actions[bot]` identity and create the release commit with `git commit -m "Release ${_VERSION}: self-pin workflow references"`; the commit's parent is the input ref SHA, and no branch is updated. Run `vitest run test/pinned-worker-contracts.test.ts` from the release commit's working tree; abort on failure. Add the `dry-run` input (Decision 5) and gate the token-mint + push + Release-create steps on `inputs.dry-run != 'true'`. Replace the push identity for the tag push with the release-agent App token (via `.github/actions/agent-token` using `RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`). Update README "Releasing" per Decision 6 in the same PR. | Task 1, Task 2 |
 | 4 | Issue [#757](https://github.com/mfrancza/agentic-development-workflow/issues/757) | **End-to-end validation via dry-run only.** Dispatch `release.yml` with `version=v99.99.99` and `dry-run=true` against `main`. Verify from the run logs: (a) the rewrite step reported `changed=true` (the current `main` pin is `@v0.3.0`, so a rewrite to `@v99.99.99` is expected), (b) the #745 verifier passed on the release commit, (c) the diagnostic diff shows exactly the self-pin line changing from `@v0.3.0` to `@v99.99.99`, (d) no tag, Release, or push happened, (e) the release-agent App token-mint step still executed (the mint runs always; only the push is gated on `dry-run != true` per Decision 3), so the identity plumbing is exercised end-to-end even without the push. A throwaway real tag is **deliberately not** part of acceptance: under the release-agent App token the tag push auto-fires `release-images.yml` (publishing `developer:v99.99.99`, `reviewer:v99.99.99`, and the moving `developer:v99` / `reviewer:v99` image tags to GHCR) and the release workflow advances the moving `v99` git tag — `gh release delete --cleanup-tag` reverts neither, so the "throwaway" would leave `v99`, four GHCR image tags, and manifest history behind (see the ambiguity-resolution bullet). The App-token **push** itself is validated on the first real release instead; if that push fails, the recovery path is `gh workflow run release-images.yml --ref vX.Y.Z -f tag=vX.Y.Z` (the same escape hatch used today). Comment the dry-run run URL on issue #750. If any failure surfaces, escalate with `human-required` for the maintainer to decide whether to re-run or re-design. | Task 3 |
 
