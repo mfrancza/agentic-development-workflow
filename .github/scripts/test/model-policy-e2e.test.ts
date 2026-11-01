@@ -2,27 +2,27 @@ import { readFileSync } from "node:fs";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resolveModel } from "../src/lib/resolve-model.js";
 import { resolveReviewerSet } from "../src/resolve-reviewer-set.js";
+import { selectReviewerModel, type PairingConfig } from "../src/lib/model-pair.js";
+import { classTable, modelToClass } from "../src/lib/model-classes.js";
 
 /**
- * End-to-end static validation for the Issue #669 model-preference policy.
+ * End-to-end static validation for this repository's model-preference policy
+ * as configured in terraform/terraform.tfvars:
  *
- * This file is the reproducible evidence artifact for Issue #672.  It
- * validates the complete policy after both implementation tasks (Issue #670
- * — design-default-model infrastructure, Issue #671 — repository
- * configuration) have landed, covering every assertion in the issue scope:
- *
- *   1. Repo-wide default is gpt-5.6-terra (terraform.tfvars → DEFAULT_MODEL).
- *   2. Design stage uses gpt-5.6-sol when no model label is present
+ *   1. Repo-wide default is sonnet (terraform.tfvars → DEFAULT_MODEL).
+ *   2. Design stage uses opus when no model label is present
  *      (DESIGN_DEFAULT_MODEL ≠ '' → agent-design.yml short-circuits to it).
  *   3. Per-design and generic labels still override that fallback
  *      (resolve-model waterfall: per-agent → generic → DESIGN_DEFAULT_MODEL →
  *      DEFAULT_MODEL).
  *   4. An unset/empty design default falls back to DEFAULT_MODEL
  *      (DESIGN_DEFAULT_MODEL == '' → `|| vars.DEFAULT_MODEL` fires).
- *   5. Reviewer resolver fans out sonnet and grok-4.6 (REVIEWER_MODELS Tier 2).
- *   6. sonnet routes to Anthropic — ANTHROPIC_API_KEY forwarded.
- *   7. grok-4.6 routes to xAI — XAI_API_KEY forwarded.
- *   8. gpt-5.6-terra is the repo-wide default, NOT a reviewer-set member.
+ *   5. REVIEWER_MODELS is empty so the reviewer resolver reaches the pairing
+ *      tier, and REVIEW_MODEL_PAIRING uses an explicit map that pairs each
+ *      Anthropic authoring model with its same-class OpenAI equivalent.
+ *   6. Anthropic models route to ANTHROPIC_API_KEY.
+ *   7. OpenAI reviewer models route to OPENAI_API_KEY.
+ *   8. The default authoring model is never selected as its own reviewer.
  *
  * All tests are static (file reads + unit calls) so they run offline and are
  * fully reproducible without a live GitHub token or Terraform credentials.
@@ -59,15 +59,36 @@ const runAgentContent = readFileSync(
   "utf8",
 );
 
-const modelClassesContent = JSON.parse(
-  readFileSync(
-    new URL(".github/scripts/data/model-classes.json", repoRoot),
-    "utf8",
-  ),
-) as {
-  classes: Record<string, Record<string, string[]>>;
-  modelToClass: Record<string, string>;
+/**
+ * Extract the `explicit_map = { ... }` entries from terraform.tfvars as a
+ * plain object.  Only quoted `"key" = "value"` pairs are recognised, which is
+ * the form `terraform fmt` produces for this map.
+ */
+function parseExplicitMap(content: string): Record<string, string> {
+  const block = content.match(/explicit_map\s*=\s*\{([^}]*)\}/);
+  if (!block) return {};
+  const entries: Record<string, string> = {};
+  for (const m of block[1].matchAll(/"([^"]+)"\s*=\s*"([^"]+)"/g)) {
+    entries[m[1]] = m[2];
+  }
+  return entries;
+}
+
+const explicitMap = parseExplicitMap(tfvarsContent);
+
+const repoPairingConfig: PairingConfig = {
+  enabled: true,
+  policy: "explicit-map",
+  preferred_vendors: ["openai", "xai", "anthropic"],
+  explicit_map: explicitMap,
+  fallback_chain: [
+    "different-vendor-same-class",
+    "same-vendor-different-model",
+    "default-model",
+  ],
 };
+
+const ALL_PROVIDERS = ["anthropic", "openai", "xai"];
 
 // ---------------------------------------------------------------------------
 // Mock Octokit — only the REST methods used by resolveReviewerSet.
@@ -108,32 +129,18 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 1: repo-wide default is gpt-5.6-terra
+// Assertion 1: repo-wide default is sonnet
 // ---------------------------------------------------------------------------
 
-describe("Issue #669 policy — (1) repo-wide default is gpt-5.6-terra", () => {
-  it("terraform.tfvars sets default_model to gpt-5.6-terra", () => {
-    // The literal assignment line must be present; surrounding whitespace is
-    // permitted so a reformatted file does not break the check.
-    expect(tfvarsContent).toMatch(/default_model\s*=\s*"gpt-5\.6-terra"/);
+describe("Model policy — (1) repo-wide default is sonnet", () => {
+  it("terraform.tfvars sets default_model to sonnet", () => {
+    // Anchored at line start so design_default_model does not satisfy it;
+    // surrounding whitespace is permitted so a reformatted file still passes.
+    expect(tfvarsContent).toMatch(/^default_model\s*=\s*"sonnet"/m);
   });
 
-  it("gpt-5.6-terra is recognised in the model-classes data file", () => {
-    // Must appear in modelToClass so the pairing resolver and provider-routing
-    // logic can handle PRs authored by this model.
-    expect(Object.keys(modelClassesContent.modelToClass)).toContain(
-      "gpt-5.6-terra",
-    );
-  });
-
-  it("gpt-5.6-terra is classified as sonnet class (OpenAI sonnet-tier)", () => {
-    expect(modelClassesContent.modelToClass["gpt-5.6-terra"]).toBe("sonnet");
-  });
-
-  it("gpt-5.6-terra is listed as an OpenAI sonnet-class model", () => {
-    expect(modelClassesContent.classes["sonnet"]["openai"]).toContain(
-      "gpt-5.6-terra",
-    );
+  it("sonnet is classified as sonnet class in the model-classes data file", () => {
+    expect(modelToClass["sonnet"]).toBe("sonnet");
   });
 
   it("review worker resolves the final fallback from vars.DEFAULT_MODEL", () => {
@@ -143,29 +150,23 @@ describe("Issue #669 policy — (1) repo-wide default is gpt-5.6-terra", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 2: design stage uses gpt-5.6-sol when no model label is present
+// Assertion 2: design stage uses opus when no model label is present
 // ---------------------------------------------------------------------------
 
-describe("Issue #669 policy — (2) design stage uses gpt-5.6-sol by default", () => {
-  it("terraform.tfvars sets design_default_model to gpt-5.6-sol", () => {
-    expect(tfvarsContent).toMatch(/design_default_model\s*=\s*"gpt-5\.6-sol"/);
+describe("Model policy — (2) design stage uses opus by default", () => {
+  it("terraform.tfvars sets design_default_model to opus", () => {
+    expect(tfvarsContent).toMatch(/design_default_model\s*=\s*"opus"/);
   });
 
-  it("gpt-5.6-sol is recognised in the model-classes data file", () => {
-    expect(Object.keys(modelClassesContent.modelToClass)).toContain(
-      "gpt-5.6-sol",
-    );
-  });
-
-  it("gpt-5.6-sol is classified as opus class (OpenAI opus-tier)", () => {
-    expect(modelClassesContent.modelToClass["gpt-5.6-sol"]).toBe("opus");
+  it("opus is classified as opus class in the model-classes data file", () => {
+    expect(modelToClass["opus"]).toBe("opus");
   });
 
   it("agent-design reusable short-circuits to DESIGN_DEFAULT_MODEL when non-empty", () => {
     // The fallback expression `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL`
     // is present in the design reusable; when DESIGN_DEFAULT_MODEL is set to
-    // "gpt-5.6-sol" the `||` short-circuits and the design workflow uses
-    // gpt-5.6-sol rather than DEFAULT_MODEL (gpt-5.6-terra).
+    // "opus" the `||` short-circuits and the design workflow uses opus rather
+    // than DEFAULT_MODEL (sonnet).
     expect(agentDesignReusableContent).toContain(
       "vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL",
     );
@@ -176,14 +177,14 @@ describe("Issue #669 policy — (2) design stage uses gpt-5.6-sol by default", (
 // Assertion 3: per-design and generic labels override the design default
 // ---------------------------------------------------------------------------
 
-describe("Issue #669 policy — (3) per-design and generic labels override DESIGN_DEFAULT_MODEL", () => {
+describe("Model policy — (3) per-design and generic labels override DESIGN_DEFAULT_MODEL", () => {
   it("agent-design-reusable.yml resolves issue labels with agent-type: design", () => {
     expect(agentDesignReusableContent).toMatch(
       /subject-type: issue[\s\S]*?agent-type: design/,
     );
   });
 
-  it("per-design label (model:design:sonnet) overrides gpt-5.6-sol", async () => {
+  it("per-design label (model:design:sonnet) overrides opus", async () => {
     mockIssueGet.mockResolvedValue(issueResponse(["model:design:sonnet"]));
 
     const result = await resolveModel(
@@ -192,15 +193,15 @@ describe("Issue #669 policy — (3) per-design and generic labels override DESIG
       1,
       "owner",
       "repo",
-      "gpt-5.6-sol",
+      "opus",
       "design",
     );
 
     expect(result).toBe("sonnet");
   });
 
-  it("generic model:* label overrides gpt-5.6-sol", async () => {
-    mockIssueGet.mockResolvedValue(issueResponse(["model:opus"]));
+  it("generic model:* label overrides opus", async () => {
+    mockIssueGet.mockResolvedValue(issueResponse(["model:haiku"]));
 
     const result = await resolveModel(
       octokit,
@@ -208,11 +209,11 @@ describe("Issue #669 policy — (3) per-design and generic labels override DESIG
       2,
       "owner",
       "repo",
-      "gpt-5.6-sol",
+      "opus",
       "design",
     );
 
-    expect(result).toBe("opus");
+    expect(result).toBe("haiku");
   });
 });
 
@@ -220,7 +221,7 @@ describe("Issue #669 policy — (3) per-design and generic labels override DESIG
 // Assertion 4: unset/empty design default falls back to DEFAULT_MODEL
 // ---------------------------------------------------------------------------
 
-describe("Issue #669 policy — (4) empty DESIGN_DEFAULT_MODEL falls back to DEFAULT_MODEL", () => {
+describe("Model policy — (4) empty DESIGN_DEFAULT_MODEL falls back to DEFAULT_MODEL", () => {
   it("agent-design reusable uses || so empty DESIGN_DEFAULT_MODEL evaluates to DEFAULT_MODEL", () => {
     // The `||` operator in `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL`
     // evaluates the right side when the left side is empty ('').  This
@@ -242,8 +243,7 @@ describe("Issue #669 policy — (4) empty DESIGN_DEFAULT_MODEL falls back to DEF
       "utf8",
     );
     // An empty-string default means 'not set' — the `||` fires and falls
-    // through to DEFAULT_MODEL ("gpt-5.6-terra") for any repo that omits the
-    // variable.
+    // through to DEFAULT_MODEL for any repo that omits the variable.
     expect(variablesTfContent).toMatch(
       /variable "design_default_model"[\s\S]*?default\s*=\s*""/,
     );
@@ -262,15 +262,14 @@ describe("Issue #669 policy — (4) empty DESIGN_DEFAULT_MODEL falls back to DEF
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 5: reviewer resolver fans out sonnet and grok-4.6
+// Assertion 5: reviewers are picked by explicit Anthropic → OpenAI pairing
 // ---------------------------------------------------------------------------
 
-describe("Issue #669 policy — (5) reviewer resolver fans out sonnet and grok-4.6", () => {
-  it("terraform.tfvars sets reviewer_models to [sonnet, grok-4.6]", () => {
-    // The literal list must be present; bracket and quote forms may vary.
-    expect(tfvarsContent).toMatch(
-      /reviewer_models\s*=\s*\[\s*"sonnet"\s*,\s*"grok-4\.6"\s*\]/,
-    );
+describe("Model policy — (5) reviewers are paired Anthropic → OpenAI via explicit map", () => {
+  it("terraform.tfvars sets reviewer_models to [] so the pairing tier is reachable", () => {
+    // A non-empty REVIEWER_MODELS list is Tier 2 in resolve-reviewer-set and
+    // would bypass pairing entirely.
+    expect(tfvarsContent).toMatch(/reviewer_models\s*=\s*\[\s*\]/);
   });
 
   it("agent-review.yml passes vars.REVIEWER_MODELS to the reviewer-models input", () => {
@@ -279,9 +278,31 @@ describe("Issue #669 policy — (5) reviewer resolver fans out sonnet and grok-4
     );
   });
 
-  it("resolve-reviewer-set returns both models when REVIEWER_MODELS=[sonnet,grok-4.6] and no labels", async () => {
-    // Tier 2 fires because REVIEWER_MODELS is non-empty and no model:review:*
-    // labels are present.  Both models are returned so the matrix job fans out.
+  it("terraform.tfvars enables review_model_pairing with the explicit-map policy", () => {
+    expect(tfvarsContent).toMatch(
+      /review_model_pairing\s*=\s*\{[\s\S]*?enabled\s*=\s*true[\s\S]*?policy\s*=\s*"explicit-map"/,
+    );
+  });
+
+  it("explicit_map pairs every Anthropic tier alias and pinned 5.5 ID with an OpenAI model", () => {
+    expect(explicitMap).toEqual({
+      haiku: "gpt-5.6-luna",
+      sonnet: "gpt-5.6-terra",
+      opus: "gpt-5.6-sol",
+      "claude-haiku-5-5": "gpt-5.6-luna",
+      "claude-sonnet-5-5": "gpt-5.6-terra",
+      "claude-opus-5-5": "gpt-5.6-sol",
+    });
+  });
+
+  it.each(["haiku", "sonnet", "opus"] as const)(
+    "%s maps to the canonical OpenAI pick of the same class",
+    (alias) => {
+      expect(explicitMap[alias]).toBe(classTable[modelToClass[alias]].openai[0]);
+    },
+  );
+
+  it("resolve-reviewer-set falls through to a single reviewer when REVIEWER_MODELS is empty", async () => {
     mockPullGet.mockResolvedValue(prResponse([]));
 
     const result = await resolveReviewerSet(
@@ -289,128 +310,82 @@ describe("Issue #669 policy — (5) reviewer resolver fans out sonnet and grok-4
       10,
       "owner",
       "repo",
-      ["sonnet", "grok-4.6"],
-      "gpt-5.6-terra",
+      [], // empty REVIEWER_MODELS → Tier 2 skipped
+      "sonnet",
     );
 
-    expect(result).toHaveLength(2);
-    expect(result[0]).toEqual({ model: "sonnet" });
-    expect(result[1]).toEqual({ model: "grok-4.6" });
+    expect(result).toEqual([{ model: "sonnet" }]);
   });
 
-  it("each resolved entry has a model property (satisfies strategy.matrix.include shape)", async () => {
-    mockPullGet.mockResolvedValue(prResponse([]));
-
-    const result = await resolveReviewerSet(
-      octokit,
-      11,
-      "owner",
-      "repo",
-      ["sonnet", "grok-4.6"],
-      "gpt-5.6-terra",
+  it.each([
+    ["sonnet", "gpt-5.6-terra"],
+    ["opus", "gpt-5.6-sol"],
+    ["claude-haiku-5-5", "gpt-5.6-luna"],
+  ])("pairing selects %s → %s as the primary pick", (author, reviewer) => {
+    const result = selectReviewerModel(
+      author,
+      repoPairingConfig,
+      ALL_PROVIDERS,
+      classTable,
+      "sonnet",
+      modelToClass,
     );
 
-    expect(result.every((e) => typeof e.model === "string")).toBe(true);
+    expect(result.model).toBe(reviewer);
+    expect(result.source).toBe("primary");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 6: sonnet routes to Anthropic (ANTHROPIC_API_KEY)
+// Assertion 6: Anthropic models route to ANTHROPIC_API_KEY
 // ---------------------------------------------------------------------------
 
-describe("Issue #669 policy — (6) sonnet routes to Anthropic", () => {
-  it("run-agent action routes sonnet to ANTHROPIC_API_KEY", () => {
-    // The routing case in run-agent/action.yml must include sonnet in the
-    // Anthropic branch.  This is the exact string the test in
-    // run-agent-provider-key.test.ts pins.
+describe("Model policy — (6) Anthropic models route to Anthropic", () => {
+  it("run-agent action routes sonnet/opus/haiku/claude-* to ANTHROPIC_API_KEY", () => {
+    // This is the exact string the test in run-agent-provider-key.test.ts pins.
     expect(runAgentContent).toContain(
       "sonnet|opus|haiku|claude-*) _key_env=(-e ANTHROPIC_API_KEY)",
     );
   });
 
-  it("sonnet is classified as an Anthropic model in model-classes.json", () => {
-    // The class table confirms sonnet is an Anthropic sonnet-class model.
-    expect(modelClassesContent.classes["sonnet"]["anthropic"]).toContain("sonnet");
-  });
-
   it("sonnet class and vendor produce an Anthropic canonical pick", () => {
-    // The canonical pick for (sonnet, anthropic) is "sonnet" itself.
-    expect(modelClassesContent.classes["sonnet"]["anthropic"][0]).toBe("sonnet");
+    expect(classTable.sonnet.anthropic[0]).toBe("sonnet");
   });
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 7: grok-4.6 routes to xAI (XAI_API_KEY)
+// Assertion 7: OpenAI reviewer models route to OPENAI_API_KEY
 // ---------------------------------------------------------------------------
 
-describe("Issue #669 policy — (7) grok-4.6 routes to xAI", () => {
-  it("run-agent action routes grok-* to XAI_API_KEY", () => {
+describe("Model policy — (7) OpenAI reviewer models route to OpenAI", () => {
+  it("run-agent action routes gpt-* to OPENAI_API_KEY", () => {
     expect(runAgentContent).toContain(
-      "grok-*)                     _key_env=(-e XAI_API_KEY)",
+      "gpt-*|o[0-9]*)              _key_env=(-e OPENAI_API_KEY)",
     );
   });
 
-  it("grok-4.6 is classified as opus class in model-classes.json", () => {
-    expect(modelClassesContent.modelToClass["grok-4.6"]).toBe("opus");
-  });
-
-  it("grok-4.6 is listed as an xAI opus-class model", () => {
-    expect(modelClassesContent.classes["opus"]["xai"]).toContain("grok-4.6");
+  it("every explicit_map reviewer is a gpt-* model", () => {
+    for (const reviewer of Object.values(explicitMap)) {
+      expect(reviewer).toMatch(/^gpt-/);
+    }
   });
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 8: gpt-5.6-terra is the repo-wide default, NOT a reviewer-set member
+// Assertion 8: the default authoring model is never its own reviewer
 // ---------------------------------------------------------------------------
 
-describe("Issue #669 policy — (8) gpt-5.6-terra is the repo-wide default, not a reviewer-set member", () => {
-  it("terraform.tfvars reviewer_models list does not include gpt-5.6-terra", () => {
-    // Extract the reviewer_models value from the file and confirm the terra
-    // model is absent.  The list must contain only sonnet and grok-4.6.
-    const match = tfvarsContent.match(
-      /reviewer_models\s*=\s*(\[[^\]]*\])/,
-    );
-    expect(match, "reviewer_models assignment must be present").not.toBeNull();
-    const listLiteral = match![1];
-    expect(listLiteral).not.toContain("gpt-5.6-terra");
-  });
-
-  it("resolve-reviewer-set does not return gpt-5.6-terra in the fanned-out set", async () => {
-    // With REVIEWER_MODELS=["sonnet","grok-4.6"] and no labels, Tier 2 fires
-    // and the set is exactly [sonnet, grok-4.6].  gpt-5.6-terra appears only
-    // as the default-model fallback, which is bypassed when Tier 2 matches.
-    mockPullGet.mockResolvedValue(prResponse([]));
-
-    const result = await resolveReviewerSet(
-      octokit,
-      20,
-      "owner",
-      "repo",
-      ["sonnet", "grok-4.6"],
-      "gpt-5.6-terra", // the repo-wide default — must NOT appear in result
+describe("Model policy — (8) the default authoring model is not its own reviewer", () => {
+  it("pairing for a sonnet-authored PR does not return sonnet", () => {
+    const result = selectReviewerModel(
+      "sonnet",
+      repoPairingConfig,
+      ALL_PROVIDERS,
+      classTable,
+      "sonnet",
+      modelToClass,
     );
 
-    const models = result.map((e) => e.model);
-    expect(models).not.toContain("gpt-5.6-terra");
-    expect(models).toEqual(["sonnet", "grok-4.6"]);
-  });
-
-  it("gpt-5.6-terra only appears in the result when REVIEWER_MODELS is empty and no label is present", async () => {
-    // This test confirms the expected Tier 3 fallback behaviour: when both
-    // Tier 1 and Tier 2 are inactive, gpt-5.6-terra (the DEFAULT_MODEL) is the
-    // single-reviewer result, matching the repo-wide default role.
-    mockPullGet.mockResolvedValue(prResponse([]));
-
-    const result = await resolveReviewerSet(
-      octokit,
-      21,
-      "owner",
-      "repo",
-      [],            // empty REVIEWER_MODELS → Tier 2 skipped
-      "gpt-5.6-terra",
-    );
-
-    expect(result).toHaveLength(1);
-    expect(result[0]).toEqual({ model: "gpt-5.6-terra" });
+    expect(result.model).not.toBe("sonnet");
   });
 });
