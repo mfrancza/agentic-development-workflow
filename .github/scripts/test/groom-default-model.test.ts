@@ -58,6 +58,11 @@ const agentVarsVariablesContent = readFileSync(
   "utf8",
 );
 
+const modelGuidanceContent = readFileSync(
+  new URL("docs/model-guidance.md", repoRoot),
+  "utf8",
+);
+
 // ---------------------------------------------------------------------------
 // Workflow wiring tests
 // ---------------------------------------------------------------------------
@@ -178,5 +183,50 @@ describe("docker/scripts/entrypoint.sh — GROOM_VENDOR_ANCHOR_MODEL injected in
     // agent receives the resolved anchor value even if shell env var access
     // is unavailable — consistent with how ADMIN_ASSIGNEES is injected.
     expect(entrypointContent).toContain("GROOM_VENDOR_ANCHOR_MODEL:");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// docs/model-guidance.md alignment tests — the guidance document must agree
+// with the groom.md anchor-resolution rules so the agent receives consistent
+// instructions from both sources it reads during grooming.
+// ---------------------------------------------------------------------------
+
+describe("docs/model-guidance.md — anchor-based fallback alignment with groom.md", () => {
+  it("describes GROOM_VENDOR_ANCHOR_MODEL as the fallback mechanism in Provider selection", () => {
+    // The guidance document must mention GROOM_VENDOR_ANCHOR_MODEL in its
+    // "Provider selection during grooming" section.  Before PR #788 this step
+    // read "retain Anthropic as the fallback" — a static rule that conflicts
+    // with the configurable anchor introduced by GROOM_DEFAULT_MODEL.
+    const providerSection = modelGuidanceContent
+      .split("### Provider selection during grooming")[1]
+      .split("### Anthropic tier aliases")[0];
+    expect(providerSection).toContain("GROOM_VENDOR_ANCHOR_MODEL");
+  });
+
+  it("guidance documents the gpt-* → OpenAI anchor rule", () => {
+    // Must match the routing rule in groom.md so the two sources agree.
+    const providerSection = modelGuidanceContent
+      .split("### Provider selection during grooming")[1]
+      .split("### Anthropic tier aliases")[0];
+    expect(providerSection).toMatch(/gpt-\*/);
+  });
+
+  it("guidance documents the grok-* → xAI anchor rule", () => {
+    // Must match the routing rule in groom.md so the two sources agree.
+    const providerSection = modelGuidanceContent
+      .split("### Provider selection during grooming")[1]
+      .split("### Anthropic tier aliases")[0];
+    expect(providerSection).toMatch(/grok-\*/);
+  });
+
+  it("guidance documents Anthropic as the safe default when the anchor is empty or unrecognized", () => {
+    // Even though the static "retain Anthropic" fallback was replaced, the
+    // anchor-resolution path must still name Anthropic as the empty/unrecognized
+    // safe default — preventing silent vendor drift on misconfiguration.
+    const providerSection = modelGuidanceContent
+      .split("### Provider selection during grooming")[1]
+      .split("### Anthropic tier aliases")[0];
+    expect(providerSection).toMatch(/Anthropic.*safe default|safe default.*Anthropic/is);
   });
 });
