@@ -131,7 +131,7 @@ The steps below describe how to wire up the same workflow in your own GitHub rep
 
 ### 1. Create the agent GitHub Apps (one-time, manual)
 
-Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **Settings → Developer settings → GitHub Apps → New GitHub App**. Create the developer-agent, reviewer-agent, and terraform-ci Apps, plus the allowlist-resolver App when an agent user list uses a team reference:
+Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **Settings → Developer settings → GitHub Apps → New GitHub App**. Create the developer-agent, reviewer-agent, terraform-ci, and release-agent Apps, plus the allowlist-resolver App when an agent user list uses a team reference:
 
 **developer-agent**
 - Repository permissions: Contents (R/W), Issues (R/W), Pull requests (R/W), Workflows (R/W), Metadata (R), Checks (R), Deployments (R)
