@@ -30,8 +30,10 @@ capability across vendors. This supersedes the Anthropic-only scope of
    workflow resolves as `GROOM_DEFAULT_MODEL || DEFAULT_MODEL`), infers the anchor's vendor using
    the `resolve_provider()` routing rules in `docker/scripts/entrypoint.sh` — Anthropic accepts a
    tier alias or any `claude-*` prefix; OpenAI uses an explicit allowlist (`gpt-6-astra`,
-   `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`), not a `gpt-*` prefix rule; xAI is similarly an
-   explicit allowlist — and selects
+   `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`), not a `gpt-*` prefix rule; xAI uses an
+   explicit allowlist of `grok-*` model IDs (`grok-4.20-0309-non-reasoning`,
+   `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-4.3`, `grok-4.5`, `grok-4.6`,
+   `grok-build-0.1`) — and selects
    from that vendor's Task-Class Matrix column. The groomer emits **no** `model:*` label when the
    task's capability class matches the anchor model's class under the Cross-Vendor Class Table —
    the downstream workflow then falls through to the configured default, honoring `DEFAULT_MODEL`
@@ -117,9 +119,9 @@ resolver treats as equivalent for pairing purposes).
 
 | Class | Anthropic | OpenAI | xAI |
 |---|---|---|---|
-| `haiku` | `haiku`, `claude-haiku-4-5` | `gpt-5.6-luna` | `grok-build-0.1` |
-| `sonnet` | `sonnet`, `claude-sonnet-4-5` | `gpt-5.6-terra` | `grok-4.3`, `grok-4.20-0309-non-reasoning`, `grok-4.5` |
-| `opus` | `opus` | `gpt-5.6-sol`, `gpt-6-astra` | `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-4.6` |
+| `haiku` | `haiku`, `claude-haiku-4-5`, `claude-haiku-5-5` | `gpt-5.6-luna` | `grok-build-0.1` |
+| `sonnet` | `sonnet`, `claude-sonnet-4-5`, `claude-sonnet-5-5` | `gpt-5.6-terra` | `grok-4.3`, `grok-4.20-0309-non-reasoning`, `grok-4.5` |
+| `opus` | `opus`, `claude-opus-5-5` | `gpt-5.6-sol`, `gpt-6-astra` | `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-4.6` |
 
 No model currently appears under more than one class. If a future edit places a model in multiple
 classes, add a short paragraph here naming the model, listing every class it appears under in the
