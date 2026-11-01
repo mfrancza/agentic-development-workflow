@@ -863,9 +863,18 @@ and `docs/adopting.md`:
    triggers a publisher rerun for each open PR). The rerun re-executes
    the publisher under `pull_request_target` context so the resulting
    job check attaches to the PR head SHA. That overwrites any stale
-   `success` from an earlier ON interval (cases (a) and (c)) and posts
-   a current result on PRs that had none (case (b), fail-closed until
-   then).
+   `success` from an earlier ON interval (cases (a) and (c)).
+
+   **Case (b) — PRs with no prior publisher run.** The backfill
+   locates each PR's latest `pull_request_target` publisher run and
+   triggers a rerun. A PR that was opened before the publisher
+   workflow was deployed (or that has only ever triggered the
+   OFF-mode preview run) has no `pull_request_target` publisher run
+   to rerun; the backfill skips it, leaving the PR fail-closed until
+   the publisher produces its first enforcing run. The operator must
+   push a no-op commit on any such PR to trigger
+   `pull_request_target: synchronize` and create the initial
+   publisher run.
 
 **Automatic catch-up.** If the operator skips step 2, the Decision 6a
 reconcile sweep (`protected-approval-gate-reconcile.yml`)
@@ -1054,7 +1063,25 @@ no stale H2 result inherited from the pre-synchronize world.
 | On event-vs-live head SHA mismatch, exit 0 and publish nothing (previous draft) | Relies on "a newer event is already queued behind us", which GitHub's documented concurrency behaviour does not guarantee — a third event can replace the pending second, so no run ever runs for the live head. See the "Why always-publish-against-live-head is necessary" discussion above. The corrected rule publishes against `liveHeadSha` in all cases. |
 | Use an external lock / Redis / etc. | Workflow-level concurrency plus API re-fetch is sufficient for a per-PR serialization boundary and introduces no new infrastructure. |
 
+> **Job-check publication model update.** Under the job-check
+> publication model (see
+> [`docs/design/protected-approval-gate-job-check.md`](protected-approval-gate-job-check.md)
+> Decision 7), the per-SHA secondary concurrency group described in
+> Decision 8a is removed. Each publisher run writes only its own
+> auto-emitted job check — not cross-PR Checks API writes — so no
+> SHA-level lock is needed. **Concurrency is per-PR only.**
+
 ### Decision 8a — Cross-PR head-SHA sharing
+
+> **Note (job-check publication model).** This section was written
+> under the Checks API publication model. Under the job-check model
+> (see [`docs/design/protected-approval-gate-job-check.md`](protected-approval-gate-job-check.md)
+> Decision 7), the per-SHA secondary concurrency group is removed and
+> sibling publication now happens via per-sibling publisher reruns
+> rather than cross-PR Checks API writes. The cross-PR strictest-wins
+> intersection computation inside each publisher run is unchanged.
+> Specific passages below are annotated where the current behaviour
+> differs from what is described here.
 
 **Decision.** The Checks API publishes check-runs keyed by
 `(repository, head_sha, context_name)` — not by PR number — and the
@@ -1106,15 +1133,26 @@ per-SHA lock* and then:
    `output.summary` lists the candidate PR numbers and each one's
    per-PR outcome so reviewers can see why the SHA was blocked.
 
-The per-PR concurrency group from Decision 8 is extended on the
-publisher side to **additionally** take a shared lock on the head SHA
-via a secondary concurrency group
+~~**[Removed under job-check publication model]**~~ The per-PR
+concurrency group from Decision 8 was extended on the publisher
+side to **additionally** take a shared lock on the head SHA via a
+secondary concurrency group
 `protected-approval-gate-sha-${liveHeadSha}` on a dedicated
 sibling job that runs the per-SHA publication; the per-PR job
 computes and hands off, and the per-SHA job serializes publications
 on the SHA. This prevents two different PRs' publishers from racing
 on the same SHA. (Actions supports at most one `concurrency` block
 per job, which is why this is split across two jobs rather than one.)
+
+**Under the current job-check publication model, the per-SHA
+secondary concurrency group is removed.** Each publisher run writes
+only its own auto-emitted job check (not cross-PR Checks API
+writes), so two different PRs' publishers writing to the same SHA
+no longer races — each attaches to its own publisher suite. Sibling
+publication happens via per-sibling publisher reruns rather than
+direct Checks API writes from a cross-PR job. See
+[`docs/design/protected-approval-gate-job-check.md`](protected-approval-gate-job-check.md)
+Decision 7.
 
 **Departed-SHA reconciliation.** When a PR leaves a shared SHA, the
 remaining open candidate PRs on that SHA need their published
@@ -1143,32 +1181,35 @@ against each departing SHA (with the departing PR filtered out):
    SHA; reconciliation is only relevant to events where a PR
    genuinely leaves a SHA.
 
-For each departing SHA, under the per-SHA concurrency lock
+~~**[Checks API path — replaced under job-check publication model]**~~
+Under the original Checks API model, each departing SHA was handled
+as follows: For each departing SHA, under the per-SHA concurrency lock
 `protected-approval-gate-sha-${departingSha}` (a sibling job
 to the live-head publication, so the same workflow run holds both
-locks), the activity:
+locks), the activity paginated `GET /repos/{owner}/{repo}/pulls?state=open&per_page=100`,
+applied the strictest-wins intersection across remaining candidates,
+and published an updated check-run with `head_sha: departingSha`
+via the Checks API.
 
-- Paginates `GET /repos/{owner}/{repo}/pulls?state=open&per_page=100`,
-  filters to `head.sha == departingSha`, and **excludes the departing
-  PR number**. This uses the same authoritative open-PR source as the
-  live-head path rather than the lag-prone commit→PR index; the explicit
-  exclusion remains necessary whether or not the closed/moved PR has
-  already disappeared from that listing. A listing failure follows the
-  same fail-closed rule: publish `failure` on `departingSha` if possible
-  and fail the job loudly; never publish `success` from a partial set.
-- If the remaining-candidate set is empty, no republication is
-  needed: the stale check-run on `departingSha` is now orphaned
-  (no open PR has that SHA as head) and cannot block any merge.
-- Otherwise, applies the Decision 8a strictest-wins intersection
-  across the remaining candidates and publishes an updated
-  check-run with `head_sha: departingSha` under the enforcing
-  context name. The `output.summary` lists which PR left and which
-  remain.
+**Under the current job-check publication model**, departed-SHA
+reconciliation instead triggers a rerun of each remaining sibling
+PR's latest `pull_request_target` publisher run (via
+`POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun`). Each
+sibling publisher rerun re-executes under its own
+`pull_request_target` context, so the resulting auto-emitted
+`protected-approval-gate` job check attaches to the sibling PR's
+head SHA inside the sibling's own publisher suite — updating both
+`gh pr checks` and the merge box without a cross-PR Checks API
+write. The per-SHA secondary concurrency group is no longer used.
+See [`docs/design/protected-approval-gate-job-check.md`](protected-approval-gate-job-check.md)
+Decision 7 for the full updated mechanism.
 
-The live-head publication path (Decision 8 against `liveHeadSha`)
-and the departed-SHA reconciliation path both run in the same
-workflow invocation but as separate jobs so each can take its own
-per-SHA concurrency lock. Both paths complete before the run exits.
+The logic for determining which sibling PRs need a rerun is
+unchanged: paginate the open-PR listing, filter to `head.sha ==
+departingSha`, exclude the departing PR number. If the
+remaining-candidate set is empty, no rerun is needed (no open PR
+has that SHA as head). If the open-PR listing fails, the activity
+follows the same fail-closed rule and fails the job loudly.
 
 The departing-SHA path is a no-op **only** when the departing PR is
 still open with that SHA as its live head — i.e. the triggering
@@ -1298,15 +1339,17 @@ rejected in the Alternatives table below with their reasons.
   without approving the dev PR.
 - When the departing path (close or synchronize to a new head) does
   happen on the dev-agent PR, the departed-SHA reconciliation
-  described above republishes the shared-SHA check-run with the
-  departing PR removed. If the human PR's head SHA has a completed
-  Actions suite when the reconciliation occurs, the new check run is
-  attached to that completed suite and the merge box shows "Expected"
-  rather than reflecting the new conclusion; a new commit on the human
-  PR's branch is needed to clear Expected in that case. This is a
-  specific lifecycle gap the reviewer identified in the previous draft
-  (which had no `closed` trigger and only published against the live
-  head on `synchronize`).
+  described above triggers a rerun of each remaining sibling PR's
+  latest publisher run. Because the rerun executes under its original
+  `pull_request_target` context, the resulting auto-emitted job check
+  attaches to the sibling PR's head SHA inside the publisher's own
+  check suite — clearing the merge box directly without requiring a
+  new commit on the human PR's branch. (Under the earlier Checks API
+  model, the Checks API write attached the check run to whatever
+  completed suite happened to own the SHA, causing the merge box to
+  show "Expected — Waiting for status to be reported". The job-check
+  publication model eliminates this lifecycle gap structurally; the
+  no-op-commit workaround is retired.)
 - An attacker cannot borrow a non-dev PR's `success` to merge a
   shared-SHA dev-agent PR with 0 approvals, because the shared-SHA
   publisher strictly intersects per-PR outcomes.
@@ -1336,6 +1379,13 @@ Decision 9 items 10–12 cover the three same-SHA acceptance cases.
 
 ### Decision 9 — Acceptance test contract
 
+> **See also:** Decision 12 of
+> [`docs/design/protected-approval-gate-job-check.md`](protected-approval-gate-job-check.md)
+> for the updated acceptance test contract under the job-check
+> publication model. Items in this section whose assertions targeted
+> `checks.create` call arguments (specifically item 19) are superseded
+> by that contract; they are annotated below.
+
 The implementer must land the following tests. They are called out here
 because several of them cover failure modes identified only in review
 and are easy to omit from a naive implementation. All must be covered
@@ -1352,7 +1402,6 @@ end-to-end validation on a scratch PR under Issue #665.
 3. **Trust-anchor test (same-repo PR modifies the gate)** — open a
    same-repository PR whose diff **simultaneously** edits:
    - the publisher workflow (`protected-approval-gate-publisher.yml`),
-   - the reusable it calls,
    - the composite action and the TypeScript activity (so that any
      non-base-branch execution path would publish unconditional
      `success`),
@@ -1559,22 +1608,19 @@ end-to-end validation on a scratch PR under Issue #665.
     latest opinionated review, etc.), including an `APPROVED` review followed
     by a `COMMENTED` review from the same login: the earlier approval must
     still count as one qualifying approval.
-19. **Sweep on a completed-suite head (non-protected author)** — open a
-    non-protected pull request (human author, not in
-    `PROTECTED_PR_AUTHOR_LOGINS`). Let its Actions suite for the current
-    head SHA complete and reach a terminal state. Dispatch the backfill
-    (or the reconcile sweep). Assert (19a) `gh pr checks` and the Checks
-    tab show a `success` conclusion for `protected-approval-gate` on that
-    head SHA. Assert (19b) the merge box still shows "Expected — Waiting
-    for status to be reported"; the Checks API update attaches the check
-    run to the completed suite and does not clear Expected. Then push a
-    new commit. Assert (19c) the publisher posts `success` under the new
-    head SHA while the new suite is in progress and the merge box clears.
-    This case documents the Checks API vs. merge-box split that acceptance
-    tests 6 and 8 do not cover — those tests involve a protected author
-    whose blocked state is correct whether the box shows `failure` or
-    Expected, so neither catches a successful sweep that does not actually
-    unblock a PR's merge box.
+19. ~~**[Superseded under job-check publication model]**~~ **Sweep on a
+    completed-suite head (non-protected author)** — this test was
+    written to document the Checks API vs. merge-box split: a Checks
+    API write attaches to a completed suite causing "Expected —
+    Waiting for status to be reported", requiring a no-op commit to
+    clear. Under the job-check publication model (see
+    [`docs/design/protected-approval-gate-job-check.md`](protected-approval-gate-job-check.md)
+    Decision 12), the backfill and reconcile sweep trigger publisher
+    reruns instead of direct Checks API writes, so the job check
+    attaches to the publisher's own suite rather than a completed
+    Actions suite, and the merge box clears without a new commit.
+    Assertions (19b) and (19c) are replaced by the updated sweep
+    test in Decision 12 of that document.
 
 ### Decision 10 — Documentation surfaces
 
