@@ -5,7 +5,8 @@ description: >
   key selected from the model name, GITHUB_REPO, AGENT_MODEL) and any optional
   per-workflow identifiers (AGENT_ACTION, GITHUB_ISSUE_NUMBER, GITHUB_PR_NUMBER,
   GITHUB_RUN_ID, ESCALATION_ASSIGNEE, RESOLVE_THREADS_FILE, ADMIN_ASSIGNEES,
-  CODE_REVIEWERS, ALLOWLIST_RESOLVER_TOKEN, FIX_CHECKS_ALLOW, GITHUB_HEAD_SHA_AT_TRIGGER). Also creates and mounts an output directory when
+  CODE_REVIEWERS, ALLOWLIST_RESOLVER_TOKEN, FIX_CHECKS_ALLOW, GITHUB_HEAD_SHA_AT_TRIGGER,
+  GROOM_VENDOR_ANCHOR_MODEL). Also creates and mounts an output directory when
   output-dir and output-mount are supplied (used by agent-review for the
   RESOLVE_THREADS_FILE hand-off).
   Pull mode (image non-empty): pulls the specified image and skips the build.
@@ -209,6 +210,7 @@ runs:
         [[ -n "${FIX_CHECKS_ALLOW:-}" ]] && _opt_env+=(-e FIX_CHECKS_ALLOW="${FIX_CHECKS_ALLOW}")
         [[ -n "${GITHUB_HEAD_SHA_AT_TRIGGER:-}" ]] && _opt_env+=(-e GITHUB_HEAD_SHA_AT_TRIGGER="${GITHUB_HEAD_SHA_AT_TRIGGER}")
         [[ -n "${FIX_CHECKS_WAIT_SECONDS:-}" ]] && _opt_env+=(-e FIX_CHECKS_WAIT_SECONDS="${FIX_CHECKS_WAIT_SECONDS}")
+        [[ -n "${GROOM_VENDOR_ANCHOR_MODEL:-}" ]] && _opt_env+=(-e GROOM_VENDOR_ANCHOR_MODEL="${GROOM_VENDOR_ANCHOR_MODEL}")
 
         # Create and prepare the host output directory if requested; build the
         # volume mount flag. chmod 777 is required because the container's

@@ -72,6 +72,7 @@ module "agent_vars" {
   agent_allowlist                                  = var.agent_allowlist
   default_model                                    = var.default_model
   design_default_model                             = var.design_default_model
+  groom_default_model                              = var.groom_default_model
   admin_assignees                                  = var.admin_assignees
   code_reviewers                                   = var.code_reviewers
   fix_checks_allow                                 = var.fix_checks_allow

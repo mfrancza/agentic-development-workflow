@@ -19,6 +19,19 @@ default_model = "sonnet"
 # Stored as the DESIGN_DEFAULT_MODEL Actions variable.
 # design_default_model = "opus"
 
+# Grooming-agent default model. When set, agent-groom workflows use this value
+# instead of DEFAULT_MODEL for both the model that runs grooming and (via
+# GROOM_VENDOR_ANCHOR_MODEL) the fallback provider the prompt uses when
+# assigning model:* labels — so Anthropic, OpenAI, and xAI anchors each direct
+# the grooming agent to its own vendor's label set. Leave unset (empty string
+# "") to inherit DEFAULT_MODEL as the anchor; the label-selection vendor will
+# follow that value (e.g. "sonnet" → Anthropic, "gpt-*" → OpenAI, "grok-*" →
+# xAI). With the example default_model = "sonnet" above, omitting this
+# preserves Anthropic label selection — but a cross-vendor DEFAULT_MODEL will
+# route to the corresponding provider instead.
+# Stored as the GROOM_DEFAULT_MODEL Actions variable.
+# groom_default_model = "sonnet"
+
 # Humans to assign to issues and PRs when the agent applies the human-required
 # label (e.g. escalations requiring security, billing, or permission decisions).
 # Stored as ADMIN_ASSIGNEES Actions variable; workflows parse it with fromJSON().

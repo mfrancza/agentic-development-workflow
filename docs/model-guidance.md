@@ -26,8 +26,11 @@ capability across vendors. This supersedes the Anthropic-only scope of
 2. With no generic label, honor an explicit execution-provider preference in the issue or
    repository instructions. Merely mentioning a vendor as the subject of a task is not a
    provider preference; neither is a per-agent override a preference for all other agents.
-   With no explicit preference, retain Anthropic as the fallback rather than silently switching
-   vendors on price alone. This does not change `DEFAULT_MODEL`.
+   With no explicit preference, derive the default provider from `GROOM_VENDOR_ANCHOR_MODEL`
+   using the anchor-resolution rules in the groom prompt: a `gpt-*` prefix → OpenAI; a
+   `grok-*` prefix → xAI; a tier alias (`sonnet`, `opus`, `haiku`) or any `claude-*`
+   prefix → Anthropic. If the anchor is empty or unrecognized, Anthropic is the safe default.
+   This does not change `DEFAULT_MODEL`.
 3. Use that provider's column in the Task-Class Matrix and the model-specific criteria below.
    For Anthropic, choose a tier alias; for OpenAI and xAI, choose a provisioned named model.
    Record the provider, task class, and reason in the grooming comment. For example, a scoped
@@ -314,6 +317,13 @@ on the PR too: an issue's review override alone is not read by the reviewer work
 
 Entries below record changes at their original dates; historical model lists and prices are not
 current selection guidance.
+
+- **2026-11-01 (rev 10)** — Aligned "Provider selection during grooming" step 2 with the
+  `GROOM_VENDOR_ANCHOR_MODEL`-based fallback introduced in PR #788 (Issue #775). The previous
+  "retain Anthropic" static fallback conflicted with the updated `groom.md` prompt, which derives
+  the default provider from the anchor model name. Step 2 now describes the same resolution rules
+  used by the prompt: `gpt-*` → OpenAI, `grok-*` → xAI, tier aliases / `claude-*` → Anthropic,
+  empty or unrecognized → Anthropic safe default.
 
 - **2026-09-12 (rev 9)** — Addressed PR #567 review: included Anthropic, OpenAI, and xAI in
   grooming selection, aligned the prompt and label criteria, and added cross-provider coverage.
