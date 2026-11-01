@@ -28,8 +28,10 @@ capability across vendors. This supersedes the Anthropic-only scope of
    provider preference; neither is a per-agent override a preference for all other agents.
    With no explicit preference, the groomer anchors to `GROOM_VENDOR_ANCHOR_MODEL` (which the
    workflow resolves as `GROOM_DEFAULT_MODEL || DEFAULT_MODEL`), infers the anchor's vendor using
-   the `resolve_provider()` routing rules in `docker/scripts/entrypoint.sh` (a `gpt-*` prefix →
-   OpenAI; a `grok-*` prefix → xAI; a tier alias or `claude-*` prefix → Anthropic), and selects
+   the `resolve_provider()` routing rules in `docker/scripts/entrypoint.sh` — Anthropic accepts a
+   tier alias or any `claude-*` prefix; OpenAI uses an explicit allowlist (`gpt-6-astra`,
+   `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`), not a `gpt-*` prefix rule; xAI is similarly an
+   explicit allowlist — and selects
    from that vendor's Task-Class Matrix column. The groomer emits **no** `model:*` label when the
    task's capability class matches the anchor model's class under the Cross-Vendor Class Table —
    the downstream workflow then falls through to the configured default, honoring `DEFAULT_MODEL`
