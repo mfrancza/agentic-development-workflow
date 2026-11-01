@@ -109,11 +109,25 @@ grooming thread (Option A — dedicated release App identity):
   rewrite step uses the same "skip lines whose first non-whitespace char
   is `#`" rule.
 - **Dry-run vs throwaway real tag for acceptance.** Both are listed in
-  the issue; the design implements **dry-run** as the primary acceptance
-  path and leaves "cut a throwaway `vX.Y.Z` and delete it" available as
-  a secondary smoke test. Dry-run is cheaper, repeatable, and does not
-  pollute the Releases page; it is also a lasting capability the
-  maintainer can re-run on any future release.
+  the issue, but a throwaway real tag is **not** safely disposable under
+  this design, so the design implements **dry-run only**. The reason:
+  the release-agent App token push (unlike the current `GITHUB_TOKEN`
+  push — see README "Releasing", "tags pushed with the workflow
+  `GITHUB_TOKEN` don't trigger other workflows") **does** fire
+  downstream workflows. A throwaway `vX.Y.Z` would therefore auto-fire
+  `release-images.yml` and publish `developer:vX.Y.Z`, `reviewer:vX.Y.Z`,
+  and the moving `developer:vX` / `reviewer:vX` image tags to GHCR; the
+  release workflow itself also advances the moving `vX` git tag.
+  `gh release delete vX.Y.Z --cleanup-tag` only removes the Release and
+  the exact tag — it does **not** revert the moving git tag or the
+  GHCR artifacts, so a throwaway `v99.99.99` would leave `v99`, four
+  GHCR image tags, and the manifest history behind. Dry-run is the
+  primary acceptance path; it is cheaper, repeatable, does not pollute
+  the Releases page or GHCR, and is a lasting capability the maintainer
+  can re-run on any future release. Validation of the App-token push
+  itself happens on the first real release (and if that push fails,
+  the recovery path is the same `gh workflow run release-images.yml`
+  escape hatch that exists today).
 - **Should the `release-images.yml` workflow change?** No. Per the issue:
   `release-images.yml --ref vX.Y.Z` builds from whichever commit the
   tag points at, so pointing the tag at the dangling release commit
@@ -398,6 +412,15 @@ that then has to be deleted. Dry-run avoids all of that.
 4. **Document the release-agent App** in README §1 (App creation
    list) and §3 (secrets list). Follows the terraform-ci App pattern
    verbatim.
+5. **Replace the "Build the images" manual-dispatch bullet.** Under
+   the release-agent App token, the tag push now triggers
+   `release-images.yml` automatically — the rationale in the current
+   bullet ("tags pushed with the workflow `GITHUB_TOKEN` don't trigger
+   other workflows") no longer applies to the real-release path.
+   Replace the bullet with a one-line note: "Images build
+   automatically on tag push; use `gh workflow run release-images.yml
+   --ref vX.Y.Z -f tag=vX.Y.Z` only for a recovery re-push after a
+   registry incident."
 
 **Rationale.** Per AGENTS.md § "Keeping Documentation Current", any
 change that alters workflow behavior, secrets, or App permissions
@@ -431,6 +454,17 @@ leaves the two separately-maintained workflows alone. AGENTS.md
 § "Reverting or replacing code with a passing live-run history"
 also applies: both files have passing live-run histories and no
 runtime evidence requires changing them.
+
+**Behavior note (not a file change).** `release-images.yml` is
+triggered by `on: push: tags: 'v*'`. Today it is manually dispatched
+after each release because the current `GITHUB_TOKEN`-based tag push
+does not fan out to downstream workflows. Under the release-agent App
+token (Decision 3), the tag push **does** fan out, so
+`release-images.yml` will auto-fire on every real release. This is a
+positive side effect (one fewer manual step), but it is why a
+throwaway real tag is not disposable (see the ambiguity resolution
+above) and why the README's "Build the images" bullet is replaced
+rather than left in place (Decision 6, item 5).
 
 ## Out of scope
 
@@ -477,7 +511,7 @@ the terraform-ci App sub-issue #424).
 | 1 | Issue [#754](https://github.com/mfrancza/agentic-development-workflow/issues/754) | **Create the `release-agent` GitHub App identity (human, `human-required`).** Create the App in Settings → Developer settings → GitHub Apps with Repository permissions: Contents (R/W), Workflows (R/W), Metadata (R). Subscribe to no events. Uncheck the Webhook "Active" box. Install the App on this repository. Add `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` as repo Actions secrets. Update README §1 (App creation list) and §3 (secrets list) following the terraform-ci App's structure. Comment the App's slug (e.g. `mfrancza-release-agent[bot]`) and installation ID on the parent design-doc PR so Task 3 can wire it in. | — |
 | 2 | Issue [#755](https://github.com/mfrancza/agentic-development-workflow/issues/755) | **Rewrite activity + tests.** Add `.github/scripts/src/rewrite-self-ref-pins.ts` with the inputs/outputs described in Decision 2, extract the shared `PINNED_SELF_REF_RE` pattern into `.github/scripts/src/lib/` and update `pinned-worker-contracts.test.ts` to import it (same regex, one source), add `.github/scripts/test/rewrite-self-ref-pins.test.ts` with Vitest coverage for: single-match file, multi-match file, no-match file, file with the pattern only inside a comment (must not rewrite), unrelated `uses:` lines (must not rewrite), unchanged pin (output `changed=false`). Add the composite wrapper `.github/actions/rewrite-self-ref-pins/action.yml` using the shared-scripts bootstrap pattern (per AGENTS.md § "Working-directory portability"). | — |
 | 3 | Issue [#756](https://github.com/mfrancza/agentic-development-workflow/issues/756) | **Wire the rewrite + release commit + verification into `release.yml`.** After the existing checkout step, invoke the rewrite activity with `target-version: ${{ inputs.version }}`. When `changed == 'true'`, configure the `github-actions[bot]` identity and create the release commit with `git commit -m "Release ${_VERSION}: self-pin workflow references"`; the commit's parent is the input ref SHA, and no branch is updated. Run `vitest run test/pinned-worker-contracts.test.ts` from the release commit's working tree; abort on failure. Add the `dry-run` input (Decision 5) and gate the token-mint + push + Release-create steps on `inputs.dry-run != 'true'`. Replace the push identity for the tag push with the release-agent App token (via `.github/actions/agent-token` using `RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`). Update README "Releasing" per Decision 6 in the same PR. | Task 1, Task 2 |
-| 4 | Issue [#757](https://github.com/mfrancza/agentic-development-workflow/issues/757) | **End-to-end validation via dry-run and throwaway real tag.** Dispatch `release.yml` with `version=v99.99.99` and `dry-run=true` against `main`. Verify from the run logs: (a) the rewrite step reported `changed=true` (the current `main` pin is `@v0.3.0`, so a rewrite to `@v99.99.99` is expected), (b) the #745 verifier passed on the release commit, (c) the diagnostic diff shows exactly the self-pin line changing from `@v0.3.0` to `@v99.99.99`, (d) no tag, Release, or push happened. Then dispatch again with `dry-run=false` for a throwaway tag `v99.99.99` (immediately deleted via `gh release delete v99.99.99 --cleanup-tag` after inspection), confirming (a) the real tag was created, (b) `git show v99.99.99:.github/workflows/agent-review-reusable.yml` contains `@v99.99.99`, (c) the release-agent App token path worked. Comment the two run URLs on issue #750. If any failure surfaces, escalate with `human-required` for the maintainer to decide whether to re-run or re-design. | Task 3 |
+| 4 | Issue [#757](https://github.com/mfrancza/agentic-development-workflow/issues/757) | **End-to-end validation via dry-run only.** Dispatch `release.yml` with `version=v99.99.99` and `dry-run=true` against `main`. Verify from the run logs: (a) the rewrite step reported `changed=true` (the current `main` pin is `@v0.3.0`, so a rewrite to `@v99.99.99` is expected), (b) the #745 verifier passed on the release commit, (c) the diagnostic diff shows exactly the self-pin line changing from `@v0.3.0` to `@v99.99.99`, (d) no tag, Release, or push happened, (e) the release-agent App token-mint step still executed (the mint runs always; only the push is gated on `dry-run != true` per Decision 3), so the identity plumbing is exercised end-to-end even without the push. A throwaway real tag is **deliberately not** part of acceptance: under the release-agent App token the tag push auto-fires `release-images.yml` (publishing `developer:v99.99.99`, `reviewer:v99.99.99`, and the moving `developer:v99` / `reviewer:v99` image tags to GHCR) and the release workflow advances the moving `v99` git tag — `gh release delete --cleanup-tag` reverts neither, so the "throwaway" would leave `v99`, four GHCR image tags, and manifest history behind (see the ambiguity-resolution bullet). The App-token **push** itself is validated on the first real release instead; if that push fails, the recovery path is `gh workflow run release-images.yml --ref vX.Y.Z -f tag=vX.Y.Z` (the same escape hatch used today). Comment the dry-run run URL on issue #750. If any failure surfaces, escalate with `human-required` for the maintainer to decide whether to re-run or re-design. | Task 3 |
 
 Task 1 and Task 2 are independent and can proceed in parallel —
 Task 1 is a one-maintainer-click App creation; Task 2 is agent-authorable
