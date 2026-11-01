@@ -142,6 +142,7 @@ jobs:
     # declares at the pinned tag, and fails when the pinned contract drifts
     # from the branch's current worker version. Bump the pin before merging
     # any worker contract change. See README "Releasing".
+    # release-self-pin: agent-review-worker-reusable.yml  # rewritten at release by .github/actions/rewrite-self-ref-pins
     uses: mfrancza/agentic-development-workflow/.github/workflows/agent-review-worker-reusable.yml@v0.3.0
     with:
       pr-number: ${{ inputs.pr-number }}
