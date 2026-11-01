@@ -40,7 +40,7 @@ See [`docs/design-philosophy.md`](docs/design-philosophy.md) for the reasoning b
     │   ├── tsconfig.json             # strict: true
     │   ├── src/                      # One entry file per activity; lib/ for shared helpers
     │   └── test/                     # Vitest unit tests (one file per activity)
-    └── workflows/                    # Event-triggered caller stubs (one per AGENT_ACTION trigger), reusable `*-reusable.yml` counterparts for all eight agent-container workflows, plus ci.yml, actionlint.yml (workflow-file lint), secret-scan.yml, and terraform-ci.yml (plan on PR / apply on push to main)
+    └── workflows/                    # Event-triggered caller stubs (one per AGENT_ACTION trigger), reusable `*-reusable.yml` counterparts for all eight agent-container workflows, plus ci.yml, actionlint.yml (workflow-file lint), secret-scan.yml, and terraform-ci.yml (plan on PR / apply on push to main); and the protected-approval-gate workflow family (see below)
 ```
 
 ## MVP Workflow
@@ -96,6 +96,14 @@ The [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composit
 - **Build mode** (`image` input is empty, default): builds from the `build-context` directory. This repo's own workflows use build mode so that in-progress changes take effect immediately without a release.
 
 - `.github/workflows/agent-auto-trigger.yml` — applies the next-stage `agent:*` label at each SDLC transition (issue opened, classification label applied, design PR merged, agent PR opened) using a minted developer-agent token. No agent container runs; downstream workflows do the actual work. Each gate is controlled by a key in `vars.AUTO_TRIGGER_AGENTS` (see **Auto-trigger gates** under **Labels**).
+
+- **`protected-approval-gate` workflow family** — opt-in required status check that blocks merging a protected-author PR until it has the configured number of qualifying approvals. See [`docs/design/protected-approval-gate.md`](docs/design/protected-approval-gate.md) and [`docs/design/protected-approval-gate-job-check.md`](docs/design/protected-approval-gate-job-check.md) for the full design.
+  - `protected-approval-gate-publisher.yml` — the publisher; runs on `pull_request_target` and emits the `protected-approval-gate` job check (enforcing) or `protected-approval-gate (preview)` job check (preview). **Must be copied** into each adopting repository rather than called as a reusable, because a reusable-workflow call produces a check name of `<caller-job>/<callee-job>` which would not match the required-status-check context.
+  - `protected-approval-gate-dispatcher.yml` — triggered by `workflow_run: protected-approval-gate-notify`; reruns the publisher for the PR that received a review, so the review-triggered job check attaches to the PR head SHA inside the publisher's own suite.
+  - `protected-approval-gate-notify.yml` — a `pull_request_review`-triggered stub whose only purpose is to complete and signal the dispatcher.
+  - `protected-approval-gate-backfill.yml` — `workflow_dispatch`-only caller of `protected-approval-gate-sweep-reusable.yml`; reruns the publisher for every open PR. Run this after enabling or re-enabling the gate.
+  - `protected-approval-gate-reconcile.yml` — scheduled (`*/5 * * * *`) caller of `protected-approval-gate-sweep-reusable.yml`; the periodic safety net that upper-bounds staleness when inline departed-SHA cleanup is dropped by pending-run replacement.
+  - `protected-approval-gate-sweep-reusable.yml` — reusable workflow called by backfill and reconcile; fans out across open PRs and triggers publisher reruns.
 
 ## Agent Actions
 

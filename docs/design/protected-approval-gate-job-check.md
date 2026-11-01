@@ -358,14 +358,16 @@ rerun has no run to target. This case is bounded:
   immediately on PR creation; the dispatcher never sees a review event
   before that run exists. The `opened` run is the first publisher run,
   and all subsequent dispatcher reruns can target it.
-- **Pre-existing PRs when the publisher workflow is first deployed, or
-  during an OFF→ON flip**: no prior `pull_request_target` run exists
-  (or exists but ran under OFF with no enforcing job output).
-  Operational mitigation: the operator pushes any no-op commit to the
-  PR branch, which fires `pull_request_target: synchronize` and
-  creates a run the dispatcher can thereafter rerun. The backfill
-  workflow (Decision 6) documents this in its summary when it skips a
-  PR with no prior run.
+- **Pre-existing PRs when the publisher workflow is first deployed**:
+  no prior `pull_request_target` run exists. Operational mitigation:
+  the operator pushes any no-op commit to the PR branch, which fires
+  `pull_request_target: synchronize` and creates a run the dispatcher
+  can thereafter rerun. The backfill workflow (Decision 6) documents
+  this in its summary when it skips a PR with no prior run. Note: an
+  OFF→ON flip is **not** this case — an OFF-mode preview run is a
+  qualifying `pull_request_target` publisher run; the backfill reruns
+  it, and the rerun executes the enforcing job because
+  `ENABLE_PROTECTED_APPROVAL_GATE` is now `true`.
 
 **Alternatives considered.**
 
@@ -620,13 +622,20 @@ patterns:
   reusable-workflow call sites produce check names of the form
   `<caller-job-id> / <callee-job-id>`, which does not match the required
   context `protected-approval-gate`.
-- **Dispatcher + reconcile + backfill**: these remain reusable
-  workflows invoked by thin caller stubs, because none of their jobs
-  produce a check-run that satisfies the required context (they only
-  trigger reruns). Adopters' caller stubs follow the same pattern as
-  the existing `agent-review.yml` etc.
-- **Notifier**: unchanged. Adopters copy the (empty) notifier workflow
-  file.
+- **Dispatcher, notifier, backfill, and reconcile**: adopters copy
+  these workflow files into their own `.github/workflows/`. They are
+  event-triggered workflows and caller stubs — the dispatcher is
+  triggered by `workflow_run` (notifier completion), the notifier by
+  `pull_request_review`, the backfill is `workflow_dispatch`-only, and
+  the reconcile runs on `schedule` and `workflow_dispatch`. None of
+  them is a `workflow_call` reusable; calling them "reusables
+  referenced remotely" would leave adopters without the
+  review-event, manual-backfill, and scheduled-reconcile entry points.
+- **Sweep only**: `protected-approval-gate-sweep-reusable.yml` is the
+  single `workflow_call` reusable that adopting repos reference
+  remotely. The backfill and reconcile caller stubs invoke it via
+  `uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@<ref>`.
+  All other workflow files are copied.
 
 Updated: `docs/adopting.md` adds a section explaining the publisher
 copy requirement, with a diff-template adopters can apply. The
@@ -732,15 +741,15 @@ rather than the Checks API call arguments.
    run, and the resulting new publisher run's auto-emitted check on
    the PR head SHA is `conclusion: success`. Assert the merge box
    clears.
-6. **(new) Review event on PR with no prior publisher run.** Simulate
-   an OFF→ON flip on a PR whose only prior publisher runs were from
-   OFF mode (preview job only). The dispatcher's rerun must either
-   target the OFF-mode run (which, after re-executing under
-   `ENABLE_PROTECTED_APPROVAL_GATE=true`, now runs the enforcing job)
-   and the enforcing check appears, OR, if the OFF-mode run cannot be
-   used, the dispatcher logs a skip and the operator's documented
-   "push a no-op commit" instruction resolves it. Assert at least one
-   of these two paths succeeds and the merge box eventually clears.
+6. **(new) Review event on PR with only OFF-mode prior publisher runs.**
+   Simulate an OFF→ON flip on a PR whose only prior publisher runs were
+   from OFF mode (preview job only). The sweep and dispatcher locate
+   publisher runs by `pull_request_target` event alone, so the OFF-mode
+   run is a qualifying target. The dispatcher's rerun must target the
+   OFF-mode run; after re-executing under
+   `ENABLE_PROTECTED_APPROVAL_GATE=true`, the run executes the enforcing
+   job and the enforcing check appears. Assert the merge box eventually
+   clears without a no-op commit.
 7. **(new) Scheduled sweep rerun — safety net for a dropped per-event
    rerun.** Simulate the Decision 7 departed-SHA sibling-rerun step
    emitting a `core.warning` (per Decision 9) because its

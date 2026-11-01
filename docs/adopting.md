@@ -1545,7 +1545,21 @@ by a protected login (for example your developer-agent App,
 `<your-developer-app-slug>[bot]`) until it has `REQUIRED_APPROVAL_COUNT`
 approvals from someone other than its author. Pull requests from other authors
 pass immediately. The implementation uses one reusable workflow plus a
-publisher you copy into your repo:
+publisher you copy into your repo.
+
+> **Why copy rather than call as a reusable?** GitHub Actions names a
+> reusable-workflow job check as `<caller-job>/<callee-job>`. If the
+> publisher were invoked as a reusable, the enforcing job check would be
+> emitted under a name like `call-publisher/protected-approval-gate`
+> rather than `protected-approval-gate`, and the required-status-check
+> context in the branch ruleset would not match. The publisher must be a
+> **top-level job** named exactly `protected-approval-gate` in a
+> top-level workflow file in your repository — hence the copy. The
+> notifier, dispatcher, backfill, and reconcile workflows are also
+> copied into your repository (they are event-triggered workflows and
+> caller stubs, not reusables). Only the sweep
+> (`protected-approval-gate-sweep-reusable.yml`) is a `workflow_call`
+> reusable that your backfill and reconcile stubs reference remotely.
 
 - `protected-approval-gate-sweep-reusable.yml` re-evaluates every open pull
   request by locating and rerunning each PR's latest `pull_request_target`
@@ -1991,6 +2005,18 @@ Enable in this order:
   PR head SHA inside the publisher suite and clears the merge box directly —
   no new commit is required. The publisher or the reconcile sweep can also
   produce that first check if a manual backfill dispatch is not convenient.
+
+  > **Pull requests with no prior publisher run.** The backfill can only
+  > rerun an existing publisher run. If a pull request was opened before
+  > the publisher workflow was deployed, there is no `pull_request_target`
+  > publisher run to rerun; the backfill skips it, leaving the PR
+  > fail-closed. Push a no-op commit (e.g.
+  > `git commit --allow-empty -m "trigger publisher"`) on any such PR to
+  > trigger `pull_request_target: synchronize` and create the initial
+  > publisher run. PRs with only an OFF-mode preview run are not in this
+  > category — the preview run is a qualifying publisher run and the
+  > backfill reruns it; the rerun executes the enforcing job because
+  > `ENABLE_PROTECTED_APPROVAL_GATE` is now `true`.
 - Merge or close open pull requests that should land before requiring the
   check (for project reasons, not because of a stale check state).
 - Require the `protected-approval-gate` status check on your default branch,
@@ -2030,6 +2056,14 @@ original `pull_request_target` context and emits a fresh `protected-approval-gat
 job check at the PR head SHA, replacing the stale result in the merge box
 without requiring a new commit. Merge or close open pull requests before
 re-requiring the check if needed for project reasons unrelated to check state.
+
+> **Pull requests with no prior publisher run.** If any open pull request
+> was opened before the publisher workflow was deployed, the backfill
+> finds no run to rerun. Push a no-op commit on any such PR to trigger
+> `pull_request_target: synchronize` and create the initial run. PRs
+> that had only OFF-mode preview runs during the disabled period are not
+> in this category — the backfill reruns their latest preview run, which
+> now executes the enforcing job.
 
 **Limitations.** Merge queues are not supported. The publisher does not run on
 `merge_group` events, so requiring `protected-approval-gate` on a branch that
