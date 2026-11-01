@@ -114,11 +114,13 @@ async function listCandidates(octokit: Octokit, owner: string, repo: string, hea
 /**
  * Evaluates the strictest-wins conclusion for all open PRs sharing the given head SHA.
  *
- * When `listCandidates` returns an empty list, falls back on a direct `pulls.get`
- * of `fallbackPrNumber` (Decision 8 of the design): if that PR is still open at
- * `headSha`, it is included as a singleton candidate. This covers the documented
- * `synchronize` race where the paginated listing has not yet indexed the triggering
- * PR at its new head SHA.
+ * Decision 8 fallback: whenever `fallbackPrNumber` is provided and absent from the
+ * listing (whether the listing is empty **or** contains other PRs that were indexed
+ * faster), it is appended as an additional candidate. The evaluation loop validates
+ * the PR's actual state and SHA via a direct `pulls.get`, so a stale listing that
+ * omits the triggering PR is corrected while a genuinely absent PR (closed or on a
+ * different SHA) is still skipped. This covers both the empty-listing race and the
+ * mixed-list race where another PR sharing the SHA is indexed before the triggering PR.
  *
  * Returns `null` when there are genuinely no open PRs at `headSha` (after the fallback
  * check). This occurs for departed-SHA evaluations when all siblings have moved away.
@@ -130,12 +132,13 @@ async function evaluateSha(
 ): Promise<ApprovalResult | null> {
   let numbers = await listCandidates(octokit, owner, repo, headSha, excludedPr);
 
-  // Decision 8 fallback: when the open-PR listing is empty but we have a fallback
-  // PR number, include it as a candidate. The evaluation loop below validates
-  // the PR's actual state and SHA via a direct pulls.get, so a stale listing that
-  // omits the triggering PR is corrected while a genuinely absent PR is still skipped.
-  if (numbers.length === 0 && fallbackPrNumber !== undefined) {
-    numbers = [fallbackPrNumber];
+  // Decision 8 fallback: inject the fallback PR whenever it is absent from the listing,
+  // not only when the listing is empty. If another PR on the same SHA was indexed first
+  // the listing is nonempty but still missing the triggering PR, so we must add it here.
+  // The evaluation loop below validates each candidate's live state and SHA via
+  // pulls.get, so a stale omission is corrected while a genuinely absent PR is skipped.
+  if (fallbackPrNumber !== undefined && !numbers.includes(fallbackPrNumber)) {
+    numbers = [...numbers, fallbackPrNumber];
   }
 
   if (numbers.length === 0) return null;

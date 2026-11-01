@@ -164,6 +164,24 @@ describe("check-protected-approval-gate", () => {
     expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
   });
 
+  it("injects the fallback PR even when the listing is nonempty but omits it (mixed-list synchronize race)", async () => {
+    // Simulate the mixed-list race: another PR (99) on live-sha was indexed first,
+    // but the triggering protected PR (42) is absent from the listing.
+    // Without the fix the gate would pass because PR 99 has an unprotected author.
+    // With the fix PR 42 is injected and its 0 approvals drive a failure.
+    listPulls.mockResolvedValue({ data: [pr(99, "human", "live-sha")] });
+    getPull.mockImplementation(async ({ pull_number }: { pull_number: number }) => ({
+      data: pull_number === 42 ? pr(42, "developer[bot]", "live-sha", "open") : pr(99, "human", "live-sha", "open"),
+    }));
+    listReviews.mockImplementation(async ({ pull_number }: { pull_number: number }) => ({
+      data: pull_number === 99 ? [{ user: { login: "alice" }, state: "APPROVED" }, { user: { login: "bob" }, state: "APPROVED" }] : [],
+    }));
+    await run();
+    // PR 42 (developer[bot]) is injected into the candidate set and has 0 approvals →
+    // strictest-wins → failure despite PR 99 having 2 approvals.
+    expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
+  });
+
   it("triggers departed-SHA sibling reruns for remaining open PRs on the old SHA", async () => {
     mockInputs({ departed_sha: "old-sha", departed_pr_number: "42" });
     getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "live-sha") });
