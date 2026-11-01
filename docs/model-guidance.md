@@ -26,16 +26,24 @@ capability across vendors. This supersedes the Anthropic-only scope of
 2. With no generic label, honor an explicit execution-provider preference in the issue or
    repository instructions. Merely mentioning a vendor as the subject of a task is not a
    provider preference; neither is a per-agent override a preference for all other agents.
-   With no explicit preference, derive the default provider from `GROOM_VENDOR_ANCHOR_MODEL`
-   using the anchor-resolution rules in the groom prompt: a `gpt-*` prefix → OpenAI; a
-   `grok-*` prefix → xAI; a tier alias (`sonnet`, `opus`, `haiku`) or any `claude-*`
-   prefix → Anthropic. If the anchor is empty or unrecognized, Anthropic is the safe default.
-   This does not change `DEFAULT_MODEL`.
+   With no explicit preference, the groomer anchors to `GROOM_VENDOR_ANCHOR_MODEL` (which the
+   workflow resolves as `GROOM_DEFAULT_MODEL || DEFAULT_MODEL`), infers the anchor's vendor using
+   the `resolve_provider()` routing rules in `docker/scripts/entrypoint.sh` (a `gpt-*` prefix →
+   OpenAI; a `grok-*` prefix → xAI; a tier alias or `claude-*` prefix → Anthropic), and selects
+   from that vendor's Task-Class Matrix column. The groomer emits **no** `model:*` label when the
+   task's capability class matches the anchor model's class under the Cross-Vendor Class Table —
+   the downstream workflow then falls through to the configured default, honoring `DEFAULT_MODEL`
+   (or `DESIGN_DEFAULT_MODEL` for design tasks). When the class differs, the groomer emits exactly
+   one same-vendor label from that task's Task-Class Matrix row. Anthropic is the safe default
+   when the anchor is empty.
 3. Use that provider's column in the Task-Class Matrix and the model-specific criteria below.
    For Anthropic, choose a tier alias; for OpenAI and xAI, choose a provisioned named model.
-   Record the provider, task class, and reason in the grooming comment. For example, a scoped
-   fix explicitly requesting OpenAI selects `model:gpt-5.6-terra`; an xAI architectural plan
-   can select `model:grok-4.20-0309-reasoning`.
+   Record the anchor model, inferred vendor, selected task class, and label outcome in the
+   grooming comment (see the groom prompt for the exact template). For example, a scoped fix
+   explicitly requesting OpenAI selects `model:gpt-5.6-terra`; an xAI architectural plan can
+   select `model:grok-4.20-0309-reasoning`. For the anchor-based case, the outcome is either
+   "no label applied — task class matches anchor class" or "applied `model:<name>` — task class
+   differs from anchor class".
 4. A provider preference does not establish account access. Operators must configure its key
    for downstream runs; the groomer's own provider/key does not prove downstream availability.
    Never inspect or print secret values. If the requested provider is known to be unavailable
@@ -287,6 +295,15 @@ The configured fallback remains `sonnet` in
 [`agent-vars` module](../terraform/modules/agent-vars/main.tf).
 It is a fallback, not evidence that every workflow always runs Sonnet, and operators can change it.
 
+`DESIGN_DEFAULT_MODEL` is an optional agent-specific override for the designer (`AGENT_ACTION=design`):
+the design workflow uses it as the fallback when no `model:*` label is present, and falls through to
+`DEFAULT_MODEL` when empty. `GROOM_DEFAULT_MODEL` is the parallel override for the grooming agent
+(`AGENT_ACTION=groom`): the grooming workflow resolves `GROOM_DEFAULT_MODEL || DEFAULT_MODEL` as the
+vendor-anchor model and passes it into the container as `GROOM_VENDOR_ANCHOR_MODEL`, which the groom
+prompt uses to apply the vendor-anchor model selection policy (see § "Provider selection during
+grooming"). When `GROOM_DEFAULT_MODEL` is empty, the groomer falls back to `DEFAULT_MODEL`. Neither
+variable changes `DEFAULT_MODEL` itself.
+
 For exact label sources and fallback wiring, read the
 [caller and reusable workflows](../.github/workflows/) and
 [`resolve-model` activity](../.github/scripts/src/resolve-model.ts).
@@ -317,6 +334,16 @@ on the PR too: an issue's review override alone is not read by the reviewer work
 
 Entries below record changes at their original dates; historical model lists and prices are not
 current selection guidance.
+
+- **2026-11-01 (rev 11)** — Vendor-anchor model selection policy (Issue #776): updated
+  § "Provider selection during grooming" step 2 to describe the full anchor-class-match policy —
+  the groomer reads `GROOM_VENDOR_ANCHOR_MODEL` (resolved as `GROOM_DEFAULT_MODEL || DEFAULT_MODEL`),
+  infers the anchor's vendor via `resolve_provider()` in `docker/scripts/entrypoint.sh`, and emits
+  **no** `model:*` label when the task class matches the anchor's class under the Cross-Vendor Class
+  Table (leaving downstream workflows to fall through to `DEFAULT_MODEL` / `DESIGN_DEFAULT_MODEL`).
+  Updated step 3's comment-recording fields to: anchor model, inferred vendor, selected task class,
+  and label outcome. Added `GROOM_DEFAULT_MODEL` and `DESIGN_DEFAULT_MODEL` descriptions to
+  § "Repo Defaults".
 
 - **2026-11-01 (rev 10)** — Aligned "Provider selection during grooming" step 2 with the
   `GROOM_VENDOR_ANCHOR_MODEL`-based fallback introduced in PR #788 (Issue #775). The previous
