@@ -391,6 +391,23 @@ both invoke a shared reusable sweep workflow that:
    push a no-op commit). The sweep's step summary lists skipped PRs with
    the exact `gh` command to generate a run.
 
+**Staleness inherited from Decision 5.** The sweep's reruns re-execute the
+targeted run with the SAME workflow YAML and `helpers-ref` the original
+run used (base-branch commit at the time of the original event). This
+means the sweep recovers PRs stuck for reasons that re-executing the
+old code can fix — a dropped notifier→dispatcher chain, a transient
+rerun-API failure in Decision 7's departed-SHA sibling step, pending-run
+replacement that discarded a sibling-rerun step, or policy-input changes
+(variables are re-read at run time). The sweep does **not** recover PRs
+stuck because the shipped activity code or workflow YAML was buggy and
+has since been fixed on the default branch — the rerun will re-execute
+the old buggy version. For those cases the operator-intervention path
+(push a no-op commit to the PR branch to fire
+`pull_request_target: synchronize`, which creates a fresh run under the
+current base-branch YAML and `helpers-ref`) is the only mechanism; the
+sweep's step summary surfaces this guidance alongside the no-prior-run
+skip notice so operators have one place to look.
+
 Preserves the existing interval guard (default 10 min via
 `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`) on the scheduled
 caller. The backfill caller has no interval guard (it is a manual OFF→ON
@@ -693,11 +710,27 @@ rather than the Checks API call arguments.
    used, the dispatcher logs a skip and the operator's documented
    "push a no-op commit" instruction resolves it. Assert at least one
    of these two paths succeeds and the merge box eventually clears.
-7. **(new) Scheduled sweep rerun.** With a PR that is stuck in
-   `BLOCKED` because its latest `pull_request_target` run predated an
-   activity bug fix, let the scheduled reconcile sweep run. Assert
-   the sweep triggers a rerun that produces a correct check-run on
-   the PR head SHA.
+7. **(new) Scheduled sweep rerun — safety net for a dropped per-event
+   rerun.** Simulate the Decision 7 departed-SHA sibling-rerun step
+   emitting a `core.warning` (per Decision 9) because its
+   `POST /actions/runs/{run_id}/rerun` call failed transiently; the
+   sibling PR therefore has a stale check-run that still reflects the
+   pre-close shared-SHA candidate set. Let the scheduled reconcile
+   sweep run. Assert the sweep triggers a rerun of the sibling PR's
+   latest `pull_request_target` publisher run and the resulting
+   check-run on the sibling's head SHA reflects the current open-PR
+   intersection (not the pre-close set). **This acceptance contract
+   explicitly excludes shipped activity/workflow bug fixes**:
+   per Decision 5's "Staleness consideration" subsection and Decision 6's
+   "Staleness inherited from Decision 5" subsection, reruns re-execute
+   the original run's base-branch YAML and `helpers-ref`, so code
+   fixes landed on the default branch do not propagate through sweep
+   reruns. Also assert that for a PR stuck because of a shipped
+   activity bug fix, the sweep's step summary surfaces the documented
+   operator-intervention path (push a no-op commit to fire
+   `pull_request_target: synchronize`), and that performing that no-op
+   push produces a fresh run under the current base-branch YAML and
+   helpers-ref whose auto-emitted check clears the merge box.
 8. **(new) Backfill run.** Dispatch the backfill workflow after an
    OFF→ON flip. Assert every open PR either gets a rerun that
    produces an enforcing check (if a prior `pull_request_target` run
