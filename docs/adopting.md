@@ -1554,9 +1554,12 @@ publisher you copy into your repo.
 > rather than `protected-approval-gate`, and the required-status-check
 > context in the branch ruleset would not match. The publisher must be a
 > **top-level job** named exactly `protected-approval-gate` in a
-> top-level workflow file in your repository — hence the copy. The other
-> workflows (dispatcher, notifier, backfill, reconcile, and sweep
-> reusable) remain reusables you reference remotely.
+> top-level workflow file in your repository — hence the copy. The
+> notifier, dispatcher, backfill, and reconcile workflows are also
+> copied into your repository (they are event-triggered workflows and
+> caller stubs, not reusables). Only the sweep
+> (`protected-approval-gate-sweep-reusable.yml`) is a `workflow_call`
+> reusable that your backfill and reconcile stubs reference remotely.
 
 - `protected-approval-gate-sweep-reusable.yml` re-evaluates every open pull
   request by locating and rerunning each PR's latest `pull_request_target`
