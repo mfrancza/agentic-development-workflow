@@ -1,0 +1,57 @@
+name: protected-approval-gate-dispatcher
+
+# Triggers a publisher rerun whenever a notifier run completes. This workflow
+# runs on the default-branch SHA (workflow_run behaviour), so it must not
+# publish checks directly — doing so would attach the auto-emitted job check to
+# the default branch instead of the reviewed PR head. Instead it locates the
+# latest pull_request_target publisher run for the affected PR and calls the
+# rerun API so the publisher re-executes under its original pull_request_target
+# context and the resulting check attaches to the PR head SHA.
+# See docs/design/protected-approval-gate-job-check.md, Decision 5.
+on:
+  workflow_run:
+    workflows: ["protected-approval-gate-notify"]
+    types: [completed]
+
+# actions: write is required to call POST /actions/runs/{run_id}/rerun.
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  # Fallback to run id prevents unrelated PR-less notifier runs from sharing
+  # one empty concurrency key. The job guard below skips when there is no PR.
+  group: protected-approval-gate-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    # Skip if the notifier could not associate a PR (e.g. pull_requests is empty
+    # for some fork events where GitHub omits the pull_requests array).
+    if: github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Find and rerun latest publisher run for PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Find the most-recent pull_request_target publisher run for this PR.
+          # The API returns runs sorted by created_at descending (GitHub default),
+          # so the first matching entry on the first page is the latest run.
+          # Pagination is skipped; the scheduled reconcile sweep (safety net) covers
+          # the rare case where no match is found within the first 100 runs.
+          run_id="$(gh api \
+            "repos/${REPO}/actions/workflows/protected-approval-gate-publisher.yml/runs?event=pull_request_target&per_page=100" \
+            | jq -r --argjson pr "${PR_NUMBER}" \
+              '[.workflow_runs[] | select((.pull_requests // [])[] | .number == $pr) | .id] | .[0] // ""')"
+          if [[ -z "$run_id" ]]; then
+            echo "::warning::No prior pull_request_target publisher run found for PR #${PR_NUMBER}. The scheduled reconcile sweep will reconcile it."
+            exit 0
+          fi
+          echo "Triggering rerun of publisher run ${run_id} for PR #${PR_NUMBER}."
+          gh api -X POST "repos/${REPO}/actions/runs/${run_id}/rerun"
+          echo "Rerun triggered successfully."

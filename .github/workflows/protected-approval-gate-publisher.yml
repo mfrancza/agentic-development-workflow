@@ -1,14 +1,14 @@
 name: protected-approval-gate-publisher
 
-# Run for every PR and every review event so the status check is available for
-# both protected and unprotected authors. The activity decides whether a PR
-# author is protected; do not gate this workflow on AGENT_ALLOWLIST.
+# Runs on every pull_request_target event to publish the gate check on the PR head
+# commit. Review events are handled by the dispatcher workflow
+# (protected-approval-gate-dispatcher.yml), which reruns the latest
+# pull_request_target publisher run rather than running directly at the
+# default-branch SHA. The activity decides whether a PR author is protected;
+# do not gate this workflow on AGENT_ALLOWLIST.
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, edited, ready_for_review, closed]
-  workflow_run:
-    workflows: ["protected-approval-gate-notify"]
-    types: [completed]
 
 # contents: read is required to retrieve the trusted helper checkout.
 # The composite action uses pull-request metadata and exits non-zero to publish
@@ -21,10 +21,7 @@ permissions:
   actions: write
 
 concurrency:
-  # The workflow_run fallback prevents unrelated PR-less notifier runs from
-  # sharing one empty concurrency key. The job guards below prevent publication
-  # when GitHub cannot associate the notifier run with a pull request.
-  group: protected-approval-gate-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  group: protected-approval-gate-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
@@ -32,7 +29,7 @@ jobs:
   # Job name must match the ruleset's required-status-check context exactly.
   # Skipped when the gate is disabled; the preview sibling job runs instead.
   protected-approval-gate:
-    if: vars.ENABLE_PROTECTED_APPROVAL_GATE == 'true' && (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false || github.event_name == 'workflow_run' && github.event.workflow_run.pull_requests[0] != null)
+    if: vars.ENABLE_PROTECTED_APPROVAL_GATE == 'true' && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -120,8 +117,8 @@ jobs:
           enabled: 'true'
           qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
           resolver-token: ${{ steps.resolver-token.outputs.token }}
-          pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
-          head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
           repo: ${{ github.repository }}
           departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
           departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
@@ -132,7 +129,7 @@ jobs:
   # Skipped when the gate is enabled; the enforcing sibling job runs instead.
   protected-approval-gate-preview:
     name: protected-approval-gate (preview)
-    if: vars.ENABLE_PROTECTED_APPROVAL_GATE != 'true' && (github.event_name == 'pull_request_target' && github.event.pull_request.draft == false || github.event_name == 'workflow_run' && github.event.workflow_run.pull_requests[0] != null)
+    if: vars.ENABLE_PROTECTED_APPROVAL_GATE != 'true' && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -220,8 +217,8 @@ jobs:
           enabled: 'false'
           qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
           resolver-token: ${{ steps.resolver-token.outputs.token }}
-          pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
-          head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
           repo: ${{ github.repository }}
           departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
           departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}

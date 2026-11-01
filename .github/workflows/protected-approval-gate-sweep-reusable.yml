@@ -1,33 +1,14 @@
 name: protected-approval-gate-sweep (reusable)
 
-# Re-publishes the protected-approval-gate check on every open pull request,
-# once per distinct head SHA. Called by the backfill (dispatched after the gate
-# is enabled) and reconcile (scheduled safety net) caller stubs, in this repo
-# and in adopting repos. In a called workflow, github.event_name and
-# GITHUB_WORKFLOW_REF describe the caller, which the interval guard relies on.
+# Reruns the publisher workflow for every open pull request so each PR's
+# auto-emitted protected-approval-gate check reflects the current approval state.
+# Called by the backfill (dispatched after the gate is enabled) and reconcile
+# (scheduled safety net) caller stubs, in this repo and in adopting repos.
 on:
   workflow_call:
     inputs:
-      protected-pr-author-logins:
-        description: JSON array of protected PR author logins.
-        required: true
-        type: string
-      required-approval-count:
-        description: Positive number of qualifying approvals required.
-        required: true
-        type: string
-      enabled:
-        description: Whether the protected-approval gate is enabled.
-        required: true
-        type: string
       repo:
         description: Repository in owner/name format.
-        required: true
-        type: string
-      helpers-ref:
-        description: >
-          Git ref of mfrancza/agentic-development-workflow to check out for
-          helper actions. Must not be empty.
         required: true
         type: string
       interval-minutes:
@@ -39,30 +20,20 @@ on:
         required: false
         type: string
         default: ''
-      qualifying-reviewers:
+      publisher-workflow-file:
         description: >
-          JSON array of logins and <org>/<team-slug> references whose
-          approvals count toward the threshold (PROTECTED_APPROVAL_REVIEWERS).
-          Empty means any reviewer other than the PR author counts.
+          Filename of the publisher workflow. Adopters who copy the publisher
+          under a different name must set this input.
         required: false
         type: string
-        default: ''
-    secrets:
-      ALLOWLIST_RESOLVER_APP_ID:
-        description: >
-          Client ID of the allowlist-resolver GitHub App (organization
-          Members read). Needed only when qualifying-reviewers contains a
-          team reference.
-        required: false
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY:
-        description: Private key of the allowlist-resolver GitHub App.
-        required: false
+        default: 'protected-approval-gate-publisher.yml'
 
+# actions: write is required to call POST /actions/runs/{run_id}/rerun.
+# actions: read is required for the interval guard's prior-run lookup.
 permissions:
   contents: read
-  actions: read
+  actions: write
   pull-requests: read
-  checks: write
 
 jobs:
   find-open-prs:
@@ -109,10 +80,13 @@ jobs:
           REPO: ${{ inputs.repo }}
         run: |
           set -euo pipefail
-          prs="$(gh pr list --repo "$REPO" --state open --limit 1000 --json number,headRefOid | jq -c 'unique_by(.headRefOid) | map({number, sha: .headRefOid})')"
+          # No SHA deduplication: each PR has its own publisher run to rerun.
+          # (SHA deduplication was needed under the old Checks API per-SHA model;
+          # the rerun model is per-PR and does not share writes across PRs.)
+          prs="$(gh pr list --repo "$REPO" --state open --limit 1000 --json number | jq -c 'map({number})')"
           echo "value=${prs}" >> "$GITHUB_OUTPUT"
 
-  publish:
+  rerun:
     needs: find-open-prs
     if: needs.find-open-prs.outputs.run == 'true' && needs.find-open-prs.outputs.prs != '[]'
     runs-on: ubuntu-24.04
@@ -121,94 +95,23 @@ jobs:
       fail-fast: false
       matrix:
         pr: ${{ fromJSON(needs.find-open-prs.outputs.prs) }}
-    concurrency:
-      group: protected-approval-gate-sha-${{ matrix.pr.sha }}
-      cancel-in-progress: false
     steps:
-      - name: Validate helpers-ref input
+      - name: Find and rerun latest publisher run for PR
         env:
-          HELPERS_REF: ${{ inputs.helpers-ref }}
-        run: |
-          set -euo pipefail
-          if [[ -z "${HELPERS_REF}" ]]; then
-            echo "::error::helpers-ref input is required and must not be empty."
-            exit 1
-          fi
-
-      - name: Resolve helpers-ref to commit SHA
-        id: resolve-ref
-        env:
-          HELPERS_REF: ${{ inputs.helpers-ref }}
           GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ matrix.pr.number }}
+          REPO: ${{ inputs.repo }}
+          PUBLISHER_WORKFLOW: ${{ inputs.publisher-workflow-file }}
         run: |
           set -euo pipefail
-          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
-          if [[ -z "${resolved}" ]]; then
-            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
-            exit 1
+          run_id="$(gh api \
+            "repos/${REPO}/actions/workflows/${PUBLISHER_WORKFLOW}/runs?event=pull_request_target&per_page=100" \
+            | jq -r --argjson pr "${PR_NUMBER}" \
+              '[.workflow_runs[] | select((.pull_requests // [])[] | .number == $pr) | .id] | .[0] // ""')"
+          if [[ -z "$run_id" ]]; then
+            echo "::warning::No prior pull_request_target publisher run found for PR #${PR_NUMBER}. Push a no-op commit to create one: gh pr checkout ${PR_NUMBER} && git commit --allow-empty -m 'trigger publisher run' && git push"
+            exit 0
           fi
-          echo "Resolved ${HELPERS_REF} → ${resolved}"
-          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
-
-      - name: Check out upstream helper actions
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: mfrancza/agentic-development-workflow
-          ref: ${{ steps.resolve-ref.outputs.sha }}
-          path: _agentic-workflow
-          persist-credentials: false
-
-      - name: Verify helper checkout HEAD matches resolved SHA
-        env:
-          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
-        run: |
-          set -euo pipefail
-          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
-          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
-            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
-            exit 1
-          fi
-          echo "Helper checkout HEAD verified: ${actual_sha}"
-
-      # Team references in qualifying-reviewers need organization Members
-      # read, which GITHUB_TOKEN lacks. Mint the allowlist-resolver token only
-      # when the list has a team reference and the secret is configured. A
-      # missing secret or failed mint leaves the token empty, and the activity
-      # then fails protected PRs closed with an explanation.
-      - name: Detect team references in qualifying reviewers
-        id: reviewer-teams
-        env:
-          QUALIFYING_REVIEWERS: ${{ inputs.qualifying-reviewers }}
-          HAS_RESOLVER: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID != '' }}
-        run: |
-          set -euo pipefail
-          teams=false
-          if jq -e 'type == "array" and any(.[]; type == "string" and contains("/"))' <<<"${QUALIFYING_REVIEWERS:-[]}" >/dev/null 2>&1; then
-            teams=true
-          fi
-          if [[ "$teams" == "true" && "$HAS_RESOLVER" == "true" ]]; then
-            echo 'mint=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'mint=false' >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Mint allowlist-resolver token
-        id: resolver-token
-        if: steps.reviewer-teams.outputs.mint == 'true'
-        continue-on-error: true
-        uses: ./_agentic-workflow/.github/actions/agent-token
-        with:
-          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-
-      - name: Publish protected-approval-gate check
-        uses: ./_agentic-workflow/.github/actions/check-protected-approval-gate
-        with:
-          protected-pr-author-logins: ${{ inputs.protected-pr-author-logins }}
-          required-approval-count: ${{ inputs.required-approval-count }}
-          enabled: ${{ inputs.enabled }}
-          qualifying-reviewers: ${{ inputs.qualifying-reviewers }}
-          resolver-token: ${{ steps.resolver-token.outputs.token }}
-          pr-number: ${{ matrix.pr.number }}
-          head-sha: ${{ matrix.pr.sha }}
-          repo: ${{ inputs.repo }}
+          echo "Triggering rerun of publisher run ${run_id} for PR #${PR_NUMBER}."
+          gh api -X POST "repos/${REPO}/actions/runs/${run_id}/rerun"
+          echo "Rerun triggered successfully for PR #${PR_NUMBER}."
