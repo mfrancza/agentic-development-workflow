@@ -1620,8 +1620,86 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      # … bootstrap helper checkout (copy full inline steps from the publisher
-      #     template in agentic-development-workflow, updating the repo reference)
+      # Pin vX.Y.Z to the same release used in the dispatcher, backfill, and
+      # reconcile stubs.  Use an exact tag (not a branch) so the ref is
+      # immutable; the resolve step verifies the checkout HEAD before any
+      # composite action runs.
+      - name: Validate helpers-ref
+        env:
+          HELPERS_REF: vX.Y.Z
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref is required and must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: vX.Y.Z
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+
+      # Mint the allowlist-resolver token only when qualifying-reviewers
+      # contains a team reference (org/team) and the resolver secrets are
+      # configured.  A missing secret or failed mint leaves the token empty;
+      # the activity then fails protected PRs with an explanation rather than
+      # silently passing them.
+      - name: Detect team references in qualifying reviewers
+        id: reviewer-teams
+        env:
+          QUALIFYING_REVIEWERS: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
+          HAS_RESOLVER: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID != '' }}
+        run: |
+          set -euo pipefail
+          teams=false
+          if jq -e 'type == "array" and any(.[]; type == "string" and contains("/"))' <<<"${QUALIFYING_REVIEWERS:-[]}" >/dev/null 2>&1; then
+            teams=true
+          fi
+          if [[ "$teams" == "true" && "$HAS_RESOLVER" == "true" ]]; then
+            echo 'mint=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'mint=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint allowlist-resolver token
+        id: resolver-token
+        if: steps.reviewer-teams.outputs.mint == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
+
       - name: Publish protected-approval-gate check
         uses: ./_agentic-workflow/.github/actions/check-protected-approval-gate
         with:
@@ -1643,7 +1721,77 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      # … same bootstrap helper checkout as the enforcing job
+      - name: Validate helpers-ref
+        env:
+          HELPERS_REF: vX.Y.Z
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref is required and must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: vX.Y.Z
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+
+      - name: Detect team references in qualifying reviewers
+        id: reviewer-teams
+        env:
+          QUALIFYING_REVIEWERS: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
+          HAS_RESOLVER: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID != '' }}
+        run: |
+          set -euo pipefail
+          teams=false
+          if jq -e 'type == "array" and any(.[]; type == "string" and contains("/"))' <<<"${QUALIFYING_REVIEWERS:-[]}" >/dev/null 2>&1; then
+            teams=true
+          fi
+          if [[ "$teams" == "true" && "$HAS_RESOLVER" == "true" ]]; then
+            echo 'mint=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'mint=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Mint allowlist-resolver token
+        id: resolver-token
+        if: steps.reviewer-teams.outputs.mint == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
+
       - name: Publish protected-approval-gate (preview) check
         uses: ./_agentic-workflow/.github/actions/check-protected-approval-gate
         with:
@@ -1655,6 +1803,8 @@ jobs:
           pr-number: ${{ github.event.pull_request.number }}
           head-sha: ${{ github.event.pull_request.head.sha }}
           repo: ${{ github.repository }}
+          departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
+          departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
 ```
 
 `departed-sha` and `departed-pr-number` re-evaluate the commit a pull request
