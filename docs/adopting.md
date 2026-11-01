@@ -274,7 +274,7 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 | `agent-review-reusable.yml`                  | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`                   | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
 | `ci-reusable.yml`                            | —                                                               | —                                                                 |
 | `protected-approval-gate-reusable.yml`       | —                                                               | `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
-| `protected-approval-gate-sweep-reusable.yml` | —                                                               | `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
+| `protected-approval-gate-sweep-reusable.yml` | —                                                               | —                                                                 |
 | `secret-scan-reusable.yml`                   | —                                                               | —                                                                 |
 | `terraform-ci-reusable.yml`                  | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | —                                                                 |
 | `test-helper-ref-reusable.yml`               | —                                                               | —                                                                 |
@@ -1548,14 +1548,21 @@ approvals from someone other than its author. Pull requests from other authors
 pass immediately. Two reusable workflows implement it:
 
 - `protected-approval-gate-reusable.yml` evaluates one pull request. Your
-  publisher calls it on pull request and review events.
+  publisher calls it on pull request events.
 - `protected-approval-gate-sweep-reusable.yml` re-evaluates every open pull
-  request. Your backfill and reconcile workflows call it.
+  request by locating and rerunning each PR's latest `pull_request_target`
+  publisher run. Your backfill and reconcile workflows call it.
 
-Both publish the result through the Checks API under the name
-`protected-approval-gate` while the gate is enabled, and
-`protected-approval-gate (preview)` while it is disabled. The preview check
-shows what the gate would decide and is never required.
+The publisher publishes the result via its auto-emitted job check under the
+name `protected-approval-gate` while the gate is enabled (enforcing job), and
+`protected-approval-gate (preview)` while it is disabled (preview job). The
+preview check shows what the gate would decide and is never required.
+
+> **`protected-approval-gate-sweep-reusable.yml` does not accept
+> `helpers-ref`.** It triggers publisher reruns via the Actions API rather than
+> running composite actions itself, so it has no helper-checkout bootstrap step
+> and no `helpers-ref` input. Do not pass `helpers-ref` to your backfill or
+> reconcile stubs.
 
 **Prerequisites.**
 
@@ -1661,23 +1668,14 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
   pull-requests: read
-  checks: write
 
 jobs:
   sweep:
     uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@vX.Y.Z
-    secrets:
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
     with:
-      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
-      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
-      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       repo: ${{ github.repository }}
-      helpers-ref: vX.Y.Z
 ```
 
 `.github/workflows/protected-approval-gate-reconcile.yml` (scheduled safety
@@ -1697,9 +1695,8 @@ on:
 
 permissions:
   contents: read
-  actions: read
+  actions: write
   pull-requests: read
-  checks: write
 
 concurrency:
   group: protected-approval-gate-reconcile
@@ -1708,16 +1705,8 @@ concurrency:
 jobs:
   sweep:
     uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@vX.Y.Z
-    secrets:
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
     with:
-      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
-      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
-      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
       repo: ${{ github.repository }}
-      helpers-ref: vX.Y.Z
       interval-minutes: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES }}
 ```
 

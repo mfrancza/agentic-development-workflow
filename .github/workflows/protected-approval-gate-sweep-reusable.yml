@@ -104,10 +104,27 @@ jobs:
           PUBLISHER_WORKFLOW: ${{ inputs.publisher-workflow-file }}
         run: |
           set -euo pipefail
-          run_id="$(gh api \
-            "repos/${REPO}/actions/workflows/${PUBLISHER_WORKFLOW}/runs?event=pull_request_target&per_page=100" \
-            | jq -r --argjson pr "${PR_NUMBER}" \
-              '[.workflow_runs[] | select((.pull_requests // [])[] | .number == $pr) | .id] | .[0] // ""')"
+          # Paginate through workflow runs (100 per page, sorted by created_at desc)
+          # until we find the latest pull_request_target run for this PR. A repo
+          # accumulates runs over time; stopping at page 1 would miss PRs whose
+          # run fell off the first 100 results.
+          run_id=""
+          page=1
+          while true; do
+            response="$(gh api \
+              "repos/${REPO}/actions/workflows/${PUBLISHER_WORKFLOW}/runs?event=pull_request_target&per_page=100&page=${page}")"
+            run_id="$(jq -r --argjson pr "${PR_NUMBER}" \
+              '[.workflow_runs[] | select((.pull_requests // [])[] | .number == $pr) | .id] | .[0] // ""' \
+              <<<"$response")"
+            if [[ -n "$run_id" ]]; then
+              break
+            fi
+            count="$(jq '.workflow_runs | length' <<<"$response")"
+            if (( count < 100 )); then
+              break
+            fi
+            (( page++ ))
+          done
           if [[ -z "$run_id" ]]; then
             echo "::warning::No prior pull_request_target publisher run found for PR #${PR_NUMBER}. Push a no-op commit to create one: gh pr checkout ${PR_NUMBER} && git commit --allow-empty -m 'trigger publisher run' && git push"
             exit 0
