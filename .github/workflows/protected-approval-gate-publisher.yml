@@ -29,6 +29,7 @@ jobs:
   # Job name must match the ruleset's required-status-check context exactly.
   # Skipped when the gate is disabled; the preview sibling job runs instead.
   protected-approval-gate:
+    name: protected-approval-gate
     if: vars.ENABLE_PROTECTED_APPROVAL_GATE == 'true' && github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 10
