@@ -119,6 +119,27 @@ resource "github_actions_variable" "design_default_model" {
   value         = var.design_default_model
 }
 
+# Expose the grooming-agent default model as a repository Actions variable so
+# agent-groom workflows can prefer it over DEFAULT_MODEL for the grooming stage.
+# An empty value (the default) means "not configured — fall through to
+# DEFAULT_MODEL"; the caller stub expresses this as
+# `vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL`, which evaluates to
+# DEFAULT_MODEL when GROOM_DEFAULT_MODEL is empty, preserving existing behavior
+# for any repo that has not yet set this variable.
+# The same fallback expression is also passed into the agent container as
+# GROOM_VENDOR_ANCHOR_MODEL so the groom prompt can read the vendor anchor
+# without re-deriving it from AGENT_MODEL.
+# count = 0 when the value is empty so Terraform does not attempt to create a
+# GitHub Actions variable with an empty value (GitHub rejects these with 422).
+# When the value is later cleared, Terraform destroys the variable and the
+# `|| vars.DEFAULT_MODEL` fallback in the workflow takes over automatically.
+resource "github_actions_variable" "groom_default_model" {
+  count         = var.groom_default_model == "" ? 0 : 1
+  repository    = var.repository
+  variable_name = "GROOM_DEFAULT_MODEL"
+  value         = var.groom_default_model
+}
+
 # Expose the reviewer models list as a JSON-encoded repository Actions variable
 # so the resolve-reviewer-set action can iterate the ordered list of model
 # identifiers to try when the multi-reviewer feature selects a reviewer.

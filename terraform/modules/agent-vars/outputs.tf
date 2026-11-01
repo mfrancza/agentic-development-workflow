@@ -58,6 +58,11 @@ output "design_default_model_variable_name" {
   value       = length(github_actions_variable.design_default_model) > 0 ? github_actions_variable.design_default_model[0].variable_name : null
 }
 
+output "groom_default_model_variable_name" {
+  description = "Name of the GROOM_DEFAULT_MODEL Actions variable, or null when groom_default_model is empty and the variable is not created."
+  value       = length(github_actions_variable.groom_default_model) > 0 ? github_actions_variable.groom_default_model[0].variable_name : null
+}
+
 output "reviewer_models_variable_name" {
   description = "Name of the REVIEWER_MODELS Actions variable."
   value       = github_actions_variable.reviewer_models.variable_name

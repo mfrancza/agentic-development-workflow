@@ -44,6 +44,11 @@ const agentDesignReusableContent = readFileSync(
   "utf8",
 );
 
+const agentGroomReusableContent = readFileSync(
+  new URL(".github/workflows/agent-groom-reusable.yml", repoRoot),
+  "utf8",
+);
+
 const agentReviewContent = readFileSync(
   new URL(".github/workflows/agent-review.yml", repoRoot),
   "utf8",
@@ -387,5 +392,45 @@ describe("Model policy — (8) the default authoring model is not its own review
     );
 
     expect(result.model).not.toBe("sonnet");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Assertion 9: GROOM_DEFAULT_MODEL wins over DEFAULT_MODEL, and both the
+// resolve-model input and the container env var see the same resolved string
+// ---------------------------------------------------------------------------
+
+describe("Model policy — (9) GROOM_DEFAULT_MODEL precedence and GROOM_VENDOR_ANCHOR_MODEL consistency", () => {
+  it("GROOM_DEFAULT_MODEL wins over DEFAULT_MODEL: agent-groom reusable short-circuits to GROOM_DEFAULT_MODEL when non-empty", () => {
+    // The fallback expression `vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL`
+    // is present in the groom reusable; when GROOM_DEFAULT_MODEL is set the `||`
+    // short-circuits and the groom workflow uses the groom-specific value rather
+    // than DEFAULT_MODEL.
+    expect(agentGroomReusableContent).toContain(
+      "vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL",
+    );
+  });
+
+  it("GROOM_DEFAULT_MODEL falls back to DEFAULT_MODEL when empty: bare DEFAULT_MODEL form is absent", () => {
+    // The pre-feature bare form `default-model: ${{ vars.DEFAULT_MODEL }}` must
+    // be absent — an empty GROOM_DEFAULT_MODEL evaluates as falsy and the `||`
+    // falls through to DEFAULT_MODEL transparently without any bare form.
+    expect(agentGroomReusableContent).not.toContain(
+      "default-model: ${{ vars.DEFAULT_MODEL }}",
+    );
+  });
+
+  it("the resolve-model input and GROOM_VENDOR_ANCHOR_MODEL use the same expression", () => {
+    // Both the `default-model:` input passed to `resolve-model` and the
+    // `GROOM_VENDOR_ANCHOR_MODEL` env var passed into the container must read
+    // `vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL` so they always agree on
+    // the anchor model — the prompt reads GROOM_VENDOR_ANCHOR_MODEL and the
+    // model waterfall uses the resolve-model output; a mismatch would produce
+    // inconsistent behavior.
+    const matches = agentGroomReusableContent.match(
+      /vars\.GROOM_DEFAULT_MODEL \|\| vars\.DEFAULT_MODEL/g,
+    );
+    expect(matches).not.toBeNull();
+    expect(matches!.length).toBeGreaterThanOrEqual(2);
   });
 });

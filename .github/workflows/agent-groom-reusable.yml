@@ -261,7 +261,7 @@ jobs:
           subject-type: issue
           subject-number: ${{ inputs.issue-number }}
           repo: ${{ github.repository }}
-          default-model: ${{ vars.DEFAULT_MODEL }}
+          default-model: ${{ vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
           agent-type: groom
 
       - name: Prepare agent log directory
@@ -275,6 +275,7 @@ jobs:
         env:
           ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }}
           ALLOWLIST_RESOLVER_TOKEN: ${{ steps.assignee-resolver.outputs.token }}
+          GROOM_VENDOR_ANCHOR_MODEL: ${{ vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
         with:
           image: ${{ inputs.image }}
           gh-token: ${{ steps.setup.outputs.token }}
