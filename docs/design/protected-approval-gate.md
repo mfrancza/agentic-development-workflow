@@ -868,13 +868,17 @@ and `docs/adopting.md`:
    **Case (b) — PRs with no prior publisher run.** The backfill
    locates each PR's latest `pull_request_target` publisher run and
    triggers a rerun. A PR that was opened before the publisher
-   workflow was deployed (or that has only ever triggered the
-   OFF-mode preview run) has no `pull_request_target` publisher run
+   workflow was deployed has no `pull_request_target` publisher run
    to rerun; the backfill skips it, leaving the PR fail-closed until
    the publisher produces its first enforcing run. The operator must
    push a no-op commit on any such PR to trigger
    `pull_request_target: synchronize` and create the initial
-   publisher run.
+   publisher run. Note: a PR with only an OFF-mode preview run is
+   **not** in this category — an OFF-mode preview run is a qualifying
+   `pull_request_target` publisher run (both the sweep and backfill
+   locate runs solely by the `pull_request_target` event). The
+   backfill reruns it, and the rerun executes the enforcing job
+   because `ENABLE_PROTECTED_APPROVAL_GATE` is now `true`.
 
 **Automatic catch-up.** If the operator skips step 2, the Decision 6a
 reconcile sweep (`protected-approval-gate-reconcile.yml`)
