@@ -21,9 +21,10 @@ capability across vendors. This supersedes the Anthropic-only scope of
 
 ### Provider selection during grooming
 
-1. Preserve any existing generic model label and all per-agent overrides. An existing generic
-   label ends model selection, regardless of provider.
-2. With no generic label, honor an explicit execution-provider preference in the issue or
+1. Preserve any existing `model:*` label — both generic model labels and per-agent overrides
+   (e.g. `model:review:opus`, `model:developer:haiku`). Any `model:*` label ends model selection,
+   regardless of provider or label scope.
+2. With no `model:*` label, honor an explicit execution-provider preference in the issue or
    repository instructions. Merely mentioning a vendor as the subject of a task is not a
    provider preference; neither is a per-agent override a preference for all other agents.
    With no explicit preference, the groomer anchors to `GROOM_VENDOR_ANCHOR_MODEL` (which the
@@ -266,8 +267,10 @@ which model actually runs. The earlier August sample is historical, not a curren
 
 - **Preserve intentional choices.** If any generic label matching `^model:[^:]+$` exists,
   the groomer must not add, remove, or replace it. This includes named vendor models and snapshots.
-- **Per-agent overrides may coexist.** A label such as `model:review:opus` alone does not block
-  selection of one generic model label. Preserve all existing per-agent labels too.
+- **Per-agent overrides also block selection.** A label such as `model:review:opus` ends model
+  selection just as a generic label does — any `model:*` label takes precedence. Preserve all
+  existing `model:*` labels unchanged, whether they are tier aliases, named vendor models, snapshots,
+  or per-agent overrides.
 - **When selecting, emit exactly one generic model label** from the chosen provider's criteria.
   For Anthropic: mechanical → Haiku; scoped, non-trivial work → Sonnet; design-heavy,
   cross-cutting, security-sensitive, ambiguous, or `plan` → Opus. OpenAI and xAI follow their
