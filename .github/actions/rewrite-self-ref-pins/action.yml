@@ -1,0 +1,76 @@
+name: 'Rewrite self-referencing workflow pins'
+description: >
+  Rewrites every self-referencing reusable-workflow pin of the form
+  "uses: mfrancza/agentic-development-workflow/.github/workflows/*@<ref>"
+  in the specified workflows directory to the given target version.
+  Used by release.yml to produce a self-consistent release commit
+  (see docs/design/release-self-pin-worker.md Decision 1).
+
+inputs:
+  workflows-dir:
+    description: >
+      Directory containing the workflow files to scan.
+      Defaults to ".github/workflows".
+    required: false
+    default: '.github/workflows'
+  target-version:
+    description: >
+      Version string to rewrite self-referencing pins to.
+      Must match the pattern ^v\d+\.\d+\.\d+$ (e.g. "v1.2.3").
+    required: true
+
+outputs:
+  changed:
+    description: '"true" if one or more files were rewritten; "false" otherwise'
+    value: ${{ steps.run.outputs.changed }}
+  files-changed:
+    description: 'Number of files that had at least one pin rewritten (decimal string)'
+    value: ${{ steps.run.outputs.files-changed }}
+
+runs:
+  using: composite
+  steps:
+    # setup-node's cache-dependency-path is resolved via @actions/glob,
+    # which rejects '.' / '..' segments, so normalize first. Also emit
+    # cache-key-path only when inside GITHUB_WORKSPACE — @actions/glob
+    # cannot find files outside the workspace (remote action references
+    # resolve github.action_path to the _actions cache, outside the workspace).
+    - name: Resolve scripts directory
+      id: scripts-dir
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        scripts_dir="$(cd "$ACTION_PATH/../../scripts" && pwd)"
+        echo "dir=${scripts_dir}" >> "$GITHUB_OUTPUT"
+        if [[ "${scripts_dir}" == "${GITHUB_WORKSPACE}"* ]]; then
+          echo "cache-key-path=${scripts_dir}/package-lock.json" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Set up Node.js
+      if: steps.scripts-dir.outputs.cache-key-path != ''
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ steps.scripts-dir.outputs.cache-key-path }}
+    - name: Set up Node.js
+      if: steps.scripts-dir.outputs.cache-key-path == ''
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+
+    - name: Install dependencies
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      run: npm ci
+
+    - name: Rewrite self-referencing workflow pins
+      id: run
+      shell: bash
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      env:
+        INPUT_WORKFLOWS_DIR: ${{ inputs.workflows-dir }}
+        INPUT_TARGET_VERSION: ${{ inputs.target-version }}
+      run: npx --no-install tsx src/rewrite-self-ref-pins.ts

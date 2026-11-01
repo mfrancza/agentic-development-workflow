@@ -31,6 +31,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { PINNED_SELF_REF_RE } from "../src/lib/self-ref-pins.js";
 
 const workflowsDir = new URL("../../../.github/workflows/", import.meta.url);
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
@@ -167,13 +168,6 @@ interface PinnedCallSite {
   /** Indentation (spaces) of the `uses:` line. */
   usesIndent: number;
 }
-
-/**
- * Pattern matching `uses: mfrancza/agentic-development-workflow/.github/workflows/<file>@<ref>`
- * on a non-comment YAML line.
- */
-const PINNED_SELF_REF_RE =
-  /uses:\s+mfrancza\/agentic-development-workflow\/\.github\/workflows\/([\w.-]+\.ya?ml)@(\S+)/;
 
 /**
  * Scan all workflow files and return every pinned self-referencing reusable
