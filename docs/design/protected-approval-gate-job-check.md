@@ -99,6 +99,27 @@ cases not reported in this issue":
    class (see "Trust-boundary analysis" below), and the human-required
    label on this issue carries forward the same maintainer-confirmation
    obligation.
+7. **The publication unit must run inside GitHub Actions. No application
+   or publisher process may be run outside Actions as part of this fix.**
+   Maintainer-stated constraint (PR #764 review comment on line 667 of
+   this file, 2026-11-01): "Not running an application outside actions
+   is a requirement at this point — we don't want to deal with other
+   infrastructure until we can do it in a comprehensive way." This is a
+   hard requirement, not a scoping preference: it disqualifies any
+   alternative whose publication mechanism depends on a long-running
+   service, a hosted webhook target, a cron-driven external worker, or
+   any identity (including a dedicated GitHub App) whose check-runs
+   cannot be emitted by Actions itself (Actions-emitted check-runs are
+   always App 15368). A dedicated publisher GitHub App — the only
+   structural fix that would eliminate the modified-notifier residual
+   risk from requirement 6 — therefore remains unavailable to this
+   design, independent of whether migrating adopting repos is cheap
+   today. When the maintainer later authorizes external infrastructure
+   as part of a comprehensive deployment-runtime story, the dedicated
+   App can be adopted without breaking the context name or ruleset
+   shape chosen here (the ruleset's `integration_id` is the only field
+   that would need to flip, and no adopters' workflow files would need
+   to change).
 
 ### Runtime evidence
 
@@ -125,8 +146,13 @@ maintainer's follow-up explicitly flags that this is a suggestion, not a
 constraint. The design evaluates three publication mechanisms (Decision
 2 below) and selects the issue's proposed shape, because the alternatives
 either keep the Checks-API-vs-suite-attachment root cause or require
-provisioning new infrastructure (a dedicated publisher GitHub App) that
-is already listed as "out of scope" in the parent design doc.
+provisioning a dedicated publisher GitHub App with a publication runtime
+outside Actions, which the maintainer disallows under requirement 7
+("no application run outside Actions as part of this fix"). The
+dedicated-App structural fix is not merely "out of scope" per the parent
+design doc; it is affirmatively disqualified for the present fix by the
+no-external-runtime requirement, and remains available as a follow-up
+once the maintainer authorizes external infrastructure.
 
 Where the issue's proposed fix leaves implementation choices open — in
 particular, *how* review events, scheduled sweeps, and departed-SHA
@@ -212,7 +238,7 @@ invocation) in a single top-level job.
 | Keep the Checks API publication; force the created run to attach to the publisher workflow's own suite | `POST /repos/{owner}/{repo}/check-runs` has no `check_suite_id` parameter and no documented workaround. Attempting to control attachment order (e.g. by delaying the publisher until all other suites complete) is fragile and does not help the primary failure mode: when CI's Actions suite completes first, the publisher's Checks API run attaches to CI's suite and the merge box ignores it. |
 | Keep the Checks API; name the publisher's own job to match | Was tried implicitly by the current design's "job pass/fail for debuggability" path (Decision 6 of the current doc). The reusable-workflow structure prevents the auto-emitted name from being just `protected-approval-gate`. Collapsing to a single top-level job is a prerequisite for *any* fix that uses the auto-emitted name, so the choice is between (a) inline-top-level-job + auto-emitted check (this decision) or (b) inline-top-level-job + Checks API (keeps the suite-attachment root cause for cross-workflow suites and across the non-`pull_request_target` paths — see below). |
 | Switch to commit statuses (`POST /statuses/{sha}` with ruleset `required_check { context }`) | Decision 6 of the current design doc rejected this for new integrations. Reconsidering under this design: commit statuses are directly keyed by `(repository, sha, context)` with no check-suite indirection, and they would in principle fix the suite-attachment problem for the paths where the publisher's workflow run SHA is the default branch (`workflow_run`, `schedule`). But commit statuses do not integrate with the Checks tab UI (one-line summary only, no rich output panel for the per-PR qualifying-approval tally), and the ruleset still binds `integration_id = 15368` for the status's source, so the attack surface is identical to the auto-emitted-job-check approach. The auto-emitted-job-check approach matches the ruleset UI's native primitive and keeps the diagnostic affordance the current design built into the Checks API `output.summary` field. Also, the issue text itself explicitly proposes the job-check direction and the maintainer called out "consider alternatives", which this table does — commit statuses are not clearly better than job checks, and are strictly worse for operator-visible debuggability. |
-| Provision a dedicated publisher GitHub App and bind the ruleset to that App's integration id | Already listed as "out of scope" in the current design's Decision 5 ("Stronger posture is possible but out of scope"). This design does not reverse that scoping, because the structural fix needs a long-tail of operator work (new App, new secrets, new Terraform resources, new deployment runtime outside Actions) that is independent of the current symptom and can be adopted later without breaking context names. The present fix must land first to unblock the shipping gate; the dedicated App remains available as a follow-up. |
+| Provision a dedicated publisher GitHub App and bind the ruleset to that App's integration id | Disqualified by requirement 7 (no application run outside Actions as part of this fix). The maintainer's PR #764 review explicitly asked whether a dedicated App would be the better long-term fix given the small adopter count today, and in the same review clarified that "not running an application outside actions is a requirement at this point — we don't want to deal with other infrastructure until we can do it in a comprehensive way." Actions-emitted check-runs are always App 15368; a dedicated-App publication path therefore necessarily runs its publication unit outside Actions (hosted webhook target, cron-driven external worker, or similar), which is affirmatively excluded. The present design does not foreclose the dedicated-App path: the ruleset's `integration_id` is the only field that would flip, and the context name and workflow shape chosen here allow adopters to migrate without a coordinated breaking change once the maintainer authorizes external infrastructure as part of a comprehensive deployment-runtime story. |
 | Rename the required context and leave the publication mechanism alone | Does not address the structural problem (any Checks-API publication under the GitHub Actions App ID has the same suite-attachment behavior). Reversing the symptom by renaming would also require a coordinated ruleset flip, which has its own operational cost. |
 
 ### Decision 3 — The job's exit code is the published conclusion
@@ -655,16 +681,21 @@ vehicle for that confirmation on the current PR, and the one applied to
 #751 is explicitly inherited into this design PR.
 
 The dedicated-publisher-App structural fix (Decision 5 "A stronger
-posture is possible but out of scope") remains out of scope and remains
-available as a follow-up, with the context name and ruleset shape
-preserved under this design so adopting it later does not require
-coordinated flips.
+posture is possible but out of scope") remains unavailable under this
+design — it is disqualified by requirement 7 (no application run
+outside Actions as part of this fix), not merely scoped out — and
+remains available as a follow-up once the maintainer authorizes
+external infrastructure as part of a comprehensive deployment-runtime
+story. The context name and ruleset shape are preserved under this
+design so that migration — when later authorized — requires only a
+ruleset `integration_id` flip and no changes to adopters' workflow
+files.
 
 **Alternatives considered.**
 
 | Alternative | Reason rejected |
 |-------------|-----------------|
-| Use this redesign as the opportunity to adopt the dedicated-publisher-App structural fix | The dedicated App requires provisioning a new identity, secret rotation, Terraform resources, and a publication runtime outside Actions (because Actions-emitted check-runs are always App 15368). The present fix must land to unblock the shipping gate; the dedicated App's scope is independent and much larger. The present design does not foreclose the dedicated-App path. |
+| Use this redesign as the opportunity to adopt the dedicated-publisher-App structural fix | Disqualified by requirement 7 (no application run outside Actions as part of this fix). The maintainer stated on PR #764 review (2026-11-01): "Not running an application outside actions is a requirement at this point — we don't want to deal with other infrastructure until we can do it in a comprehensive way." A dedicated App necessarily runs its publication unit outside Actions, because Actions-emitted check-runs are always App 15368. The maintainer's companion comment on Decision 2's dedicated-App row ("Would a dedicated app be a generally superior solution? There aren't that many adopting repos yet, so let's fix this the optimal way for the long term") asked whether the dedicated App should be the long-term optimal fix adopted now; requirement 7 answers that question: not until the comprehensive deployment-runtime story is in place. The present design preserves the context name and workflow shape so that migration to a dedicated App — if later authorized — requires only a ruleset `integration_id` flip. |
 | Narrow the publisher's trigger set to reduce the attack surface (e.g. no `pull_request_target: edited`) | Does not change the attack surface — the modified-notifier attack runs through the untrusted notifier, not the trusted publisher. Narrowing the publisher's triggers would regress functionality (edited catches title/body/base changes that correlate with policy inputs) without security benefit. |
 
 ### Decision 12 — Acceptance test contract (updated from Decision 9 of the parent design)
