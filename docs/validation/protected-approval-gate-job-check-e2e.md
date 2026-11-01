@@ -11,7 +11,7 @@
 
 ## Summary
 
-This document records outcomes from the Decision 12 acceptance test contract executed against the live repository. Thirteen of the fifteen test cases are fully or mechanistically validated; eleven require an operator to enable the gate (`ENABLE_PROTECTED_APPROVAL_GATE = 'true'`) and at least one qualifying human approval on a protected-author PR. See **Human intervention required** below.
+This document records outcomes from the Decision 12 acceptance test contract executed against the live repository. Nine of the fifteen test cases have supporting evidence: four (cases 3, 4, 12, 13) are fully validated by unit tests alone; five (cases 2, 5, 7, 9, 15) are mechanistically confirmed or partially observed in preview mode but require full end-to-end assertion. Eleven cases in total require an operator to enable the gate (`ENABLE_PROTECTED_APPROVAL_GATE = 'true'`) and at least one qualifying human approval on a protected-author PR to complete full end-to-end validation. See **Human intervention required** below.
 
 ---
 
