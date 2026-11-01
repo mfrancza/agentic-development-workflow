@@ -1545,10 +1545,13 @@ An opt-in required status check that blocks merging a pull request authored
 by a protected login (for example your developer-agent App,
 `<your-developer-app-slug>[bot]`) until it has `REQUIRED_APPROVAL_COUNT`
 approvals from someone other than its author. Pull requests from other authors
-pass immediately. Two reusable workflows implement it:
+pass immediately. The implementation uses two reusable workflows plus a
+publisher you copy into your repo:
 
-- `protected-approval-gate-reusable.yml` evaluates one pull request. Your
-  publisher calls it on pull request events.
+- `protected-approval-gate-reusable.yml` evaluates one pull request. It is
+  available for callers that want a reusable workflow; the publisher template
+  below inlines the composite action directly so the auto-emitted job check has
+  the required top-level name (`protected-approval-gate`).
 - `protected-approval-gate-sweep-reusable.yml` re-evaluates every open pull
   request by locating and rerunning each PR's latest `pull_request_target`
   publisher run. Your backfill and reconcile workflows call it.
@@ -1577,18 +1580,20 @@ preview check shows what the gate would decide and is never required.
   `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` secrets of an `allowlist-resolver`
   GitHub App are required (see below). Everything else uses the workflow
   `GITHUB_TOKEN`.
-- All four caller workflows below. The backfill and reconcile are what keep
+- All five caller workflows below. The backfill and reconcile are what keep
   results current after the gate is re-enabled, so do not skip them.
 
 **Caller stubs.**
 
-The publisher runs on `pull_request_target` and on completion of the notifier,
-so it always executes trusted base-branch code and can publish results for fork
-pull requests. Do not run it on `pull_request` or `pull_request_review`: those
-events load workflow YAML from the pull request and cannot publish Checks API
-results for forks. The notifier executes nothing; its completion is the signal
-the publisher listens for. Its `name:` must exactly match the publisher's
-`workflow_run.workflows` filter.
+The publisher runs on `pull_request_target` only, so it always executes
+trusted base-branch code and can publish results for fork pull requests. Do
+not run it on `pull_request` or `pull_request_review`: those events load
+workflow YAML from the pull request and cannot publish results for forks.
+Review events are handled by the dispatcher, which reruns the publisher under
+its original `pull_request_target` context so the check attaches to the PR
+head SHA rather than the default branch. The notifier executes nothing; its
+completion is the signal the dispatcher listens for. Its `name:` must exactly
+match the dispatcher's `workflow_run.workflows` filter.
 
 `.github/workflows/protected-approval-gate-publisher.yml`:
 
@@ -1598,37 +1603,63 @@ name: protected-approval-gate-publisher
 on:
   pull_request_target:
     types: [opened, reopened, synchronize, edited, ready_for_review, closed]
-  workflow_run:
-    workflows: ["protected-approval-gate-notify"]
-    types: [completed]
 
+# contents: read — helper checkout.
+# actions: write — departed-SHA sibling rerun helper
+#   (listWorkflowRuns + reRunWorkflow in check-protected-approval-gate).
 permissions:
   contents: read
   pull-requests: read
-  checks: write
+  actions: write
 
 concurrency:
-  group: protected-approval-gate-pr-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  group: protected-approval-gate-pr-${{ github.event.pull_request.number }}
   cancel-in-progress: false
 
 jobs:
-  check-protected-approvals:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.pull_requests[0] != null
-    uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-reusable.yml@vX.Y.Z
-    secrets:
-      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
-      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
-    with:
-      protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
-      required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
-      enabled: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE }}
-      qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
-      pr-number: ${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}
-      head-sha: ${{ github.event.pull_request.head.sha || github.event.workflow_run.pull_requests[0].head.sha }}
-      repo: ${{ github.repository }}
-      helpers-ref: vX.Y.Z
-      departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
-      departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
+  # Enforcing job — runs only when the gate is enabled and the PR is not a draft.
+  # Job name must match the ruleset's required-status-check context exactly.
+  # Skipped when the gate is disabled; the preview job runs instead.
+  protected-approval-gate:
+    if: vars.ENABLE_PROTECTED_APPROVAL_GATE == 'true' && github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # … bootstrap helper checkout (copy full inline steps from the publisher
+      #     template in agentic-development-workflow, updating the repo reference)
+      - name: Publish protected-approval-gate check
+        uses: ./_agentic-workflow/.github/actions/check-protected-approval-gate
+        with:
+          enabled: 'true'
+          protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
+          required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
+          qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
+          resolver-token: ${{ steps.resolver-token.outputs.token }}
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          repo: ${{ github.repository }}
+          departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
+          departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
+
+  # Preview job — diagnostic only, never blocks merges.
+  protected-approval-gate-preview:
+    name: protected-approval-gate (preview)
+    if: vars.ENABLE_PROTECTED_APPROVAL_GATE != 'true' && github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # … same bootstrap helper checkout as the enforcing job
+      - name: Publish protected-approval-gate (preview) check
+        uses: ./_agentic-workflow/.github/actions/check-protected-approval-gate
+        with:
+          enabled: 'false'
+          protected-pr-author-logins: ${{ vars.PROTECTED_PR_AUTHOR_LOGINS }}
+          required-approval-count: ${{ vars.REQUIRED_APPROVAL_COUNT }}
+          qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
+          resolver-token: ${{ steps.resolver-token.outputs.token }}
+          pr-number: ${{ github.event.pull_request.number }}
+          head-sha: ${{ github.event.pull_request.head.sha }}
+          repo: ${{ github.repository }}
 ```
 
 `departed-sha` and `departed-pr-number` re-evaluate the commit a pull request
@@ -1655,6 +1686,64 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - run: 'true'
+```
+
+`.github/workflows/protected-approval-gate-dispatcher.yml` (reruns the
+publisher for the reviewed PR under the original `pull_request_target`
+context, so the resulting check attaches to the PR head SHA):
+
+```yaml
+name: protected-approval-gate-dispatcher
+
+on:
+  workflow_run:
+    workflows: ["protected-approval-gate-notify"]
+    types: [completed]
+
+# actions: write is required to call POST /actions/runs/{run_id}/rerun.
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: protected-approval-gate-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    if: github.event.workflow_run.pull_requests[0] != null
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Find and rerun latest publisher run for PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          run_id=""
+          page=1
+          while true; do
+            response="$(gh api \
+              "repos/${REPO}/actions/workflows/protected-approval-gate-publisher.yml/runs?event=pull_request_target&per_page=100&page=${page}")"
+            run_id="$(jq -r --argjson pr "${PR_NUMBER}" \
+              '[.workflow_runs[] | select((.pull_requests // [])[] | .number == $pr) | .id] | .[0] // ""' \
+              <<<"$response")"
+            if [[ -n "$run_id" ]]; then
+              break
+            fi
+            count="$(jq '.workflow_runs | length' <<<"$response")"
+            if (( count < 100 )); then
+              break
+            fi
+            (( page++ ))
+          done
+          if [[ -z "$run_id" ]]; then
+            echo "::warning::No prior publisher run found for PR #${PR_NUMBER}. The scheduled sweep will reconcile it."
+            exit 0
+          fi
+          gh api -X POST "repos/${REPO}/actions/runs/${run_id}/rerun"
 ```
 
 `.github/workflows/protected-approval-gate-backfill.yml` (dispatch it by hand
