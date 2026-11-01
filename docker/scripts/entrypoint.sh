@@ -726,7 +726,9 @@ Existing labels: ${EXISTING_LABELS:-none}
 
 Label criteria are defined in: agents/grooming/label-criteria.json (already checked out in your working directory at ${WORK_DIR})
 
-ADMIN_ASSIGNEES: ${ADMIN_ASSIGNEES}"
+ADMIN_ASSIGNEES: ${ADMIN_ASSIGNEES}
+
+GROOM_VENDOR_ANCHOR_MODEL: ${GROOM_VENDOR_ANCHOR_MODEL:-}"
 }
 
 action_resolve_conflicts() {

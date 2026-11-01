@@ -26,9 +26,20 @@ import { describe, expect, it } from "vitest";
 const repoRoot = new URL("../../../", import.meta.url);
 const workflowsDir = new URL(".github/workflows/", repoRoot);
 const terraformDir = new URL("terraform/", repoRoot);
+const dockerDir = new URL("docker/scripts/", repoRoot);
 
 const groomReusableContent = readFileSync(
   new URL("agent-groom-reusable.yml", workflowsDir),
+  "utf8",
+);
+
+const groomPromptContent = readFileSync(
+  new URL("prompts/groom.md", dockerDir),
+  "utf8",
+);
+
+const entrypointContent = readFileSync(
+  new URL("entrypoint.sh", dockerDir),
   "utf8",
 );
 
@@ -131,5 +142,41 @@ describe("terraform/modules/agent-vars/main.tf — GROOM_DEFAULT_MODEL Actions v
     expect(agentVarsMainContent).toMatch(
       /resource "github_actions_variable" "groom_default_model"[\s\S]*?count\s*=\s*var\.groom_default_model\s*==\s*""\s*\?\s*0\s*:\s*1/,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Prompt consumption tests — groom.md reads GROOM_VENDOR_ANCHOR_MODEL so the
+// label provider agrees with the configured grooming default.
+// ---------------------------------------------------------------------------
+
+describe("docker/scripts/prompts/groom.md — GROOM_VENDOR_ANCHOR_MODEL prompt consumption", () => {
+  it("groom.md references GROOM_VENDOR_ANCHOR_MODEL for fallback vendor selection", () => {
+    // The prompt must read the anchor variable so the grooming agent uses the
+    // configured provider (Anthropic, OpenAI, or xAI) when choosing a model
+    // label, rather than always defaulting to Anthropic regardless of what
+    // GROOM_DEFAULT_MODEL is set to.
+    expect(groomPromptContent).toContain("GROOM_VENDOR_ANCHOR_MODEL");
+  });
+
+  it("groom.md maps gpt-* prefix to OpenAI provider", () => {
+    // When the anchor is an OpenAI model the prompt must direct the agent to
+    // select an OpenAI label, not fall through to Anthropic.
+    expect(groomPromptContent).toContain("gpt-*");
+  });
+
+  it("groom.md maps grok-* prefix to xAI provider", () => {
+    // When the anchor is an xAI model the prompt must direct the agent to
+    // select an xAI label, not fall through to Anthropic.
+    expect(groomPromptContent).toContain("grok-*");
+  });
+});
+
+describe("docker/scripts/entrypoint.sh — GROOM_VENDOR_ANCHOR_MODEL injected into prompt context", () => {
+  it("action_groom injects GROOM_VENDOR_ANCHOR_MODEL into the prompt text", () => {
+    // The entrypoint must expand the variable into the prompt string so the
+    // agent receives the resolved anchor value even if shell env var access
+    // is unavailable — consistent with how ADMIN_ASSIGNEES is injected.
+    expect(entrypointContent).toContain("GROOM_VENDOR_ANCHOR_MODEL:");
   });
 });

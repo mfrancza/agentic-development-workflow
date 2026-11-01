@@ -185,6 +185,11 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #   design_default_model — (optional) design-agent default model; when set,
 #                          agent-design prefers this over default_model; omit or
 #                          set to "" to fall back to default_model (the default)
+#   groom_default_model  — (optional) grooming-agent default model; when set,
+#                          agent-groom prefers this over default_model and uses
+#                          its vendor (Anthropic/OpenAI/xAI) as the fallback
+#                          provider when selecting a model:* label; omit or
+#                          set to "" to fall back to default_model (the default)
 #   auto_trigger_agents  — per-stage auto-trigger switches (all false by default;
 #                          set a key to true to auto-apply that stage's agent:* label)
 #   admin_assignees      — (optional) GitHub usernames or same-organization
