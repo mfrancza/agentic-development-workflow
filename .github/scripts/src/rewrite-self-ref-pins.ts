@@ -1,54 +1,120 @@
 import * as core from "@actions/core";
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { PINNED_SELF_REF_RE } from "./lib/self-ref-pins.js";
 
 /**
- * Rewrites every self-referencing reusable-workflow pin in a workflow file's
- * content to point at `targetVersion`.
+ * Matches a `# release-self-pin: <worker-filename>` anchor comment.
  *
- * Rules:
- * - Lines whose first non-whitespace character is `#` are treated as comments
- *   and are never rewritten.
- * - Only `mfrancza/agentic-development-workflow/.github/workflows/*@<ref>`
- *   patterns are matched; all other `uses:` lines are left untouched.
- * - When every matched pin already points at `targetVersion`, the file is
- *   unchanged and `null` is returned so the caller knows not to write it.
+ * Capture group 1: the declared worker filename (e.g.
+ * "agent-review-worker-reusable.yml").  Everything after the first whitespace
+ * following the filename is ignored, so an inline trailing comment such as
+ * `  # rewritten at release by …` does not pollute the capture.
+ */
+const ANCHOR_RE = /^\s*#\s+release-self-pin:\s+(\S+)/;
+
+/**
+ * Returns a regex that matches the `uses:` self-pin line for the given worker
+ * filename.
+ *
+ * Capture group 1: the `@<ref>` value (e.g. "v0.3.0").
+ */
+function selfPinRe(workerFile: string): RegExp {
+  const escaped = workerFile.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    `uses:\\s+mfrancza/agentic-development-workflow/\\.github/workflows/${escaped}@(\\S+)`,
+  );
+}
+
+/**
+ * Rewrites self-referencing reusable-workflow pins that are explicitly
+ * declared via a `# release-self-pin: <worker-filename>` anchor comment to
+ * point at `targetVersion`.
+ *
+ * Rules (Decision 2 in docs/design/release-self-pin-worker.md):
+ * - Only `uses:` lines that immediately follow a matching anchor comment
+ *   (with only blank lines permitted between anchor and `uses:`) are
+ *   candidates for rewriting.
+ * - The next non-blank line after an anchor MUST be a `uses:` self-pin for
+ *   the worker the anchor declares.  If it is not, the function throws with a
+ *   diagnostic citing the file and line — the anchor is a hard contract, not
+ *   a hint.
+ * - `uses:` lines that are not preceded by an anchor are left completely
+ *   untouched (even if they match the self-referencing pattern).
+ * - When every anchored pin already points at `targetVersion`, no bytes
+ *   change and `null` is returned so the caller knows not to write the file.
  *
  * @param content        The raw file content (UTF-8 string).
  * @param targetVersion  The version to rewrite pins to (e.g. "v1.2.3").
+ * @param filePath       The file path used in diagnostic messages.
  * @returns The rewritten content, or `null` if no lines changed.
  */
 export function rewriteFileContent(
   content: string,
   targetVersion: string,
+  filePath: string = "<unknown>",
 ): string | null {
   const lines = content.split("\n");
   let fileChanged = false;
+  const newLines = [...lines];
 
-  const newLines = lines.map((line) => {
-    // Skip comment lines — first non-whitespace char is '#'.
-    if (/^\s*#/.test(line)) return line;
+  for (let i = 0; i < lines.length; i++) {
+    const anchorMatch = ANCHOR_RE.exec(lines[i]);
+    if (!anchorMatch) continue;
 
-    const m = PINNED_SELF_REF_RE.exec(line);
-    if (!m) return line;
+    const declaredWorker = anchorMatch[1];
 
-    const ref = m[2];
-    if (ref === targetVersion) return line; // Already at target — no change.
+    // Find the next non-blank line after the anchor (blank = whitespace-only).
+    let nextIdx = i + 1;
+    while (nextIdx < lines.length && lines[nextIdx].trim() === "") {
+      nextIdx++;
+    }
 
-    fileChanged = true;
-    // Replace only the @<ref> suffix.  m.index is where the match starts in
-    // `line`; m[0].length is the length of the full match.  Slicing off the
-    // last `ref.length` characters of the match and appending targetVersion
-    // preserves everything before and after the match (including indentation
-    // and any trailing comment).
-    const matchEnd = m.index + m[0].length;
-    return (
-      line.slice(0, matchEnd - ref.length) +
-      targetVersion +
-      line.slice(matchEnd)
-    );
-  });
+    if (nextIdx >= lines.length) {
+      throw new Error(
+        `${filePath}:${i + 1}: anchor "# release-self-pin: ${declaredWorker}" ` +
+          `is not followed by a uses: self-pin line (reached end of file).`,
+      );
+    }
+
+    const nextLine = lines[nextIdx];
+
+    // A comment line can never be the required uses: pin — it would be a
+    // broken anchor (e.g. prose comment between the anchor and the live line).
+    if (/^\s*#/.test(nextLine)) {
+      throw new Error(
+        `${filePath}:${i + 1}: anchor "# release-self-pin: ${declaredWorker}" ` +
+          `is not followed by the expected uses: self-pin for "${declaredWorker}". ` +
+          `Next non-blank line (${filePath}:${nextIdx + 1}) is a comment, not a uses: line: ` +
+          `"${nextLine.trim()}"`,
+      );
+    }
+
+    const usesRe = selfPinRe(declaredWorker);
+    const usesMatch = usesRe.exec(nextLine);
+
+    if (!usesMatch) {
+      throw new Error(
+        `${filePath}:${i + 1}: anchor "# release-self-pin: ${declaredWorker}" ` +
+          `is not followed by the expected uses: self-pin for "${declaredWorker}". ` +
+          `Next non-blank line (${filePath}:${nextIdx + 1}): "${nextLine.trim()}"`,
+      );
+    }
+
+    const ref = usesMatch[1];
+    if (ref !== targetVersion) {
+      // Replace only the @<ref> suffix.  usesMatch.index is where the match
+      // starts in nextLine; usesMatch[0].length covers the full match.
+      const matchEnd = usesMatch.index + usesMatch[0].length;
+      newLines[nextIdx] =
+        nextLine.slice(0, matchEnd - ref.length) +
+        targetVersion +
+        nextLine.slice(matchEnd);
+      fileChanged = true;
+    }
+
+    // Advance i past the uses: line so we do not double-process it.
+    i = nextIdx;
+  }
 
   return fileChanged ? newLines.join("\n") : null;
 }
@@ -88,7 +154,7 @@ export async function run(): Promise<void> {
   for (const file of files) {
     const filePath = join(workflowsDir, file);
     const content = readFileSync(filePath, "utf8");
-    const newContent = rewriteFileContent(content, targetVersion);
+    const newContent = rewriteFileContent(content, targetVersion, filePath);
     if (newContent !== null) {
       writeFileSync(filePath, newContent, "utf8");
       filesChanged++;

@@ -73,4 +73,13 @@ runs:
       env:
         INPUT_WORKFLOWS_DIR: ${{ inputs.workflows-dir }}
         INPUT_TARGET_VERSION: ${{ inputs.target-version }}
-      run: npx --no-install tsx src/rewrite-self-ref-pins.ts
+      run: |
+        # Resolve INPUT_WORKFLOWS_DIR to an absolute path evaluated relative to
+        # GITHUB_WORKSPACE, not relative to the scripts working-directory.
+        # Without this, the default ".github/workflows" would resolve to
+        # "<scripts-dir>/.github/workflows", which does not exist.
+        if [[ "${INPUT_WORKFLOWS_DIR}" != /* ]]; then
+          INPUT_WORKFLOWS_DIR="${GITHUB_WORKSPACE}/${INPUT_WORKFLOWS_DIR}"
+        fi
+        export INPUT_WORKFLOWS_DIR
+        npx --no-install tsx src/rewrite-self-ref-pins.ts

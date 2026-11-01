@@ -17,10 +17,18 @@ import { rewriteFileContent, run } from "../src/rewrite-self-ref-pins.js";
 
 // ─── Fixtures ──────────────────────────────────────────────────────────────
 //
-// All fixtures use the real owner/repo path so the PINNED_SELF_REF_RE regex
-// matches exactly as it does against live workflow files.
+// All fixtures use the real owner/repo path so the self-pin matching works
+// exactly as it does against live workflow files.
 
-/** A live uses: line with a self-referencing pin at v0.3.0. */
+/** Anchor comment for the primary worker. */
+const ANCHOR_LINE =
+  "    # release-self-pin: agent-review-worker-reusable.yml";
+
+/** Anchor comment for a second (different) worker file. */
+const ANCHOR_LINE_2 =
+  "    # release-self-pin: other-worker-reusable.yml";
+
+/** A live `uses:` line with a self-referencing pin at v0.3.0. */
 const SELF_REF_LINE =
   "    uses: mfrancza/agentic-development-workflow/.github/workflows/agent-review-worker-reusable.yml@v0.3.0";
 
@@ -30,33 +38,37 @@ const SELF_REF_LINE_2 =
 
 /**
  * A comment line that contains the self-ref pattern as prose.
- * This mirrors the kind of comment that appears above the live uses: line in
- * agent-review-reusable.yml (e.g. on line 139 of the file), where the worker
- * filename and version are mentioned inline as documentation.
+ * This mirrors the kind of comment that appears in agent-review-reusable.yml
+ * where the worker filename and version are mentioned as documentation.
+ * It must never be rewritten.
  */
 const COMMENT_WITH_SELF_REF_PATTERN =
   "    # uses: mfrancza/agentic-development-workflow/.github/workflows/agent-review-worker-reusable.yml@v0.3.0";
 
-/** An unrelated uses: line (third-party action, not a self-ref). */
+/** An unrelated `uses:` line (third-party action, not a self-ref). */
 const UNRELATED_USES_LINE =
   "      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0";
 
 // ─── rewriteFileContent — pure-function tests ──────────────────────────────
 
 describe("rewriteFileContent", () => {
-  it("rewrites a single self-referencing pin (single-match file)", () => {
-    const content = `${SELF_REF_LINE}\n`;
-    const result = rewriteFileContent(content, "v1.0.0");
+  it("rewrites an anchored self-referencing pin (anchor + matching uses: → rewrite)", () => {
+    const content = `${ANCHOR_LINE}\n${SELF_REF_LINE}\n`;
+    const result = rewriteFileContent(content, "v1.0.0", "test.yml");
     expect(result).not.toBeNull();
     expect(result).toContain("@v1.0.0");
     expect(result).not.toContain("@v0.3.0");
     // Leading indentation must be preserved.
-    expect(result!.split("\n")[0]).toMatch(/^\s{4}uses:/);
+    expect(result!.split("\n")[1]).toMatch(/^\s{4}uses:/);
+    // Anchor line must be unchanged.
+    expect(result!.split("\n")[0]).toBe(ANCHOR_LINE);
   });
 
-  it("rewrites every self-referencing pin when multiple are present (multi-match file)", () => {
-    const content = `${SELF_REF_LINE}\n${SELF_REF_LINE_2}\n`;
-    const result = rewriteFileContent(content, "v1.0.0");
+  it("rewrites every anchored pin when multiple anchors are present (multiple anchors in one file)", () => {
+    const content =
+      `${ANCHOR_LINE}\n${SELF_REF_LINE}\n` +
+      `${ANCHOR_LINE_2}\n${SELF_REF_LINE_2}\n`;
+    const result = rewriteFileContent(content, "v1.0.0", "test.yml");
     expect(result).not.toBeNull();
     expect(
       result!.split("\n").filter((l) => l.includes("@v0.3.0")),
@@ -66,7 +78,7 @@ describe("rewriteFileContent", () => {
     ).toHaveLength(2);
   });
 
-  it("returns null for a file with no self-referencing pins (no-match file)", () => {
+  it("returns null for a file with no anchors (no anchors → file untouched)", () => {
     const content = [
       "on:",
       "  push:",
@@ -77,45 +89,89 @@ describe("rewriteFileContent", () => {
       `      - ${UNRELATED_USES_LINE}`,
       "",
     ].join("\n");
-    expect(rewriteFileContent(content, "v1.0.0")).toBeNull();
+    expect(rewriteFileContent(content, "v1.0.0", "test.yml")).toBeNull();
   });
 
-  it("does not rewrite a self-ref pattern that appears inside a # comment line", () => {
-    // COMMENT_WITH_SELF_REF_PATTERN mirrors the kind of comment present in
-    // agent-review-reusable.yml where the worker filename and version are
-    // mentioned as documentation. It must never be rewritten.
-    const content = `${COMMENT_WITH_SELF_REF_PATTERN}\n${SELF_REF_LINE}\n`;
-    const result = rewriteFileContent(content, "v1.0.0");
-    expect(result).not.toBeNull();
-    // Comment line must be exactly unchanged.
-    expect(result!.split("\n")[0]).toBe(COMMENT_WITH_SELF_REF_PATTERN);
-    // The live uses: line below the comment must be rewritten.
-    expect(result!.split("\n")[1]).toContain("@v1.0.0");
-    expect(result!.split("\n")[1]).not.toContain("@v0.3.0");
+  it("does not rewrite an un-anchored self-ref uses: line (uses: without anchor → left alone)", () => {
+    // A self-ref uses: line without an anchor comment above it must not be
+    // rewritten; the rewriter's target is the anchor, not the pattern.
+    const content = `${SELF_REF_LINE}\n`;
+    expect(rewriteFileContent(content, "v1.0.0", "test.yml")).toBeNull();
   });
 
   it("does not rewrite unrelated uses: lines such as actions/checkout@…", () => {
     const content = `${UNRELATED_USES_LINE}\n`;
-    expect(rewriteFileContent(content, "v1.0.0")).toBeNull();
+    expect(rewriteFileContent(content, "v1.0.0", "test.yml")).toBeNull();
   });
 
-  it("returns null when the pin already matches the target version (no-op)", () => {
+  it("returns null when the anchored pin already matches the target version (anchor + already-target → no-op)", () => {
     const alreadyAtTarget = SELF_REF_LINE.replace("@v0.3.0", "@v1.0.0");
-    const content = `${alreadyAtTarget}\n`;
-    expect(rewriteFileContent(content, "v1.0.0")).toBeNull();
+    const content = `${ANCHOR_LINE}\n${alreadyAtTarget}\n`;
+    expect(rewriteFileContent(content, "v1.0.0", "test.yml")).toBeNull();
   });
 
-  it("returns null only for the already-matched pins and rewrites the others in a mixed file", () => {
-    // One pin already at target, one still at old ref.
+  it("rewrites only the stale pin when one anchored pin is already at target and another is not", () => {
     const alreadyAtTarget = SELF_REF_LINE.replace("@v0.3.0", "@v1.0.0");
-    const content = `${alreadyAtTarget}\n${SELF_REF_LINE_2}\n`;
-    const result = rewriteFileContent(content, "v1.0.0");
+    const content =
+      `${ANCHOR_LINE}\n${alreadyAtTarget}\n` +
+      `${ANCHOR_LINE_2}\n${SELF_REF_LINE_2}\n`;
+    const result = rewriteFileContent(content, "v1.0.0", "test.yml");
     expect(result).not.toBeNull();
     // Already-at-target pin must be unchanged.
-    expect(result!.split("\n")[0]).toBe(alreadyAtTarget);
+    expect(result!.split("\n")[1]).toBe(alreadyAtTarget);
     // Stale pin must be updated.
-    expect(result!.split("\n")[1]).toContain("@v1.0.0");
-    expect(result!.split("\n")[1]).not.toContain("@v0.3.0");
+    expect(result!.split("\n")[3]).toContain("@v1.0.0");
+    expect(result!.split("\n")[3]).not.toContain("@v0.3.0");
+  });
+
+  it("throws a diagnostic when anchor is followed by a mismatched uses: line (anchor + mismatched next line → abort)", () => {
+    // The anchor declares "agent-review-worker-reusable.yml" but the next
+    // line is an unrelated uses: — the anchor contract is broken.
+    const content = `${ANCHOR_LINE}\n${UNRELATED_USES_LINE}\n`;
+    expect(() => rewriteFileContent(content, "v1.0.0", "test.yml")).toThrow(
+      /release-self-pin: agent-review-worker-reusable\.yml/,
+    );
+  });
+
+  it("throws a diagnostic when anchor declares worker A but the uses: line pins worker B", () => {
+    const content = `${ANCHOR_LINE}\n${SELF_REF_LINE_2}\n`;
+    expect(() => rewriteFileContent(content, "v1.0.0", "test.yml")).toThrow(
+      /release-self-pin: agent-review-worker-reusable\.yml/,
+    );
+  });
+
+  it("throws a diagnostic when anchor is at end of file with no following non-blank line", () => {
+    const content = `${ANCHOR_LINE}\n`;
+    expect(() => rewriteFileContent(content, "v1.0.0", "test.yml")).toThrow(
+      /end of file/,
+    );
+  });
+
+  it("handles blank lines between anchor and uses: line (next non-blank line rule)", () => {
+    const content = `${ANCHOR_LINE}\n\n   \n${SELF_REF_LINE}\n`;
+    const result = rewriteFileContent(content, "v1.0.0", "test.yml");
+    expect(result).not.toBeNull();
+    expect(result).toContain("@v1.0.0");
+    expect(result).not.toContain("@v0.3.0");
+  });
+
+  it("does not rewrite a self-ref pattern that appears inside a # comment line", () => {
+    // An anchor followed immediately by a comment-containing-self-ref-pattern
+    // should throw because the comment is the next non-blank line and is not a
+    // matching uses: line.
+    const content = `${ANCHOR_LINE}\n${COMMENT_WITH_SELF_REF_PATTERN}\n${SELF_REF_LINE}\n`;
+    expect(() => rewriteFileContent(content, "v1.0.0", "test.yml")).toThrow();
+  });
+
+  it("preserves an inline trailing comment on the anchor line (e.g. '# rewritten at release by …')", () => {
+    // An anchor with extra trailing text after the filename must still parse.
+    const anchorWithTrailingComment =
+      `${ANCHOR_LINE}  # rewritten at release by .github/actions/rewrite-self-ref-pins`;
+    const content = `${anchorWithTrailingComment}\n${SELF_REF_LINE}\n`;
+    const result = rewriteFileContent(content, "v1.0.0", "test.yml");
+    expect(result).not.toBeNull();
+    expect(result).toContain("@v1.0.0");
+    expect(result!.split("\n")[0]).toBe(anchorWithTrailingComment);
   });
 });
 
@@ -144,10 +200,10 @@ describe("run() — directory processing", () => {
   }
 
   it(
-    "processes a mix of self-reference files and non-matching files in the same directory, " +
-      "rewriting only the self-reference files and reporting the correct count",
+    "processes a mix of anchored-pin files and non-matching files, " +
+      "rewriting only the anchored-pin files and reporting the correct count",
     async () => {
-      const selfRefContent = `jobs:\n  call:\n${SELF_REF_LINE}\n`;
+      const selfRefContent = `jobs:\n  call:\n${ANCHOR_LINE}\n${SELF_REF_LINE}\n`;
       const noMatchContent = `on: push\njobs:\n  build:\n    steps:\n${UNRELATED_USES_LINE}\n`;
 
       writeFileSync(join(tmpDir, "workflow-with-pin.yml"), selfRefContent);
@@ -159,7 +215,7 @@ describe("run() — directory processing", () => {
       expect(core.setOutput).toHaveBeenCalledWith("changed", "true");
       expect(core.setOutput).toHaveBeenCalledWith("files-changed", "1");
 
-      // Self-ref file must be rewritten.
+      // Anchored self-ref file must be rewritten.
       const updatedContent = readFileSync(
         join(tmpDir, "workflow-with-pin.yml"),
         "utf8",
@@ -176,7 +232,7 @@ describe("run() — directory processing", () => {
     },
   );
 
-  it("reports changed=false and files-changed=0 when no files contain self-referencing pins", async () => {
+  it("reports changed=false and files-changed=0 when no files contain anchors", async () => {
     writeFileSync(join(tmpDir, "workflow.yml"), `on: push\n`);
 
     mockInputs({ workflows_dir: tmpDir, target_version: "v1.0.0" });
@@ -186,8 +242,10 @@ describe("run() — directory processing", () => {
     expect(core.setOutput).toHaveBeenCalledWith("files-changed", "0");
   });
 
-  it("reports changed=false when every self-referencing pin already matches the target version", async () => {
-    const alreadyAtTarget = `jobs:\n  call:\n${SELF_REF_LINE.replace("@v0.3.0", "@v1.0.0")}\n`;
+  it("reports changed=false when every anchored pin already matches the target version", async () => {
+    const alreadyAtTarget =
+      `jobs:\n  call:\n${ANCHOR_LINE}\n` +
+      `${SELF_REF_LINE.replace("@v0.3.0", "@v1.0.0")}\n`;
     writeFileSync(join(tmpDir, "workflow.yml"), alreadyAtTarget);
 
     mockInputs({ workflows_dir: tmpDir, target_version: "v1.0.0" });
@@ -208,8 +266,10 @@ describe("run() — directory processing", () => {
   });
 
   it("processes both .yml and .yaml files and skips other extensions", async () => {
-    const selfRefYml = `jobs:\n  call:\n${SELF_REF_LINE}\n`;
-    const selfRefYaml = `jobs:\n  call:\n${SELF_REF_LINE_2}\n`;
+    const selfRefYml =
+      `jobs:\n  call:\n${ANCHOR_LINE}\n${SELF_REF_LINE}\n`;
+    const selfRefYaml =
+      `jobs:\n  call:\n${ANCHOR_LINE_2}\n${SELF_REF_LINE_2}\n`;
     const notAWorkflow = `not: a workflow\n`;
 
     writeFileSync(join(tmpDir, "a.yml"), selfRefYml);
@@ -226,5 +286,32 @@ describe("run() — directory processing", () => {
     expect(readFileSync(join(tmpDir, "b.yaml"), "utf8")).toContain("@v2.0.0");
     // Non-workflow file must be untouched.
     expect(readFileSync(join(tmpDir, "README.md"), "utf8")).toBe(notAWorkflow);
+  });
+
+  it("rejects a file with an anchor followed by a mismatched uses: line", async () => {
+    const badContent =
+      `jobs:\n  call:\n${ANCHOR_LINE}\n${UNRELATED_USES_LINE}\n`;
+    writeFileSync(join(tmpDir, "bad.yml"), badContent);
+
+    mockInputs({ workflows_dir: tmpDir, target_version: "v1.0.0" });
+    await expect(run()).rejects.toThrow(
+      /release-self-pin: agent-review-worker-reusable\.yml/,
+    );
+  });
+
+  it("does not rewrite an un-anchored self-ref uses: line in a file that has no anchors", async () => {
+    // A self-ref uses: line without an anchor must not be rewritten; the file
+    // is left untouched.
+    const unanchoredContent = `jobs:\n  call:\n${SELF_REF_LINE}\n`;
+    writeFileSync(join(tmpDir, "workflow.yml"), unanchoredContent);
+
+    mockInputs({ workflows_dir: tmpDir, target_version: "v1.0.0" });
+    await run();
+
+    expect(core.setOutput).toHaveBeenCalledWith("changed", "false");
+    expect(core.setOutput).toHaveBeenCalledWith("files-changed", "0");
+    expect(readFileSync(join(tmpDir, "workflow.yml"), "utf8")).toBe(
+      unanchoredContent,
+    );
   });
 });
