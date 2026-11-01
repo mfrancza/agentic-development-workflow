@@ -1,15 +1,24 @@
 name: release
 
-# Creates an annotated git tag (v<M>.<m>.<p>) and a moving major tag (v<M>),
-# pushes both, and publishes a GitHub Release with auto-generated notes.
+# Creates a dangling release commit (with self-pin references rewritten to the
+# target version), creates an annotated git tag (v<M>.<m>.<p>) and a moving
+# major tag (v<M>) against that commit, pushes both, and publishes a GitHub
+# Release with auto-generated notes.
 #
 # The release-images workflow (.github/workflows/release-images.yml) picks up
 # automatically on the push: tags: 'v*' event generated when the tags are
-# pushed, so this workflow only needs to create the tags and the release —
-# it does not invoke the image build itself.
+# pushed via the release-ci App token, so this workflow only needs to create
+# the tags and the release — it does not invoke the image build itself.
 #
-# Runs as the workflow's own GITHUB_TOKEN with contents: write only.
-# No agent App identity is involved.
+# The release-ci App token (minted from RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY)
+# is used only for the tag push. The token holds Contents: Write and Workflows: Write,
+# which GITHUB_TOKEN lacks; the Workflows: Write scope is required when the
+# release commit modifies files under .github/workflows/.
+#
+# The GitHub Release creation continues to use GITHUB_TOKEN (contents: write
+# from the top-level permissions block); that endpoint needs no Workflows scope.
+#
+# See docs/design/release-self-pin-worker.md for the full design rationale.
 
 on:
   workflow_dispatch:
@@ -26,6 +35,15 @@ on:
           the tip of main.
         required: false
         default: 'main'
+      dry-run:
+        description: >
+          When true, builds the release commit locally, runs the pinned-worker-
+          contracts verification against it, prints the diff and a summary, and
+          exits without creating or pushing any tag or GitHub Release. Use this
+          to preview the self-pin rewrite before cutting a real release:
+          gh workflow run release.yml -f version=vX.Y.Z -f dry-run=true
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -51,8 +69,12 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           ref: ${{ inputs.ref }}
+          # fetch-tags is required so that pinned-worker-contracts.test.ts can
+          # run `git show <tag>:...` to validate pinned self-referencing reusable
+          # workflow calls against the worker's contract at the pinned tag.
+          fetch-tags: true
           # Credentials are not persisted in the checkout; we configure the
-          # remote URL explicitly with GITHUB_TOKEN when we need to push.
+          # remote URL explicitly with the release-ci App token when we push.
           persist-credentials: false
 
       # Step 2: Ensure the exact version tag does not already exist.
@@ -68,18 +90,128 @@ jobs:
             exit 1
           fi
 
-      # Steps 3–5: Create the annotated tag, force-update the moving major
-      # tag to the same SHA, and push both to the remote.
-      - name: Create and push tags
-        env:
-          _VERSION: ${{ inputs.version }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          _REPO: ${{ github.repository }}
+      # Mint the release-ci App installation token. This step runs on both the
+      # dry-run and real-run paths so dry-run exercises identical setup to a
+      # real release (see Decision 3 in docs/design/release-self-pin-worker.md).
+      # The minted token is used only by the tag-push step; the Release-create
+      # step continues to use GITHUB_TOKEN.
+      - name: Mint release-ci App token
+        id: release-token
+        uses: ./.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      # Capture the SHA of the input ref before any release commit is created.
+      # Used later for the dry-run diff diagnostic.
+      - name: Capture input-ref SHA
+        id: input-ref
         run: |
           set -euo pipefail
           SHA="$(git rev-parse HEAD)"
-          # Strip CR/LF from SHA per repo output-injection policy.
           SHA="$(printf '%s' "${SHA}" | tr -d '\r\n')"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      # Rewrite every self-referencing workflow pin that carries a
+      # '# release-self-pin: <worker>' anchor to the target version.
+      # Emits changed=true|false and files-changed=<n>.
+      # See docs/design/release-self-pin-worker.md Decision 2.
+      - name: Rewrite self-referencing workflow pins
+        id: rewrite
+        uses: ./.github/actions/rewrite-self-ref-pins
+        with:
+          target-version: ${{ inputs.version }}
+
+      # If the rewrite changed any files, commit them as the release commit.
+      # The commit parent is the input ref SHA; no branch is updated.
+      # When nothing changed (pin was already at the target version), no empty
+      # commit is created and the tag will point at the input ref SHA directly.
+      - name: Create release commit
+        id: release-commit
+        env:
+          _VERSION: ${{ inputs.version }}
+          _REWRITE_CHANGED: ${{ steps.rewrite.outputs.changed }}
+        run: |
+          set -euo pipefail
+          if [[ "${_REWRITE_CHANGED}" == "true" ]]; then
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git config user.name "github-actions[bot]"
+            git add -A
+            git commit -m "Release ${_VERSION}: self-pin workflow references"
+          fi
+          SHA="$(git rev-parse HEAD)"
+          SHA="$(printf '%s' "${SHA}" | tr -d '\r\n')"
+          echo "release-sha=${SHA}" >> "$GITHUB_OUTPUT"
+
+      # Inline sanity check: when the rewrite reported changed=true, at least
+      # one workflow file must now contain @<version>. This catches degenerate
+      # "regex matched zero files" bugs that the #745 test alone would miss if
+      # the repo somehow had no self-references.
+      - name: Sanity-check rewrite output
+        if: steps.rewrite.outputs.changed == 'true'
+        env:
+          _VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          count="$(grep -rl "@${_VERSION}" .github/workflows/ | wc -l | tr -d ' ')"
+          if [[ "${count}" -eq 0 ]]; then
+            echo "::error::Rewrite reported changed=true but no workflow file under .github/workflows/ contains '@${_VERSION}'. The rewrite may have produced no output. Aborting."
+            exit 1
+          fi
+          echo "Sanity check passed: ${count} workflow file(s) contain '@${_VERSION}'."
+
+      # Set up Node.js for the pinned-worker-contracts verification step below.
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: .github/scripts/package-lock.json
+
+      # Verify the release commit's working tree with the pinned-worker-contracts
+      # test (#745). Runs on both the dry-run and real-run paths. Aborts the
+      # workflow on failure, before any tag is created.
+      - name: Verify release commit with pinned-worker-contracts test
+        working-directory: .github/scripts
+        run: |
+          set -euo pipefail
+          npm ci
+          npx vitest run test/pinned-worker-contracts.test.ts
+
+      # Dry-run diagnostic: print the release SHA, the diff from the input ref
+      # to the release commit, and a confirmation line. Only runs when
+      # dry-run=true; the workflow exits cleanly without pushing anything.
+      - name: Dry-run diagnostic
+        if: inputs.dry-run == true
+        env:
+          _VERSION: ${{ inputs.version }}
+          _INPUT_SHA: ${{ steps.input-ref.outputs.sha }}
+          _RELEASE_SHA: ${{ steps.release-commit.outputs.release-sha }}
+        run: |
+          set -euo pipefail
+          MAJOR_TAG="${_VERSION%%.*}"
+          echo "Release SHA: ${_RELEASE_SHA}"
+          echo ""
+          echo "--- git diff ${_INPUT_SHA} ${_RELEASE_SHA} ---"
+          git diff "${_INPUT_SHA}" "${_RELEASE_SHA}"
+          echo "--- end diff ---"
+          echo ""
+          echo "Dry run complete: release commit ${_RELEASE_SHA} would be tagged as ${_VERSION} and ${MAJOR_TAG}."
+
+      # Create the annotated tag at the release commit SHA, force-update the
+      # moving major tag to the same commit, and push both using the release-ci
+      # App token. The App token holds Workflows: Write, which GITHUB_TOKEN
+      # lacks — this scope is required when the release commit modifies files
+      # under .github/workflows/. Gated on dry-run != true.
+      - name: Create and push tags
+        if: inputs.dry-run != true
+        env:
+          _VERSION: ${{ inputs.version }}
+          _RELEASE_SHA: ${{ steps.release-commit.outputs.release-sha }}
+          _RELEASE_TOKEN: ${{ steps.release-token.outputs.token }}
+          _REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
 
           # Extract the moving major tag: v1 from v1.2.3.
           # %%.* strips everything from the first dot onwards.
@@ -89,25 +221,30 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
 
-          # Step 3: Create the annotated tag at the checked-out SHA.
-          git tag -a "${_VERSION}" -m "Release ${_VERSION}" "${SHA}"
+          # Create the annotated tag at the release commit SHA (not HEAD of the
+          # input ref — the release commit may be a dangling commit that is one
+          # commit ahead of the input ref SHA).
+          git tag -a "${_VERSION}" -m "Release ${_VERSION}" "${_RELEASE_SHA}"
 
-          # Step 4: Force-update the moving major tag to the same SHA.
+          # Force-update the moving major tag to the same SHA.
           # -f is required when the tag already exists (e.g. v1 existed as
           # v1.0.0 and is now being advanced to v1.1.0).
-          git tag -f "${MAJOR_TAG}" "${SHA}"
+          git tag -f "${MAJOR_TAG}" "${_RELEASE_SHA}"
 
-          # Step 5: Push both tags. Use -f on the major tag push for the
-          # same reason — the remote may already have a v<M> from a prior
-          # release. Authenticate via an inlined token in the remote URL so
-          # persist-credentials: false does not block the push.
-          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${_REPO}.git"
+          # Push both tags using the release-ci App token. Use -f on the major
+          # tag push for the same reason. The release-ci App token holds
+          # Workflows: Write, enabling the push of a commit that modifies
+          # files under .github/workflows/.
+          git remote set-url origin "https://x-access-token:${_RELEASE_TOKEN}@github.com/${_REPO}.git"
           git push origin "${_VERSION}"
           git push origin -f "${MAJOR_TAG}"
 
-      # Step 6: Create the GitHub Release using generate-notes for the
-      # changelog body and mark it as the latest release.
+      # Create the GitHub Release using generate-notes for the changelog body
+      # and mark it as the latest release. Uses GITHUB_TOKEN (contents: write
+      # from the top-level permissions block) — the Releases API endpoint does
+      # not require the Workflows scope. Gated on dry-run != true.
       - name: Create GitHub Release
+        if: inputs.dry-run != true
         env:
           _VERSION: ${{ inputs.version }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
