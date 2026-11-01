@@ -26,17 +26,16 @@ required-check entry pins its `integration_id` to the GitHub Actions App
 cannot satisfy the gate (Decision 6).
 
 The computation is executed by a **publisher** workflow that runs under
-`pull_request_target` (for pull-request-side events) and `workflow_run`
-(for review-side events, chained through an empty, zero-permission
-notifier workflow). This split, detailed in Decision 5, (a) always runs
-trusted base-branch workflow code (not the attacker-controllable PR
-head), and (b) carries a write-capable `GITHUB_TOKEN` so the Checks API
-POST succeeds on fork-authored PRs — which the earlier `pull_request`
-design would have silently blocked. Decision 5 also documents the
-residual risk from a same-repository PR that edits the notifier (or
-adds another workflow with `checks: write`) to post a spoofed
-check-run under the GitHub Actions App ID, and the baseline-review +
-PR-diff-visibility layers that bound that risk.
+`pull_request_target` only. This always runs trusted base-branch workflow
+code (not the attacker-controllable PR head), and carries a write-capable
+`GITHUB_TOKEN`. Decision 5 details the event-routing architecture: review
+events are handled by a separate dispatcher workflow that reruns the
+publisher's latest `pull_request_target` run via the rerun API, so the
+resulting job check attaches to the PR head SHA rather than the
+default-branch SHA. The publication mechanism was subsequently revised
+in [`docs/design/protected-approval-gate-job-check.md`](protected-approval-gate-job-check.md)
+(which supersedes Decision 6 and the Checks-API-centric portions of
+Decisions 7, 8, 8a, and 9 below).
 
 The context name is fixed (`protected-approval-gate`). An
 ON → OFF → ON cycle in which approvals change while the gate is OFF
@@ -710,6 +709,16 @@ single reference implementation to follow.
 
 ### Decision 6 — Publish the check conclusion via the Checks API, with a stable context name bound to the GitHub Actions App
 
+> **Superseded.** This decision is superseded by Decision 2 of
+> [`docs/design/protected-approval-gate-job-check.md`](protected-approval-gate-job-check.md),
+> which replaces Checks API publication with the publisher workflow's
+> own auto-emitted job check. The historical rationale is preserved
+> below for reference; the current implementation does not use
+> `checks.create`. The `integration_id` pin rationale ("Why
+> `integration_id` must be pinned") and the alternatives table remain
+> useful for understanding why the current design uses the job-check
+> mechanism rather than commit statuses or a dedicated App.
+
 **Decision.** The activity publishes the check conclusion using the
 Checks API (`POST /repos/{owner}/{repo}/check-runs`) with the fixed
 `name` `protected-approval-gate`. The name (like the workflow files,
@@ -829,14 +838,15 @@ now 1-not-2.
 
 To make activation safe across the full cycle, the enforcing context
 keeps a **fixed name** and stale results are **replaced**, not hidden.
-A later `checks.create` under the same context name supersedes the
-previous run in the Checks API, so `gh pr checks` and the Checks tab
-reflect the new result. **However, when GitHub attaches the new check
-run to an already-completed Actions suite, the merge box shows
-"Expected — Waiting for status to be reported" regardless of the check
-conclusion. A new commit is the only way to clear Expected, because
-the publisher runs while the new head's suite is still open.** Two
-paths re-publish on every open PR through the Checks API, documented in
+The backfill and reconcile sweep trigger reruns of each open PR's
+latest `pull_request_target` publisher run via the rerun API
+(`POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun`). The rerun
+re-executes the publisher under its original `pull_request_target`
+context, so the resulting auto-emitted `protected-approval-gate` job
+check attaches to the PR head SHA — in the publisher's own Actions
+check suite. This replaces the stale result both in `gh pr checks` and
+in the merge box without requiring a new commit. Two paths re-publish
+on every open PR, documented in
 [`terraform/modules/branch-protection/README.md`](../../terraform/modules/branch-protection/README.md)
 and `docs/adopting.md`:
 
@@ -849,31 +859,23 @@ and `docs/adopting.md`:
 2. Dispatch the one-shot reconciliation workflow
    `protected-approval-gate-backfill.yml` (a `workflow_dispatch`-only
    caller of `protected-approval-gate-sweep-reusable.yml`, which fans
-   out across `gh pr list --state open --json number,headRefOid` and
-   runs the publisher activity once per distinct head SHA).
-   It publishes the current evaluation under the enforcing context on
-   every open PR's live head SHA through the Checks API. That overwrites
-   any `success` left from an earlier ON interval (cases (a) and (c))
-   and posts a result on PRs that had none (case (b), fail-closed until
-   then). Open PRs on a head whose Actions suite has already completed
-   receive the updated Checks API result but stay in "Expected" in the
-   merge box until a new commit. Merge or close those PRs before
-   requiring the check; do not rely on the backfill to clear Expected on
-   existing heads. Confirm the merge box — not `gh pr checks` — to
-   verify a PR is actually unblocked.
+   out across `gh pr list --state open --limit 1000 --json number` and
+   triggers a publisher rerun for each open PR). The rerun re-executes
+   the publisher under `pull_request_target` context so the resulting
+   job check attaches to the PR head SHA. That overwrites any stale
+   `success` from an earlier ON interval (cases (a) and (c)) and posts
+   a current result on PRs that had none (case (b), fail-closed until
+   then).
 
-**Automatic catch-up.** If the operator skips step 2, the Decision 8a
+**Automatic catch-up.** If the operator skips step 2, the Decision 6a
 reconcile sweep (`protected-approval-gate-reconcile.yml`)
-re-publishes the enforcing context on every open PR once every
+reruns the publisher for every open PR once every
 `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` (default 10) while
-the gate is ON. A stale `success` from a prior ON interval is therefore
-replaced in the Checks API within at most one sweep interval after a
-re-enable, and the backfill closes that window immediately. The first
-enable has no exposure at all: OFF mode never publishes the enforcing
-context, so no prior result exists. The same completed-suite limitation
-applies to the sweep: PRs on a head whose Actions suite has already
-finished remain in "Expected" in the merge box even after the sweep
-re-posts their result.
+the gate is ON. A stale result from a prior ON interval is therefore
+replaced within at most one sweep interval after a re-enable, and the
+backfill closes that window immediately. The first enable has no
+exposure at all: OFF mode never publishes the enforcing context, so no
+prior result exists.
 
 **Disable procedure (ON → OFF).** Set
 `enable_protected_approval_gate = false` and `terraform apply`. The

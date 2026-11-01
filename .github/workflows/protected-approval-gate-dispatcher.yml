@@ -32,38 +32,25 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: .github/scripts/package-lock.json
+
+      - name: Install dependencies
+        working-directory: .github/scripts
+        run: npm ci
+
       - name: Find and rerun latest publisher run for PR
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          GITHUB_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
-        run: |
-          set -euo pipefail
-          # Paginate through workflow runs (100 per page, sorted by created_at desc)
-          # until we find the latest pull_request_target run for this PR. A repo
-          # accumulates runs over time; stopping at page 1 would miss PRs whose
-          # run fell off the first 100 results. Mirrors the sweep reusable's loop.
-          run_id=""
-          page=1
-          while true; do
-            response="$(gh api \
-              "repos/${REPO}/actions/workflows/protected-approval-gate-publisher.yml/runs?event=pull_request_target&per_page=100&page=${page}")"
-            run_id="$(jq -r --argjson pr "${PR_NUMBER}" \
-              '[.workflow_runs[] | select((.pull_requests // [])[] | .number == $pr) | .id] | .[0] // ""' \
-              <<<"$response")"
-            if [[ -n "$run_id" ]]; then
-              break
-            fi
-            count="$(jq '.workflow_runs | length' <<<"$response")"
-            if (( count < 100 )); then
-              break
-            fi
-            (( page++ ))
-          done
-          if [[ -z "$run_id" ]]; then
-            echo "::warning::No prior pull_request_target publisher run found for PR #${PR_NUMBER}. The scheduled reconcile sweep will reconcile it."
-            exit 0
-          fi
-          echo "Triggering rerun of publisher run ${run_id} for PR #${PR_NUMBER}."
-          gh api -X POST "repos/${REPO}/actions/runs/${run_id}/rerun"
-          echo "Rerun triggered successfully."
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PUBLISHER_WORKFLOW_FILE: protected-approval-gate-publisher.yml
+        working-directory: .github/scripts
+        run: npx --no-install tsx src/rerun-publisher-for-pr.ts
