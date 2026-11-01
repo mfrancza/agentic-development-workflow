@@ -151,6 +151,12 @@ Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **S
 - Webhook: **uncheck "Active"** (same reason as above).
 - After creation: note the **Client ID** (the `Iv23.xxx` string) and download the private key.
 
+**release-ci**
+- Repository permissions: Contents (R/W), Workflows (R/W), Metadata (R).
+- Subscribe to events: none (App is only used to mint tokens for release tag pushes; no webhook events needed).
+- Webhook: **uncheck "Active"** (same reason as above).
+- After creation: note the **Client ID** (the `Iv23.xxx` string) and download the private key.
+
 **allowlist-resolver**
 - Organization permissions: Members (R).
 - Repository permissions: Metadata (R).
@@ -159,7 +165,7 @@ Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **S
 - Install the App on the organization that owns the repository.
 - After creation: note the Client ID and download the private key.
 
-Then install the developer-agent, reviewer-agent, and terraform-ci Apps on this repository (sidebar → **Install App** → **Install** next to your username → **Only select repositories** → pick `agentic-development-workflow`). Install allowlist-resolver on the repository-owning organization so it can read that organization's team membership. Terraform deliberately does not manage App installations (the GitHub API endpoints for it reject OAuth user tokens, which is what `gh auth token` issues).
+Then install the developer-agent, reviewer-agent, terraform-ci, and release-ci Apps on this repository (sidebar → **Install App** → **Install** next to your username → **Only select repositories** → pick `agentic-development-workflow`). Install allowlist-resolver on the repository-owning organization so it can read that organization's team membership. Terraform deliberately does not manage App installations (the GitHub API endpoints for it reject OAuth user tokens, which is what `gh auth token` issues).
 
 ### 2. Run Terraform
 
@@ -272,6 +278,10 @@ gh secret set TERRAFORM_APP_PRIVATE_KEY < ~/.config/agentic-agents/terraform-ci.
 # Required when any agent user list contains an org/team-slug reference
 gh secret set ALLOWLIST_RESOLVER_APP_ID --body "<allowlist-resolver App Client ID>"
 gh secret set ALLOWLIST_RESOLVER_APP_PRIVATE_KEY < ~/.config/agentic-agents/allowlist-resolver.pem
+
+# Required for the release-ci App (used by release.yml to push tags with Workflows: Write)
+gh secret set RELEASE_APP_ID          --body "<release-ci App Client ID>"  # the Iv23.xxx Client ID, not the numeric App ID
+gh secret set RELEASE_APP_PRIVATE_KEY < ~/.config/agentic-agents/release-ci.pem
 
 # Required for HCP Terraform remote state backend (used by terraform-ci.yml and local terraform init)
 gh secret set TF_API_TOKEN             --body "<hcp-terraform-api-token>"  # generate in HCP UI: User Settings → Tokens
@@ -435,9 +445,10 @@ Releases follow semantic versioning: bump the **patch** version (`v1.2.3 → v1.
 
 To cut a release `vX.Y.Z`:
 
-- **Bump the nested worker pin first.** `agent-review-reusable.yml` calls `agent-review-worker-reusable.yml` by full reference at a fixed release tag (`uses:` cannot read `helpers-ref`). Merge a change setting it to the release you are about to cut, then tag that commit. Until the tag exists, `agent-review` runs that use the new pin fail to load the worker, so tag promptly after merging.
-- **Tag and publish:** dispatch the [`release` workflow](.github/workflows/release.yml) (`gh workflow run release.yml -f version=vX.Y.Z`). It validates the version format, creates an annotated tag and moves the major tag (e.g. `v0`), pushes both, and publishes a GitHub Release with auto-generated notes.
-- **Build the images:** dispatch [`release-images`](.github/workflows/release-images.yml) by hand (`gh workflow run release-images.yml --ref vX.Y.Z -f tag=vX.Y.Z`). It does not fire on its own, because tags pushed with the workflow `GITHUB_TOKEN` don't trigger other workflows.
+- **Preview the rewrite (optional):** run a dry-run to verify the self-pin rewrite before cutting a real release: `gh workflow run release.yml -f version=vX.Y.Z -f dry-run=true`. The workflow builds the release commit locally, runs the pinned-worker-contracts verification against it, prints the diff, and exits without pushing or creating any tag or Release.
+- **Tag and publish:** dispatch the [`release` workflow](.github/workflows/release.yml) (`gh workflow run release.yml -f version=vX.Y.Z`). It validates the version format, rewrites any self-referencing workflow pins to `@vX.Y.Z`, creates a release commit if the rewrite changed any files, creates an annotated tag and moves the major tag (e.g. `v0`) against the release commit, pushes both using the release-ci App token, and publishes a GitHub Release with auto-generated notes.
+- **Images build automatically on tag push** via the release-ci App token (which, unlike the workflow `GITHUB_TOKEN`, fans out to downstream workflows). Use `gh workflow run release-images.yml --ref vX.Y.Z -f tag=vX.Y.Z` only for a recovery re-push after a registry incident.
+- **Note on tag history:** release tags point at a dangling release commit whose parent is the tip of `main` at tag time, not at any `main` commit directly. As a result, `git describe --tags` on `main` will not find the newest release tag. Use `gh release list` or `git ls-remote --tags origin` to find the latest released version.
 - **Write the notes:** add a hand-written section above the generated list calling out every stub change adopters must make (required before 1.0, when minor releases may break).
 
 ## Debugging
