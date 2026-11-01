@@ -2005,12 +2005,15 @@ Enable in this order:
 
   > **Pull requests with no prior publisher run.** The backfill can only
   > rerun an existing publisher run. If a pull request was opened before
-  > the publisher workflow was deployed (or has only ever triggered the
-  > OFF-mode preview run), there is no `pull_request_target` publisher run
-  > to rerun; the backfill skips it, leaving the PR fail-closed. Push a
-  > no-op commit (e.g. `git commit --allow-empty -m "trigger publisher"`)
-  > on any such PR to trigger `pull_request_target: synchronize` and
-  > create the initial publisher run.
+  > the publisher workflow was deployed, there is no `pull_request_target`
+  > publisher run to rerun; the backfill skips it, leaving the PR
+  > fail-closed. Push a no-op commit (e.g.
+  > `git commit --allow-empty -m "trigger publisher"`) on any such PR to
+  > trigger `pull_request_target: synchronize` and create the initial
+  > publisher run. PRs with only an OFF-mode preview run are not in this
+  > category — the preview run is a qualifying publisher run and the
+  > backfill reruns it; the rerun executes the enforcing job because
+  > `ENABLE_PROTECTED_APPROVAL_GATE` is now `true`.
 - Merge or close open pull requests that should land before requiring the
   check (for project reasons, not because of a stale check state).
 - Require the `protected-approval-gate` status check on your default branch,
@@ -2052,10 +2055,12 @@ without requiring a new commit. Merge or close open pull requests before
 re-requiring the check if needed for project reasons unrelated to check state.
 
 > **Pull requests with no prior publisher run.** If any open pull request
-> was opened before the publisher workflow was deployed and has never
-> triggered an enforcing publisher run, the backfill finds no run to
-> rerun. Push a no-op commit on any such PR to trigger
-> `pull_request_target: synchronize` and create the initial run.
+> was opened before the publisher workflow was deployed, the backfill
+> finds no run to rerun. Push a no-op commit on any such PR to trigger
+> `pull_request_target: synchronize` and create the initial run. PRs
+> that had only OFF-mode preview runs during the disabled period are not
+> in this category — the backfill reruns their latest preview run, which
+> now executes the enforcing job.
 
 **Limitations.** Merge queues are not supported. The publisher does not run on
 `merge_group` events, so requiring `protected-approval-gate` on a branch that
