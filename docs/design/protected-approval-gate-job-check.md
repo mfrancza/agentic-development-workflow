@@ -622,13 +622,20 @@ patterns:
   reusable-workflow call sites produce check names of the form
   `<caller-job-id> / <callee-job-id>`, which does not match the required
   context `protected-approval-gate`.
-- **Dispatcher + reconcile + backfill**: these remain reusable
-  workflows invoked by thin caller stubs, because none of their jobs
-  produce a check-run that satisfies the required context (they only
-  trigger reruns). Adopters' caller stubs follow the same pattern as
-  the existing `agent-review.yml` etc.
-- **Notifier**: unchanged. Adopters copy the (empty) notifier workflow
-  file.
+- **Dispatcher, notifier, backfill, and reconcile**: adopters copy
+  these workflow files into their own `.github/workflows/`. They are
+  event-triggered workflows and caller stubs — the dispatcher is
+  triggered by `workflow_run` (notifier completion), the notifier by
+  `pull_request_review`, the backfill is `workflow_dispatch`-only, and
+  the reconcile runs on `schedule` and `workflow_dispatch`. None of
+  them is a `workflow_call` reusable; calling them "reusables
+  referenced remotely" would leave adopters without the
+  review-event, manual-backfill, and scheduled-reconcile entry points.
+- **Sweep only**: `protected-approval-gate-sweep-reusable.yml` is the
+  single `workflow_call` reusable that adopting repos reference
+  remotely. The backfill and reconcile caller stubs invoke it via
+  `uses: mfrancza/agentic-development-workflow/.github/workflows/protected-approval-gate-sweep-reusable.yml@<ref>`.
+  All other workflow files are copied.
 
 Updated: `docs/adopting.md` adds a section explaining the publisher
 copy requirement, with a diff-template adopters can apply. The
