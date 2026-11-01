@@ -1984,24 +1984,24 @@ Enable in this order:
 - Set `ENABLE_PROTECTED_APPROVAL_GATE` to `true`, with
   `PROTECTED_PR_AUTHOR_LOGINS` and `REQUIRED_APPROVAL_COUNT` set.
 - Dispatch `protected-approval-gate-backfill` and wait for it to finish.
-  This gives each open pull request a current conclusion in the Checks tab
-  and registers the context name for the branch-protection picker. The
-  publisher or the reconcile sweep can also produce that first report.
+  For each open pull request the backfill locates the most-recent
+  `pull_request_target` publisher run and triggers a rerun via the Actions
+  API. The rerun executes under the original `pull_request_target` context,
+  so the auto-emitted `protected-approval-gate` job check attaches to the
+  PR head SHA inside the publisher suite and clears the merge box directly —
+  no new commit is required. The publisher or the reconcile sweep can also
+  produce that first check if a manual backfill dispatch is not convenient.
 - Merge or close open pull requests that should land before requiring the
-  check. A pull request on a head whose Actions suite has already finished
-  stays "Expected — Waiting for status to be reported" in the merge box
-  even after the backfill posts `success` — the Checks API update attaches
-  to the completed suite and does not clear Expected. Only a new commit
-  clears it. Confirm the merge box, not `gh pr checks`.
+  check (for project reasons, not because of a stale check state).
 - Require the `protected-approval-gate` status check on your default branch,
   with **GitHub Actions** as its source:
   - **With this project's `branch-protection` Terraform module:** set
     `enable_protected_approval_gate = true` (it also sets the Actions variable
     through `agent-vars`) and apply. The module pins the check's source to
     GitHub Actions (`integration_id = 15368`). Dispatch the backfill
-    immediately after apply so each open pull request has a result in the
-    Checks tab; merge or close remaining open pull requests before requiring
-    the check.
+    immediately after apply so each open pull request gets a fresh publisher
+    run with the current gate result; the rerun clears the merge box without
+    requiring a new commit.
   - **With a repository or organization ruleset:** edit the ruleset that
     targets your default branch, enable **Require status checks to pass**, add
     the check `protected-approval-gate`, and select **GitHub Actions** as its
@@ -2024,13 +2024,12 @@ request to the branch is blocked. With the Terraform modules, setting
 **Re-enabling the gate.** Follow the enabling steps again. While the gate was
 disabled, only the preview check was updated, so an open pull request whose
 head has not changed can still carry an enforcing result from the earlier
-enabled period. The backfill and the reconcile sweep update the Checks API
-with the current result, replacing the stale entry visible in `gh pr checks`
-and the Checks tab. However, a pull request on a head whose Actions suite has
-already completed stays "Expected — Waiting for status to be reported" in the
-merge box even after the sweep re-posts the result; only a new commit clears
-it. Merge or close open pull requests before re-requiring the check if their
-Actions suite has finished.
+enabled period. Dispatching the backfill (or waiting for the reconcile sweep)
+reruns the publisher for each open pull request; the rerun executes under the
+original `pull_request_target` context and emits a fresh `protected-approval-gate`
+job check at the PR head SHA, replacing the stale result in the merge box
+without requiring a new commit. Merge or close open pull requests before
+re-requiring the check if needed for project reasons unrelated to check state.
 
 **Limitations.** Merge queues are not supported. The publisher does not run on
 `merge_group` events, so requiring `protected-approval-gate` on a branch that
@@ -2038,9 +2037,12 @@ uses a merge queue stalls entries waiting for a check that is never posted.
 
 **Trust considerations.** The publisher and sweep run trusted base-branch code
 and never check out pull request content. The required check's GitHub Actions
-source restricts who can satisfy it, but any workflow in your repository with
-`checks: write` could post a check under the same name; see the residual-risk
-discussion in
+source restricts who can satisfy it: the check is now the auto-emitted job
+check produced by the publisher's `protected-approval-gate` job (not a Checks
+API write), so it can only be satisfied by a GitHub Actions workflow run that
+has a top-level job named `protected-approval-gate`. Any workflow in your
+repository that declares such a job could emit a result under the same name;
+see the residual-risk discussion in
 [`docs/design/protected-approval-gate.md`](design/protected-approval-gate.md)
 (Decision 5).
 
