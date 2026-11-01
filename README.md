@@ -131,7 +131,7 @@ The steps below describe how to wire up the same workflow in your own GitHub rep
 
 ### 1. Create the agent GitHub Apps (one-time, manual)
 
-Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **Settings → Developer settings → GitHub Apps → New GitHub App**. Create the developer-agent, reviewer-agent, terraform-ci, and release-agent Apps, plus the allowlist-resolver App when an agent user list uses a team reference:
+Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **Settings → Developer settings → GitHub Apps → New GitHub App**. Create the developer-agent, reviewer-agent, terraform-ci, and release-ci Apps, plus the allowlist-resolver App when an agent user list uses a team reference:
 
 **developer-agent**
 - Repository permissions: Contents (R/W), Issues (R/W), Pull requests (R/W), Workflows (R/W), Metadata (R), Checks (R), Deployments (R)
@@ -151,7 +151,7 @@ Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **S
 - Webhook: **uncheck "Active"** (same reason as above).
 - After creation: note the **Client ID** (the `Iv23.xxx` string) and download the private key.
 
-**release-agent**
+**release-ci**
 - Repository permissions: Contents (R/W), Workflows (R/W), Metadata (R)
 - Subscribe to events: none (App is used only to mint tokens for release runs; no webhook events needed).
 - Webhook: **uncheck "Active"** (same reason as above).
@@ -165,7 +165,7 @@ Terraform cannot create GitHub Apps, so do this first in the GitHub UI under **S
 - Install the App on the organization that owns the repository.
 - After creation: note the Client ID and download the private key.
 
-Then install the developer-agent, reviewer-agent, terraform-ci, and release-agent Apps on this repository (sidebar → **Install App** → **Install** next to your username → **Only select repositories** → pick `agentic-development-workflow`). Install allowlist-resolver on the repository-owning organization so it can read that organization's team membership. Terraform deliberately does not manage App installations (the GitHub API endpoints for it reject OAuth user tokens, which is what `gh auth token` issues).
+Then install the developer-agent, reviewer-agent, terraform-ci, and release-ci Apps on this repository (sidebar → **Install App** → **Install** next to your username → **Only select repositories** → pick `agentic-development-workflow`). Install allowlist-resolver on the repository-owning organization so it can read that organization's team membership. Terraform deliberately does not manage App installations (the GitHub API endpoints for it reject OAuth user tokens, which is what `gh auth token` issues).
 
 ### 2. Run Terraform
 
@@ -275,9 +275,9 @@ gh secret set REVIEWER_APP_PRIVATE_KEY < ~/.config/agentic-agents/reviewer-agent
 gh secret set TERRAFORM_APP_ID         --body "<terraform-ci App Client ID>"  # the Iv23.xxx Client ID, not the numeric App ID
 gh secret set TERRAFORM_APP_PRIVATE_KEY < ~/.config/agentic-agents/terraform-ci.pem
 
-# Required for the release-agent App (used by release.yml)
-gh secret set RELEASE_APP_ID          --body "<release-agent App Client ID>"  # the Iv23.xxx Client ID, not the numeric App ID
-gh secret set RELEASE_APP_PRIVATE_KEY < ~/.config/agentic-agents/release-agent.pem
+# Required for the release-ci App (used by release.yml)
+gh secret set RELEASE_APP_ID          --body "<release-ci App Client ID>"  # the Iv23.xxx Client ID, not the numeric App ID
+gh secret set RELEASE_APP_PRIVATE_KEY < ~/.config/agentic-agents/release-ci.pem
 
 # Required when any agent user list contains an org/team-slug reference
 gh secret set ALLOWLIST_RESOLVER_APP_ID --body "<allowlist-resolver App Client ID>"
