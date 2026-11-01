@@ -79,13 +79,13 @@ model** as whichever downstream workflow will actually run the task:
 
 - Design tasks → `DESIGN_DEFAULT_MODEL || DEFAULT_MODEL` (matching
   `agent-design.yml`'s fallback).
-- All other tasks → `DEFAULT_MODEL` (matching `agent-implementation.yml`'s
+- All other tasks → `DEFAULT_MODEL` (matching `agent-implement.yml`'s
   fallback).
 
 This deliberately **does not** include `GROOM_DEFAULT_MODEL` in the anchor
 resolution. `GROOM_DEFAULT_MODEL` only governs the model the groomer itself
 runs on; it does not change what `agent-design.yml` or
-`agent-implementation.yml` will fall through to when no `model:*` label is
+`agent-implement.yml` will fall through to when no `model:*` label is
 present. Tying the anchor to the groomer's own execution model would break the
 no-label rule whenever `GROOM_DEFAULT_MODEL` is set to a different capability
 class than `DEFAULT_MODEL` / `DESIGN_DEFAULT_MODEL` — exactly the
