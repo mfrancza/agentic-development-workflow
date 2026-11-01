@@ -190,14 +190,20 @@ downstream anchor.
 
 Because the implementation anchor remains `DEFAULT_MODEL = sonnet` and the
 design anchor remains `DESIGN_DEFAULT_MODEL = opus`, the
-no-label-when-matched rule still routes plan tasks to Sonnet via
-`DEFAULT_MODEL` and design tasks to Opus via `DESIGN_DEFAULT_MODEL`. The rule
-emits `model:haiku` only for a mechanical task (whose class differs from
-Sonnet) and `model:opus` only if a non-design task is classified above
-Sonnet. Grooming on Haiku never collapses the no-label decision onto Haiku,
-because the anchors the prompt consults are the downstream workflows'
-effective defaults, not `GROOM_DEFAULT_MODEL`. This is the practical payoff
-of the execution-vs-anchor split described in Decision 2.
+no-label-when-matched rule routes `plan`-class tasks — which
+`agent-auto-trigger-reusable.yml` sends to `agent:design` and therefore to
+`agent-design.yml` — to Opus via `DESIGN_DEFAULT_MODEL`, and routes typical
+scoped `bug` / `do` / `enhancement` implementation tasks to Sonnet via
+`DEFAULT_MODEL`. The rule emits `model:haiku` only for a mechanical task
+(whose class differs from Sonnet) and emits `model:opus` only for an
+implementation-family task classified above Sonnet (for example, a
+cross-cutting refactor or long-horizon implementation routed through
+`agent-implement.yml`, which still falls through to the Sonnet
+implementation anchor without a label). Grooming on Haiku never collapses
+the no-label decision onto Haiku, because the anchors the prompt consults
+are the downstream workflows' effective defaults, not `GROOM_DEFAULT_MODEL`.
+This is the practical payoff of the execution-vs-anchor split described in
+Decision 2.
 
 **Alternatives considered.** Leaving `groom_default_model` unset was rejected
 because the maintainer's grooming comment explicitly includes "adding a
@@ -217,9 +223,16 @@ The groom prompt (`docker/scripts/prompts/groom.md`) step 3 is rewritten to:
 2. Classify the task using the Task-Class Matrix row for the issue's
    dominant task class.
 3. Select the anchor env var based on the classified task family:
-   `GROOM_DESIGN_ANCHOR_MODEL` for design tasks and `GROOM_IMPL_ANCHOR_MODEL`
-   for every other class. Infer the chosen anchor's vendor via the same
-   `claude-*`-prefix / explicit-allowlist rules documented in
+   `GROOM_DESIGN_ANCHOR_MODEL` for design-family tasks and
+   `GROOM_IMPL_ANCHOR_MODEL` for every other class. "Design-family" here
+   means the task will route to `agent-design.yml` — in practice, the
+   `plan`-class row of the Task-Class Matrix, which
+   `agent-auto-trigger-reusable.yml` translates into the `agent:design`
+   label. Non-`plan` rows that mention "design" in the matrix (for example,
+   "Design — bounded feature specification without `plan`") route through
+   `agent-implement.yml` and therefore use `GROOM_IMPL_ANCHOR_MODEL`. Infer
+   the chosen anchor's vendor via the same `claude-*`-prefix /
+   explicit-allowlist rules documented in
    [`docs/model-guidance.md`](../model-guidance.md) § "Provider Notes".
    `GROOM_DEFAULT_MODEL` is deliberately not consulted here — it only
    controls which model actually runs the groomer, not which model the
