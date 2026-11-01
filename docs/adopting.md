@@ -273,7 +273,6 @@ gh secret set XAI_API_KEY              --body "<key>"   # required for xAI Grok 
 | `agent-respond-review-reusable.yml`          | `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`                 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
 | `agent-review-reusable.yml`                  | `REVIEWER_APP_ID`, `REVIEWER_APP_PRIVATE_KEY`                   | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `XAI_API_KEY`, `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
 | `ci-reusable.yml`                            | —                                                               | —                                                                 |
-| `protected-approval-gate-reusable.yml`       | —                                                               | `ALLOWLIST_RESOLVER_APP_ID`, `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` |
 | `protected-approval-gate-sweep-reusable.yml` | —                                                               | —                                                                 |
 | `secret-scan-reusable.yml`                   | —                                                               | —                                                                 |
 | `terraform-ci-reusable.yml`                  | `TERRAFORM_APP_ID`, `TERRAFORM_APP_PRIVATE_KEY`, `TF_API_TOKEN` | —                                                                 |
@@ -1545,13 +1544,9 @@ An opt-in required status check that blocks merging a pull request authored
 by a protected login (for example your developer-agent App,
 `<your-developer-app-slug>[bot]`) until it has `REQUIRED_APPROVAL_COUNT`
 approvals from someone other than its author. Pull requests from other authors
-pass immediately. The implementation uses two reusable workflows plus a
+pass immediately. The implementation uses one reusable workflow plus a
 publisher you copy into your repo:
 
-- `protected-approval-gate-reusable.yml` evaluates one pull request. It is
-  available for callers that want a reusable workflow; the publisher template
-  below inlines the composite action directly so the auto-emitted job check has
-  the required top-level name (`protected-approval-gate`).
 - `protected-approval-gate-sweep-reusable.yml` re-evaluates every open pull
   request by locating and rerunning each PR's latest `pull_request_target`
   publisher run. Your backfill and reconcile workflows call it.
