@@ -14,14 +14,17 @@ on:
     types: [completed]
 
 # actions: write is required to call POST /actions/runs/{run_id}/rerun.
+# pull-requests: read is required so workflow run responses include the
+# pull_requests array used to match runs to the affected PR.
 permissions:
   contents: read
   actions: write
+  pull-requests: read
 
 concurrency:
   # Fallback to run id prevents unrelated PR-less notifier runs from sharing
   # one empty concurrency key. The job guard below skips when there is no PR.
-  group: protected-approval-gate-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  group: protected-approval-gate-dispatcher-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
   cancel-in-progress: false
 
 jobs:
