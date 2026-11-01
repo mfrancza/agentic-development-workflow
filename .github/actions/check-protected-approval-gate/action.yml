@@ -1,5 +1,5 @@
 name: 'Check protected approval gate'
-description: 'Publishes the configurable protected-author approval check run.'
+description: 'Evaluates the configurable protected-author approval gate and exits non-zero on failure.'
 
 inputs:
   protected-pr-author-logins:
@@ -22,18 +22,21 @@ inputs:
   pr-number:
     description: 'Pull request number'
     required: true
-  head-sha:
-    description: 'Advisory pull request head SHA; the activity fetches the live value'
-    required: true
   repo:
     description: 'Repository in owner/name format'
     required: true
   departed-sha:
-    description: 'Optional SHA a pull request has departed'
+    description: 'Optional SHA a pull request has departed (triggers sibling publisher reruns)'
     required: false
+    default: ''
   departed-pr-number:
-    description: 'Optional pull request number to exclude from departed-SHA reconciliation'
+    description: 'Optional pull request number to exclude from departed-SHA sibling reconciliation'
     required: false
+    default: ''
+  publisher-workflow-file:
+    description: 'Filename of the publisher workflow used to find and rerun sibling publisher runs'
+    required: false
+    default: 'protected-approval-gate-publisher.yml'
 
 runs:
   using: composite
@@ -71,7 +74,7 @@ runs:
       shell: bash
       working-directory: ${{ steps.scripts-dir.outputs.dir }}
       run: npm ci
-    - name: Publish approval check
+    - name: Evaluate approval gate
       shell: bash
       working-directory: ${{ steps.scripts-dir.outputs.dir }}
       env:
@@ -82,8 +85,8 @@ runs:
         INPUT_QUALIFYING_REVIEWERS: ${{ inputs.qualifying-reviewers }}
         INPUT_RESOLVER_TOKEN: ${{ inputs.resolver-token }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
-        INPUT_HEAD_SHA: ${{ inputs.head-sha }}
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_DEPARTED_SHA: ${{ inputs.departed-sha }}
         INPUT_DEPARTED_PR_NUMBER: ${{ inputs.departed-pr-number }}
+        INPUT_PUBLISHER_WORKFLOW_FILE: ${{ inputs.publisher-workflow-file }}
       run: npx --no-install tsx src/check-protected-approval-gate.ts

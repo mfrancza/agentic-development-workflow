@@ -1,10 +1,37 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { listReviews, listPulls, getPull, createCheck, paginate, listMembersInOrg } = vi.hoisted(() => ({
-  listReviews: vi.fn(), listPulls: vi.fn(), getPull: vi.fn(), createCheck: vi.fn(), paginate: vi.fn(), listMembersInOrg: vi.fn(),
+const { listReviews, listPulls, getPull, listWorkflowRuns, reRunWorkflow, paginate, listMembersInOrg, summaryAddHeading, summaryAddRaw, summaryWrite } = vi.hoisted(() => {
+  const summaryWrite = vi.fn().mockResolvedValue(undefined);
+  return {
+    listReviews: vi.fn(), listPulls: vi.fn(), getPull: vi.fn(),
+    listWorkflowRuns: vi.fn(), reRunWorkflow: vi.fn(),
+    paginate: vi.fn(), listMembersInOrg: vi.fn(),
+    summaryAddHeading: vi.fn(), summaryAddRaw: vi.fn(), summaryWrite,
+  };
+});
+
+vi.mock("@actions/core", () => {
+  const summary = { addHeading: summaryAddHeading, addRaw: summaryAddRaw, write: summaryWrite };
+  summaryAddHeading.mockImplementation(() => summary);
+  summaryAddRaw.mockImplementation(() => summary);
+  return {
+    getInput: vi.fn().mockReturnValue(""),
+    error: vi.fn(),
+    warning: vi.fn(),
+    notice: vi.fn(),
+    setFailed: vi.fn(),
+    summary,
+  };
+});
+vi.mock("@actions/github", () => ({
+  getOctokit: vi.fn().mockReturnValue({
+    paginate, rest: {
+      pulls: { listReviews, list: listPulls, get: getPull },
+      actions: { listWorkflowRuns, reRunWorkflow },
+      teams: { listMembersInOrg },
+    },
+  }),
 }));
-vi.mock("@actions/core", () => ({ getInput: vi.fn().mockReturnValue(""), error: vi.fn(), setFailed: vi.fn() }));
-vi.mock("@actions/github", () => ({ getOctokit: vi.fn().mockReturnValue({ paginate, rest: { pulls: { listReviews, list: listPulls, get: getPull }, checks: { create: createCheck }, teams: { listMembersInOrg } } }) }));
 
 import * as core from "@actions/core";
 import * as github from "@actions/github";
@@ -13,34 +40,60 @@ import { run } from "../src/check-protected-approval-gate.js";
 function mockInputs(overrides: Record<string, string> = {}) {
   const inputs: Record<string, string> = {
     protected_pr_author_logins: '["developer[bot]", "other[bot]"]', required_approval_count: "2", enabled: "true",
-    pr_number: "42", pr_author: "ignored", head_sha: "event-sha", repo: "owner/repo", departed_sha: "", departed_pr_number: "", ...overrides,
+    pr_number: "42", repo: "owner/repo", departed_sha: "", departed_pr_number: "",
+    publisher_workflow_file: "protected-approval-gate-publisher.yml",
+    ...overrides,
   };
   vi.mocked(core.getInput).mockImplementation((name: string) => inputs[name] ?? "");
 }
 function pr(number: number, author: string, sha = "live-sha", state = "open") { return { number, user: { login: author }, head: { sha }, state }; }
 function review(login: string, state: string) { return { user: { login }, state }; }
-function callsFor(sha: string) { return createCheck.mock.calls.filter(([input]) => input.head_sha === sha).map(([input]) => input); }
 
 describe("check-protected-approval-gate", () => {
   beforeEach(() => {
     vi.clearAllMocks(); vi.stubEnv("GITHUB_TOKEN", "test-token"); mockInputs();
     getPull.mockResolvedValue({ data: pr(42, "developer[bot]") });
     listPulls.mockResolvedValue({ data: [pr(42, "developer[bot]")] });
-    listReviews.mockResolvedValue({ data: [] }); createCheck.mockResolvedValue({});
+    listReviews.mockResolvedValue({ data: [] });
+    listWorkflowRuns.mockResolvedValue({ data: { workflow_runs: [] } });
+    reRunWorkflow.mockResolvedValue({});
     paginate.mockResolvedValue([]);
+    summaryWrite.mockResolvedValue(undefined);
   });
 
-  it("uses the fixed enforcing context and the live, not event, head SHA", async () => {
+  it("fetches the live head SHA from pulls.get, not from an event input", async () => {
     await run();
-    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "protected-approval-gate", head_sha: "live-sha", conclusion: "failure" }));
     expect(getPull).toHaveBeenCalledWith({ owner: "owner", repo: "repo", pull_number: 42 });
+    // Failure (0 approvals) sets exit code via setFailed
+    expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
   });
 
-  it("does not publish the enforcing context when disabled", async () => {
-    mockInputs({ enabled: "false" }); listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
+  it("exits non-zero (setFailed) when conclusion is failure", async () => {
     await run();
-    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "protected-approval-gate (preview)", conclusion: "success" }));
-    expect(createCheck).not.toHaveBeenCalledWith(expect.objectContaining({ name: "protected-approval-gate" }));
+    expect(vi.mocked(core.setFailed)).toHaveBeenCalledWith(expect.stringContaining("0 qualifying approval(s)"));
+  });
+
+  it("does not call setFailed when conclusion is success", async () => {
+    listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
+    await run();
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+    expect(vi.mocked(core.notice)).toHaveBeenCalled();
+  });
+
+  it("does not publish enforcing conclusion when disabled (preview mode still sets exit code)", async () => {
+    mockInputs({ enabled: "false" });
+    listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
+    await run();
+    // Preview success: notice called, setFailed not called
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+    expect(vi.mocked(core.notice)).toHaveBeenCalled();
+  });
+
+  it("writes the result to step summary", async () => {
+    listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
+    await run();
+    expect(summaryAddHeading).toHaveBeenCalledWith(expect.stringContaining("Approval gate"), expect.anything());
+    expect(summaryWrite).toHaveBeenCalled();
   });
 
   it.each([
@@ -49,14 +102,22 @@ describe("check-protected-approval-gate", () => {
     ["a later comment preserves an approval", [review("alice", "APPROVED"), review("alice", "COMMENTED"), review("bob", "APPROVED")], "success"],
     ["a later dismissal removes an approval", [review("alice", "APPROVED"), review("alice", "DISMISSED"), review("bob", "APPROVED")], "failure"],
   ])("evaluates %s using latest opinionated reviews", async (_name, reviews, conclusion) => {
-    listReviews.mockResolvedValue({ data: reviews }); await run(); expect(callsFor("live-sha")[0].conclusion).toBe(conclusion);
+    listReviews.mockResolvedValue({ data: reviews }); await run();
+    if (conclusion === "failure") {
+      expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
+    } else {
+      expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+    }
   });
 
   it("applies custom thresholds and self-excludes the author of each protected PR", async () => {
     mockInputs({ required_approval_count: "1" }); listReviews.mockResolvedValue({ data: [review("other[bot]", "APPROVED"), review("alice", "APPROVED")] });
-    await run(); expect(callsFor("live-sha")[0].conclusion).toBe("success");
+    await run(); expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+    vi.clearAllMocks();
+    mockInputs({ required_approval_count: "1" });
     getPull.mockResolvedValue({ data: pr(42, "other[bot]") }); listPulls.mockResolvedValue({ data: [pr(42, "other[bot]")] }); listReviews.mockResolvedValue({ data: [review("other[bot]", "APPROVED")] });
-    await run(); expect(callsFor("live-sha")[1].conclusion).toBe("failure");
+    summaryWrite.mockResolvedValue(undefined);
+    await run(); expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
   });
 
   it.each([
@@ -65,8 +126,8 @@ describe("check-protected-approval-gate", () => {
     ["zero threshold", { required_approval_count: "0" }], ["non-integer threshold", { required_approval_count: "1.5" }],
   ])("fails every PR visibly for %s", async (_name, inputs) => {
     mockInputs(inputs); await expect(run()).rejects.toThrow();
-    expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "protected-approval-gate", conclusion: "failure", head_sha: "live-sha" }));
-    expect(core.error).toHaveBeenCalled();
+    expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
+    expect(vi.mocked(core.error)).toHaveBeenCalled();
   });
 
   it("uses paginated open PR listing and publishes the strictest shared-SHA result", async () => {
@@ -74,19 +135,100 @@ describe("check-protected-approval-gate", () => {
     listPulls.mockResolvedValue({ data: [pr(42, "human"), pr(43, "developer[bot]")] }); listReviews.mockResolvedValue({ data: [] });
     await run();
     expect(listPulls).toHaveBeenCalledWith({ owner: "owner", repo: "repo", state: "open", per_page: 100, page: 1 });
-    expect(callsFor("live-sha")[0].conclusion).toBe("failure");
+    // developer[bot] on the same SHA has 0 approvals → strictest-wins → failure
+    expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
   });
 
   it("fails closed when open-PR listing fails", async () => {
     listPulls.mockRejectedValue(new Error("listing unavailable")); await expect(run()).rejects.toThrow("listing unavailable");
-    expect(callsFor("live-sha")[0]).toEqual(expect.objectContaining({ conclusion: "failure" }));
+    expect(vi.mocked(core.error)).toHaveBeenCalled();
   });
 
-  it("reconciles a departed SHA while excluding the departed pull request", async () => {
+  it("falls back on a direct pulls.get when the listing omits the triggering PR (Decision 8 synchronize race)", async () => {
+    // Simulate the race: listing returns empty but the triggering PR is open at liveHeadSha
+    listPulls.mockResolvedValue({ data: [] });
+    getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "live-sha", "open") });
+    listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
+    await run();
+    // After fallback, PR 42 is included as a singleton candidate and evaluated
+    expect(getPull).toHaveBeenCalledWith({ owner: "owner", repo: "repo", pull_number: 42 });
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+  });
+
+  it("does not falsely pass when the fallback PR is not open at the live head SHA", async () => {
+    // Listing empty AND the triggering PR has moved off the SHA (edge case)
+    listPulls.mockResolvedValue({ data: [] });
+    getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "different-sha", "open") });
+    await run();
+    // Fallback PR fails the SHA check in evaluateSha → "none" candidates → failure
+    expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
+  });
+
+  it("triggers departed-SHA sibling reruns for remaining open PRs on the old SHA", async () => {
     mockInputs({ departed_sha: "old-sha", departed_pr_number: "42" });
-    getPull.mockImplementation(async ({ pull_number }: { pull_number: number }) => ({ data: pull_number === 42 ? pr(42, "developer[bot]", "live-sha") : pr(43, "human", "old-sha") }));
-    listPulls.mockImplementation(async ({ page }: { page: number }) => ({ data: page === 1 ? [pr(42, "developer[bot]", "live-sha"), pr(43, "human", "old-sha")] : [] }));
-    await run(); expect(callsFor("old-sha")[0]).toEqual(expect.objectContaining({ conclusion: "success" }));
+    getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "live-sha") });
+    listPulls.mockImplementation(async ({ page }: { page: number }) => ({
+      data: page === 1 ? [pr(42, "developer[bot]", "live-sha"), pr(43, "human", "old-sha")] : [],
+    }));
+    listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
+    listWorkflowRuns.mockResolvedValue({ data: { workflow_runs: [{ id: 999, created_at: "2024-01-01T00:00:00Z", pull_requests: [{ number: 43 }] }] } });
+    await run();
+    expect(listWorkflowRuns).toHaveBeenCalledWith(expect.objectContaining({ workflow_id: "protected-approval-gate-publisher.yml", event: "pull_request_target" }));
+    expect(reRunWorkflow).toHaveBeenCalledWith({ owner: "owner", repo: "repo", run_id: 999 });
+    expect(vi.mocked(core.notice)).toHaveBeenCalledWith(expect.stringContaining("PR #43"));
+  });
+
+  it("warns (does not fail) when a sibling's rerun API call errors", async () => {
+    mockInputs({ departed_sha: "old-sha", departed_pr_number: "42" });
+    getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "live-sha") });
+    listPulls.mockImplementation(async ({ page }: { page: number }) => ({
+      data: page === 1 ? [pr(42, "developer[bot]", "live-sha"), pr(43, "human", "old-sha")] : [],
+    }));
+    listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
+    listWorkflowRuns.mockResolvedValue({ data: { workflow_runs: [{ id: 999, created_at: "2024-01-01T00:00:00Z", pull_requests: [{ number: 43 }] }] } });
+    reRunWorkflow.mockRejectedValue(new Error("Forbidden"));
+    await run();
+    expect(vi.mocked(core.warning)).toHaveBeenCalledWith(expect.stringContaining("Rerun API error"));
+    // Main result was success; do not fail the job over a sibling rerun error
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+  });
+
+  it("warns (does not fail) when no prior publisher run exists for a sibling", async () => {
+    mockInputs({ departed_sha: "old-sha", departed_pr_number: "42" });
+    getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "live-sha") });
+    listPulls.mockImplementation(async ({ page }: { page: number }) => ({
+      data: page === 1 ? [pr(42, "developer[bot]", "live-sha"), pr(43, "human", "old-sha")] : [],
+    }));
+    listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
+    listWorkflowRuns.mockResolvedValue({ data: { workflow_runs: [] } });
+    await run();
+    expect(vi.mocked(core.warning)).toHaveBeenCalledWith(expect.stringContaining("No prior pull_request_target publisher run"));
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+  });
+
+  it("fails loudly when the departed-SHA sibling listing fails", async () => {
+    mockInputs({ departed_sha: "old-sha", departed_pr_number: "42" });
+    getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "live-sha") });
+    listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
+    let callCount = 0;
+    listPulls.mockImplementation(async () => {
+      callCount++;
+      // First call (live SHA) returns live PR only; second call (departed SHA) throws
+      if (callCount === 1) return { data: [pr(42, "developer[bot]", "live-sha")] };
+      throw new Error("departed listing unavailable");
+    });
+    await expect(run()).rejects.toThrow("departed listing unavailable");
+    expect(vi.mocked(core.error)).toHaveBeenCalledWith(expect.stringContaining("departed listing unavailable"));
+  });
+
+  it("does not trigger sibling reruns when disabled (preview mode)", async () => {
+    mockInputs({ enabled: "false", departed_sha: "old-sha", departed_pr_number: "42" });
+    getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "live-sha") });
+    listPulls.mockResolvedValue({ data: [pr(42, "developer[bot]", "live-sha"), pr(43, "human", "old-sha")] });
+    listReviews.mockResolvedValue({ data: [] });
+    await run();
+    expect(listWorkflowRuns).not.toHaveBeenCalled();
+    expect(reRunWorkflow).not.toHaveBeenCalled();
   });
 
   describe("qualifying reviewers", () => {
@@ -94,15 +236,17 @@ describe("check-protected-approval-gate", () => {
 
     it("counts only approvals from listed logins, case-insensitively", async () => {
       mockInputs({ qualifying_reviewers: '["alice"]' }); listReviews.mockResolvedValue({ data: twoApprovals });
-      await run(); expect(callsFor("live-sha")[0]).toEqual(expect.objectContaining({ conclusion: "failure" }));
-      mockInputs({ qualifying_reviewers: '["alice", "bob"]' });
-      await run(); expect(callsFor("live-sha")[1]).toEqual(expect.objectContaining({ conclusion: "success" }));
+      await run(); expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
+      vi.clearAllMocks(); summaryWrite.mockResolvedValue(undefined);
+      mockInputs({ qualifying_reviewers: '["alice", "bob"]' }); listReviews.mockResolvedValue({ data: twoApprovals });
+      getPull.mockResolvedValue({ data: pr(42, "developer[bot]") }); listPulls.mockResolvedValue({ data: [pr(42, "developer[bot]")] });
+      await run(); expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
     });
 
     it("never counts the PR author, even when listed", async () => {
       mockInputs({ qualifying_reviewers: '["developer[bot]", "alice"]' });
       listReviews.mockResolvedValue({ data: [review("developer[bot]", "APPROVED"), review("alice", "APPROVED")] });
-      await run(); expect(callsFor("live-sha")[0].conclusion).toBe("failure");
+      await run(); expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
     });
 
     it("expands team references with the resolver token for the repository owner's organization", async () => {
@@ -112,7 +256,7 @@ describe("check-protected-approval-gate", () => {
       await run();
       expect(vi.mocked(github.getOctokit)).toHaveBeenCalledWith("resolver-token");
       expect(paginate).toHaveBeenCalledWith(listMembersInOrg, { org: "owner", team_slug: "maintainers" });
-      expect(callsFor("live-sha")[0].conclusion).toBe("success");
+      expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -121,21 +265,22 @@ describe("check-protected-approval-gate", () => {
     ])("fails protected PRs closed with %s", async (_name, inputs, message) => {
       mockInputs(inputs); listReviews.mockResolvedValue({ data: twoApprovals });
       await run();
-      expect(callsFor("live-sha")[0]).toEqual(expect.objectContaining({ conclusion: "failure", output: expect.objectContaining({ summary: expect.stringContaining(message) }) }));
-      expect(core.error).toHaveBeenCalledWith(expect.stringContaining(message));
+      // setFailed is called with the evaluateSha summary, which embeds the inner failure message
+      expect(vi.mocked(core.setFailed)).toHaveBeenCalledWith(expect.stringContaining(message));
+      expect(vi.mocked(core.error)).toHaveBeenCalledWith(expect.stringContaining(message));
     });
 
     it("fails protected PRs closed when a team lookup fails", async () => {
       mockInputs({ qualifying_reviewers: '["owner/maintainers"]', resolver_token: "resolver-token" });
       paginate.mockRejectedValue(Object.assign(new Error("Forbidden"), { status: 403 }));
       listReviews.mockResolvedValue({ data: twoApprovals });
-      await run(); expect(callsFor("live-sha")[0].conclusion).toBe("failure");
+      await run(); expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
     });
 
     it("does not affect PRs from unprotected authors when the list cannot be resolved", async () => {
       mockInputs({ qualifying_reviewers: '["owner/maintainers"]' });
       getPull.mockResolvedValue({ data: pr(42, "human") }); listPulls.mockResolvedValue({ data: [pr(42, "human")] });
-      await run(); expect(callsFor("live-sha")[0].conclusion).toBe("success");
+      await run(); expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -143,24 +288,19 @@ describe("check-protected-approval-gate", () => {
       ["a malformed team reference", '["owner/team/extra"]'], ["a duplicate entry", '["alice", "ALICE"]'],
     ])("fails every PR visibly for %s", async (_name, list) => {
       mockInputs({ qualifying_reviewers: list }); await expect(run()).rejects.toThrow();
-      expect(createCheck).toHaveBeenCalledWith(expect.objectContaining({ name: "protected-approval-gate", conclusion: "failure" }));
+      expect(vi.mocked(core.setFailed)).toHaveBeenCalled();
     });
   });
 
-  it("uses the GitHub token and Checks API", async () => {
+  it("uses the GitHub token from environment", async () => {
     await run(); expect(vi.mocked(github.getOctokit)).toHaveBeenCalledWith("test-token");
   });
 
   it("posts success for a non-protected author PR that is the sole open PR on its head", async () => {
-    // A sweep or backfill run posts success in the Checks API for a non-protected PR.
-    // Note: when the PR's Actions suite has already completed, GitHub attaches the
-    // new check run to that completed suite and the merge box shows "Expected —
-    // Waiting for status to be reported" regardless of the check conclusion.
-    // Only a new commit (which starts a fresh in-progress suite) clears Expected.
-    // See Decision 7 and Decision 9 item 19 in docs/design/protected-approval-gate.md.
     getPull.mockResolvedValue({ data: pr(42, "human") });
     listPulls.mockResolvedValue({ data: [pr(42, "human")] });
     await run();
-    expect(callsFor("live-sha")[0].conclusion).toBe("success");
+    expect(vi.mocked(core.setFailed)).not.toHaveBeenCalled();
+    expect(vi.mocked(core.notice)).toHaveBeenCalled();
   });
 });
