@@ -13,6 +13,9 @@ agent_allowlist = [
 
 default_model        = "sonnet"
 design_default_model = "opus"
+# Haiku is cheap for the bounded grooming pass; same Anthropic vendor as
+# default_model / design_default_model satisfies the vendor-anchor policy.
+groom_default_model = "haiku"
 
 # Humans to assign to issues and PRs when the agent applies the human-required
 # label (e.g. escalations requiring security, billing, or permission decisions).
