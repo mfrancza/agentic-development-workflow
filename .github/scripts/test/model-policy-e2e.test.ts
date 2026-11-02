@@ -396,11 +396,11 @@ describe("Model policy — (8) the default authoring model is not its own review
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 9: GROOM_DEFAULT_MODEL wins over DEFAULT_MODEL, and both the
-// resolve-model input and the container env var see the same resolved string
+// Assertion 9: GROOM_DEFAULT_MODEL wins over DEFAULT_MODEL for the groomer's
+// own model, while the vendor anchors stay on the downstream defaults
 // ---------------------------------------------------------------------------
 
-describe("Model policy — (9) GROOM_DEFAULT_MODEL precedence and GROOM_VENDOR_ANCHOR_MODEL consistency", () => {
+describe("Model policy — (9) GROOM_DEFAULT_MODEL precedence and downstream vendor anchors", () => {
   it("GROOM_DEFAULT_MODEL wins over DEFAULT_MODEL: agent-groom reusable short-circuits to GROOM_DEFAULT_MODEL when non-empty", () => {
     // The fallback expression `vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL`
     // is present in the groom reusable; when GROOM_DEFAULT_MODEL is set the `||`
@@ -420,17 +420,16 @@ describe("Model policy — (9) GROOM_DEFAULT_MODEL precedence and GROOM_VENDOR_A
     );
   });
 
-  it("the resolve-model input and GROOM_VENDOR_ANCHOR_MODEL use the same expression", () => {
-    // Both the `default-model:` input passed to `resolve-model` and the
-    // `GROOM_VENDOR_ANCHOR_MODEL` env var passed into the container must read
-    // `vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL` so they always agree on
-    // the anchor model — the prompt reads GROOM_VENDOR_ANCHOR_MODEL and the
-    // model waterfall uses the resolve-model output; a mismatch would produce
-    // inconsistent behavior.
-    const matches = agentGroomReusableContent.match(
-      /vars\.GROOM_DEFAULT_MODEL \|\| vars\.DEFAULT_MODEL/g,
+  it("the vendor anchors are the downstream defaults, not the groomer's model", () => {
+    // With this repo's groom_default_model = "haiku" and default_model =
+    // "sonnet", anchoring on the groomer's own model would leave mechanical
+    // tasks unlabeled and run them on Sonnet downstream (Issue #794).
+    expect(agentGroomReusableContent).toContain(
+      "GROOM_IMPL_ANCHOR_MODEL: ${{ vars.DEFAULT_MODEL }}",
     );
-    expect(matches).not.toBeNull();
-    expect(matches!.length).toBeGreaterThanOrEqual(2);
+    expect(agentGroomReusableContent).toContain(
+      "GROOM_DESIGN_ANCHOR_MODEL: ${{ vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL }}",
+    );
+    expect(agentGroomReusableContent.match(/vars\.GROOM_DEFAULT_MODEL/g)).toHaveLength(1);
   });
 });

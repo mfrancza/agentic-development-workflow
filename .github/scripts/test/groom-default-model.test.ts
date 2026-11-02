@@ -18,9 +18,11 @@ import { describe, expect, it } from "vitest";
  * confirm that expression is present and that the prior bare-DEFAULT_MODEL
  * form is absent from the default-model input line.
  *
- * Additionally, the groom reusable must pass the same resolved anchor into
- * the agent container as GROOM_VENDOR_ANCHOR_MODEL so the groom prompt can
- * read the vendor-anchor model without re-deriving it from AGENT_MODEL.
+ * Separately, the groom reusable passes the downstream defaults into the agent
+ * container as the vendor anchors (GROOM_IMPL_ANCHOR_MODEL = DEFAULT_MODEL,
+ * GROOM_DESIGN_ANCHOR_MODEL = DESIGN_DEFAULT_MODEL || DEFAULT_MODEL).
+ * GROOM_DEFAULT_MODEL must never feed an anchor: a cheaper groomer would
+ * otherwise leave mechanical tasks unlabeled (Issue #794).
  */
 
 const repoRoot = new URL("../../../", import.meta.url);
@@ -88,24 +90,40 @@ describe("agent-groom-reusable.yml — GROOM_DEFAULT_MODEL fallback wiring", () 
   });
 });
 
-describe("agent-groom-reusable.yml — GROOM_VENDOR_ANCHOR_MODEL container env var", () => {
-  it("passes GROOM_VENDOR_ANCHOR_MODEL into the grooming agent container", () => {
-    // The resolved anchor expression must be forwarded to the container so the
-    // groom prompt can read the vendor-anchor model without re-deriving it from
-    // AGENT_MODEL.
-    expect(groomReusableContent).toContain("GROOM_VENDOR_ANCHOR_MODEL");
+describe("agent-groom-reusable.yml — vendor anchor container env vars", () => {
+  it("anchors implementation tasks on DEFAULT_MODEL", () => {
+    expect(groomReusableContent).toContain(
+      "GROOM_IMPL_ANCHOR_MODEL: ${{ vars.DEFAULT_MODEL }}",
+    );
   });
 
-  it("GROOM_VENDOR_ANCHOR_MODEL uses the same fallback expression as default-model", () => {
-    // Both the resolve-model input and the container env var must read the same
-    // expression so they always agree on the anchor model.
-    const matches = groomReusableContent.match(
-      /vars\.GROOM_DEFAULT_MODEL \|\| vars\.DEFAULT_MODEL/g,
+  it("anchors design tasks on DESIGN_DEFAULT_MODEL || DEFAULT_MODEL", () => {
+    expect(groomReusableContent).toContain(
+      "GROOM_DESIGN_ANCHOR_MODEL: ${{ vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL }}",
     );
-    expect(matches).not.toBeNull();
-    // At minimum two occurrences: one for the resolve-model default-model input
-    // and one for GROOM_VENDOR_ANCHOR_MODEL.
-    expect(matches!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("uses GROOM_DEFAULT_MODEL only for the groomer's execution model, never as an anchor", () => {
+    // Exactly one reference: the resolve-model default-model input.  A second
+    // reference would mean an anchor is tied to the groomer's own model again.
+    const matches = groomReusableContent.match(/vars\.GROOM_DEFAULT_MODEL/g);
+    expect(matches).toHaveLength(1);
+    expect(groomReusableContent).not.toContain("GROOM_VENDOR_ANCHOR_MODEL");
+  });
+});
+
+describe("run-agent action — forwards the grooming vendor anchors", () => {
+  it("passes both anchor env vars into the container when set", () => {
+    const runAgentContent = readFileSync(
+      new URL(".github/actions/run-agent/action.yml", repoRoot),
+      "utf8",
+    );
+    expect(runAgentContent).toContain(
+      '-e GROOM_IMPL_ANCHOR_MODEL="${GROOM_IMPL_ANCHOR_MODEL}"',
+    );
+    expect(runAgentContent).toContain(
+      '-e GROOM_DESIGN_ANCHOR_MODEL="${GROOM_DESIGN_ANCHOR_MODEL}"',
+    );
   });
 });
 
@@ -151,17 +169,25 @@ describe("terraform/modules/agent-vars/main.tf — GROOM_DEFAULT_MODEL Actions v
 });
 
 // ---------------------------------------------------------------------------
-// Prompt consumption tests — groom.md reads GROOM_VENDOR_ANCHOR_MODEL so the
-// label provider agrees with the configured grooming default.
+// Prompt consumption tests — groom.md picks the anchor for the task family so
+// the label decision follows the downstream defaults.
 // ---------------------------------------------------------------------------
 
-describe("docker/scripts/prompts/groom.md — GROOM_VENDOR_ANCHOR_MODEL prompt consumption", () => {
-  it("groom.md references GROOM_VENDOR_ANCHOR_MODEL for fallback vendor selection", () => {
-    // The prompt must read the anchor variable so the grooming agent uses the
-    // configured provider (Anthropic, OpenAI, or xAI) when choosing a model
-    // label, rather than always defaulting to Anthropic regardless of what
-    // GROOM_DEFAULT_MODEL is set to.
-    expect(groomPromptContent).toContain("GROOM_VENDOR_ANCHOR_MODEL");
+describe("docker/scripts/prompts/groom.md — vendor anchor prompt consumption", () => {
+  it("groom.md selects GROOM_DESIGN_ANCHOR_MODEL or GROOM_IMPL_ANCHOR_MODEL by task family", () => {
+    expect(groomPromptContent).toContain(
+      "`GROOM_DESIGN_ANCHOR_MODEL` for design-family tasks, `GROOM_IMPL_ANCHOR_MODEL` for implementation-family tasks",
+    );
+  });
+
+  it("groom.md tells the agent not to anchor on its own execution model", () => {
+    expect(groomPromptContent).toContain(
+      "Do **not** anchor on the model you are running on",
+    );
+  });
+
+  it("groom.md records the task family in the grooming comment", () => {
+    expect(groomPromptContent).toContain("**Task family**");
   });
 
   it("groom.md maps gpt-* prefix to OpenAI provider", () => {
@@ -177,12 +203,17 @@ describe("docker/scripts/prompts/groom.md — GROOM_VENDOR_ANCHOR_MODEL prompt c
   });
 });
 
-describe("docker/scripts/entrypoint.sh — GROOM_VENDOR_ANCHOR_MODEL injected into prompt context", () => {
-  it("action_groom injects GROOM_VENDOR_ANCHOR_MODEL into the prompt text", () => {
-    // The entrypoint must expand the variable into the prompt string so the
-    // agent receives the resolved anchor value even if shell env var access
-    // is unavailable — consistent with how ADMIN_ASSIGNEES is injected.
-    expect(entrypointContent).toContain("GROOM_VENDOR_ANCHOR_MODEL:");
+describe("docker/scripts/entrypoint.sh — vendor anchors injected into prompt context", () => {
+  it("action_groom injects both anchors into the prompt text", () => {
+    // The entrypoint must expand the variables into the prompt string so the
+    // agent receives the anchor values even if shell env var access is
+    // unavailable — consistent with how ADMIN_ASSIGNEES is injected.
+    expect(entrypointContent).toContain(
+      "GROOM_IMPL_ANCHOR_MODEL: ${GROOM_IMPL_ANCHOR_MODEL:-}",
+    );
+    expect(entrypointContent).toContain(
+      "GROOM_DESIGN_ANCHOR_MODEL: ${GROOM_DESIGN_ANCHOR_MODEL:-}",
+    );
   });
 });
 
@@ -193,15 +224,16 @@ describe("docker/scripts/entrypoint.sh — GROOM_VENDOR_ANCHOR_MODEL injected in
 // ---------------------------------------------------------------------------
 
 describe("docs/model-guidance.md — anchor-based fallback alignment with groom.md", () => {
-  it("describes GROOM_VENDOR_ANCHOR_MODEL as the fallback mechanism in Provider selection", () => {
-    // The guidance document must mention GROOM_VENDOR_ANCHOR_MODEL in its
-    // "Provider selection during grooming" section.  Before PR #788 this step
-    // read "retain Anthropic as the fallback" — a static rule that conflicts
-    // with the configurable anchor introduced by GROOM_DEFAULT_MODEL.
+  it("describes the per-family anchors in Provider selection", () => {
+    // The guidance document must name both anchors in its "Provider selection
+    // during grooming" section, and state that GROOM_DEFAULT_MODEL is not one.
     const providerSection = modelGuidanceContent
       .split("### Provider selection during grooming")[1]
       .split("### Anthropic tier aliases")[0];
-    expect(providerSection).toContain("GROOM_VENDOR_ANCHOR_MODEL");
+    expect(providerSection).toContain("GROOM_IMPL_ANCHOR_MODEL");
+    expect(providerSection).toContain("GROOM_DESIGN_ANCHOR_MODEL");
+    expect(providerSection).toContain("`GROOM_DEFAULT_MODEL` is deliberately not an anchor");
+    expect(providerSection).not.toContain("GROOM_VENDOR_ANCHOR_MODEL");
   });
 
   it("guidance documents the gpt-* → OpenAI anchor rule", () => {

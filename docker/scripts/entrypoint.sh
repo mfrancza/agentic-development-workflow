@@ -728,7 +728,9 @@ Label criteria are defined in: agents/grooming/label-criteria.json (already chec
 
 ADMIN_ASSIGNEES: ${ADMIN_ASSIGNEES}
 
-GROOM_VENDOR_ANCHOR_MODEL: ${GROOM_VENDOR_ANCHOR_MODEL:-}"
+GROOM_IMPL_ANCHOR_MODEL: ${GROOM_IMPL_ANCHOR_MODEL:-}
+
+GROOM_DESIGN_ANCHOR_MODEL: ${GROOM_DESIGN_ANCHOR_MODEL:-}"
 }
 
 action_resolve_conflicts() {

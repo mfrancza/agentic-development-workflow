@@ -275,7 +275,12 @@ jobs:
         env:
           ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }}
           ALLOWLIST_RESOLVER_TOKEN: ${{ steps.assignee-resolver.outputs.token }}
-          GROOM_VENDOR_ANCHOR_MODEL: ${{ vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
+          # Vendor anchors are the downstream workflows' effective defaults,
+          # not the groomer's own execution model (GROOM_DEFAULT_MODEL), so a
+          # cheaper groomer never collapses the no-label decision onto itself.
+          # See docs/design/groomer-model-selection-vendor-anchor.md Decision 2.
+          GROOM_IMPL_ANCHOR_MODEL: ${{ vars.DEFAULT_MODEL }}
+          GROOM_DESIGN_ANCHOR_MODEL: ${{ vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL }}
         with:
           image: ${{ inputs.image }}
           gh-token: ${{ steps.setup.outputs.token }}
