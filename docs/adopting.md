@@ -2149,40 +2149,43 @@ gh api repos/mfrancza/agentic-development-workflow/tags --jq '.[].name'
 If no tags are listed, a release has not been created yet. Contact the source
 repo maintainer or pin to a commit SHA instead.
 
-If tags exist but `docker pull` still returns "manifest unknown", the
-`release-images` workflow may not have fired automatically — see the next
-gotcha.
+If tags exist but `docker pull` still returns "manifest unknown", the images
+for that tag were not published — see
+[Container images missing for a release tag](#container-images-missing-for-a-release-tag).
 
 ---
 
-### release-images workflow does not fire after release.yml dispatch
+### Container images missing for a release tag
 
 **Symptom:** Tags `v<M>.<m>.<p>` and `v<M>` exist on the source repo (confirmed
 via `gh api repos/mfrancza/agentic-development-workflow/tags --jq '.[].name'`)
 but the four container images (`developer:v<M>.<m>.<p>`, `developer:v<M>`,
 `reviewer:v<M>.<m>.<p>`, `reviewer:v<M>`) do not exist on GHCR — `docker pull`
-returns "manifest unknown" and `gh run list --workflow release-images.yml` shows
-zero runs for the tag.
+returns "manifest unknown".
 
-**Cause:** `release.yml` pushes the version and moving-major tags using
-`secrets.GITHUB_TOKEN`. GitHub intentionally does not trigger subsequent
-workflow runs from events sourced by `GITHUB_TOKEN` (to prevent infinite
-loops). The `push: tags: 'v*'` trigger in `release-images.yml` therefore
-never fires when `release.yml` is the one pushing the tags.
+**Cause:** From v0.5.0 on, `release.yml` pushes the release tags with the
+`release-ci` App token, and the tag push triggers `release-images.yml`
+automatically. Images are missing only if that run failed or is still in
+progress (`gh run list --repo mfrancza/agentic-development-workflow --workflow
+release-images.yml`).
 
-This was observed at the initial v0.0.0 release (2026-09-07, issue #454).
+Releases up to v0.4.0 pushed their tags with the workflow `GITHUB_TOKEN`. GitHub
+does not start other workflows from `GITHUB_TOKEN` events, so those releases
+never triggered `release-images.yml` and their images were built by a manual
+dispatch (first observed at v0.0.0, issue #454).
 
-**Fix:** Manually dispatch `release-images.yml` using its `workflow_dispatch`
-trigger (which accepts an optional `tag` input for exactly this scenario):
+**Fix:** Dispatch `release-images.yml` by hand with the tag (its
+`workflow_dispatch` trigger accepts a `tag` input for exactly this case):
 
 ```bash
 gh workflow run release-images.yml \
   --repo mfrancza/agentic-development-workflow \
+  --ref v<M>.<m>.<p> \
   -f tag=v<M>.<m>.<p>
 ```
 
 Or use the Actions UI: Actions → release-images → Run workflow → enter the
-version tag (e.g. `v0.0.0`).
+version tag (e.g. `v0.5.0`).
 
 After the run completes, verify unauthenticated pullability for all four tags
 (see [GHCR image pull fails in workflow](#ghcr-image-pull-fails-in-workflow) for the visibility-flip fix if packages land as private).
