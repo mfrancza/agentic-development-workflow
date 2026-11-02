@@ -67,7 +67,8 @@ describe("model guidance consistency", () => {
   it("wires provider selection into grooming while preserving override guards", () => {
     expect(groomPrompt).toContain("Provider selection during grooming");
     expect(groomPrompt).toContain("a provisioned OpenAI model, or a provisioned xAI model");
-    expect(groomPrompt).toContain("GROOM_VENDOR_ANCHOR_MODEL");
+    expect(groomPrompt).toContain("GROOM_IMPL_ANCHOR_MODEL");
+    expect(groomPrompt).toContain("GROOM_DESIGN_ANCHOR_MODEL");
     expect(groomPrompt).toContain("skip model label selection entirely");
     expect(groomPrompt).toContain("Preserve them unchanged");
     expect(groomPrompt).toContain("Existing per-agent overrides also block generic model selection");

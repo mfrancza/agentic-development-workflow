@@ -126,9 +126,9 @@ resource "github_actions_variable" "design_default_model" {
 # `vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL`, which evaluates to
 # DEFAULT_MODEL when GROOM_DEFAULT_MODEL is empty, preserving existing behavior
 # for any repo that has not yet set this variable.
-# The same fallback expression is also passed into the agent container as
-# GROOM_VENDOR_ANCHOR_MODEL so the groom prompt can read the vendor anchor
-# without re-deriving it from AGENT_MODEL.
+# This only selects the model the groomer runs on. The groomer's vendor anchors
+# (GROOM_IMPL_ANCHOR_MODEL / GROOM_DESIGN_ANCHOR_MODEL) stay on the downstream
+# defaults, DEFAULT_MODEL and DESIGN_DEFAULT_MODEL.
 # count = 0 when the value is empty so Terraform does not attempt to create a
 # GitHub Actions variable with an empty value (GitHub rejects these with 422).
 # When the value is later cleared, Terraform destroys the variable and the

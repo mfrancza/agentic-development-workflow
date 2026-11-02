@@ -27,8 +27,11 @@ capability across vendors. This supersedes the Anthropic-only scope of
 2. With no `model:*` label, honor an explicit execution-provider preference in the issue or
    repository instructions. Merely mentioning a vendor as the subject of a task is not a
    provider preference; neither is a per-agent override a preference for all other agents.
-   With no explicit preference, the groomer anchors to `GROOM_VENDOR_ANCHOR_MODEL` (which the
-   workflow resolves as `GROOM_DEFAULT_MODEL || DEFAULT_MODEL`), infers the anchor's vendor using
+   With no explicit preference, the groomer anchors to the model the downstream workflow will
+   fall through to: `GROOM_DESIGN_ANCHOR_MODEL` (`DESIGN_DEFAULT_MODEL || DEFAULT_MODEL`) for
+   design-family (`plan`) tasks, and `GROOM_IMPL_ANCHOR_MODEL` (`DEFAULT_MODEL`) for every other
+   task. `GROOM_DEFAULT_MODEL` is deliberately not an anchor: it only selects the model the groomer
+   itself runs on. The groomer infers the anchor's vendor using
    the `resolve_provider()` routing rules in `docker/scripts/entrypoint.sh` — Anthropic accepts a
    tier alias or any `claude-*` prefix; OpenAI uses an explicit allowlist (`gpt-6-astra`,
    `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`), not a `gpt-*` prefix rule; xAI uses an
@@ -43,7 +46,7 @@ capability across vendors. This supersedes the Anthropic-only scope of
    when the anchor is empty.
 3. Use that provider's column in the Task-Class Matrix and the model-specific criteria below.
    For Anthropic, choose a tier alias; for OpenAI and xAI, choose a provisioned named model.
-   Record the anchor model, inferred vendor, selected task class, and label outcome in the
+   Record the task family, anchor model, inferred vendor, selected task class, and label outcome in the
    grooming comment (see the groom prompt for the exact template). For example, a scoped fix
    explicitly requesting OpenAI selects `model:gpt-5.6-terra`; an xAI architectural plan can
    select `model:grok-4.20-0309-reasoning`. For the anchor-based case, the outcome is either
@@ -305,11 +308,12 @@ It is a fallback, not evidence that every workflow always runs Sonnet, and opera
 `DESIGN_DEFAULT_MODEL` is an optional agent-specific override for the designer (`AGENT_ACTION=design`):
 the design workflow uses it as the fallback when no `model:*` label is present, and falls through to
 `DEFAULT_MODEL` when empty. `GROOM_DEFAULT_MODEL` is the parallel override for the grooming agent
-(`AGENT_ACTION=groom`): the grooming workflow resolves `GROOM_DEFAULT_MODEL || DEFAULT_MODEL` as the
-vendor-anchor model and passes it into the container as `GROOM_VENDOR_ANCHOR_MODEL`, which the groom
-prompt uses to apply the vendor-anchor model selection policy (see § "Provider selection during
-grooming"). When `GROOM_DEFAULT_MODEL` is empty, the groomer falls back to `DEFAULT_MODEL`. Neither
-variable changes `DEFAULT_MODEL` itself.
+(`AGENT_ACTION=groom`): the grooming workflow runs the groomer on `GROOM_DEFAULT_MODEL || DEFAULT_MODEL`.
+It does **not** change the groomer's vendor anchors, which stay on the downstream defaults
+(`GROOM_IMPL_ANCHOR_MODEL` = `DEFAULT_MODEL`, `GROOM_DESIGN_ANCHOR_MODEL` =
+`DESIGN_DEFAULT_MODEL || DEFAULT_MODEL`; see § "Provider selection during grooming"), so a cheaper
+grooming model never changes which tasks get a `model:*` label. Neither variable changes
+`DEFAULT_MODEL` itself.
 
 For exact label sources and fallback wiring, read the
 [caller and reusable workflows](../.github/workflows/) and
@@ -341,6 +345,14 @@ on the PR too: an issue's review override alone is not read by the reviewer work
 
 Entries below record changes at their original dates; historical model lists and prices are not
 current selection guidance.
+
+- **2026-11-02 (rev 12)** — Split the grooming vendor anchor (Issue #794): the groomer now anchors
+  on `GROOM_IMPL_ANCHOR_MODEL` (`DEFAULT_MODEL`) for implementation tasks and
+  `GROOM_DESIGN_ANCHOR_MODEL` (`DESIGN_DEFAULT_MODEL || DEFAULT_MODEL`) for design (`plan`) tasks,
+  replacing the single `GROOM_VENDOR_ANCHOR_MODEL` (`GROOM_DEFAULT_MODEL || DEFAULT_MODEL`), as
+  the design doc's Decisions 1–2 specified. With `GROOM_DEFAULT_MODEL = haiku` the single anchor
+  left mechanical tasks unlabeled, so they ran downstream on `DEFAULT_MODEL`. The grooming comment
+  now also records the task family.
 
 - **2026-11-01 (rev 11)** — Vendor-anchor model selection policy (Issue #776): updated
   § "Provider selection during grooming" step 2 to describe the full anchor-class-match policy —
