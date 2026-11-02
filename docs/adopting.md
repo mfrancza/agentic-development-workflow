@@ -1723,7 +1723,6 @@ jobs:
           qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
           resolver-token: ${{ steps.resolver-token.outputs.token }}
           pr-number: ${{ github.event.pull_request.number }}
-          head-sha: ${{ github.event.pull_request.head.sha }}
           repo: ${{ github.repository }}
           departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
           departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
@@ -1815,7 +1814,6 @@ jobs:
           qualifying-reviewers: ${{ vars.PROTECTED_APPROVAL_REVIEWERS }}
           resolver-token: ${{ steps.resolver-token.outputs.token }}
           pr-number: ${{ github.event.pull_request.number }}
-          head-sha: ${{ github.event.pull_request.head.sha }}
           repo: ${{ github.repository }}
           departed-sha: ${{ github.event.action == 'synchronize' && github.event.before || github.event.action == 'closed' && github.event.pull_request.head.sha || '' }}
           departed-pr-number: ${{ (github.event.action == 'synchronize' || github.event.action == 'closed') && github.event.pull_request.number || 0 }}
