@@ -6,7 +6,7 @@ Agents will have their own identities and development environments, allowing pol
 
 =MVP Workflow=
 
-The user creates a Github issue and assigns it to the claude develoepr agent.
+The user creates a GitHub issue and assigns it to the claude developer agent.
 
 This triggers running a container with the issue passed in as a parameter.
 
@@ -30,7 +30,7 @@ Once the deployment completes, the agent container shuts down.
 
 =Requirements=
 
-The agenst should have separate identities from the user in Github and dependencies, so that they can be distinguished during PRs and the agent can have limited permissions.
+The agents should have separate identities from the user in GitHub and dependencies, so that they can be distinguished during PRs and the agent can have limited permissions.
 
 The development agent should run in a container which is separate from the credentials of the user.
 
@@ -39,8 +39,8 @@ The agents should interact with humans and other agents via comments in issues a
 The MVP project should include:
 -The Dockerfile for the container running the development agents
 -Terraform for 
--- Setting up a Github repo
--- Setting up branch protection rules to rqeuire independent PR approval and remove agent's abilty to change main branch outside of PRs
--- Creating the github identities for the agents
--- Setting up github actions to run the agents in containers when the PR is assigned to an agent identity 
+-- Setting up a GitHub repo
+-- Setting up branch protection rules to require independent PR approval and remove agent's ability to change main branch outside of PRs
+-- Creating the GitHub identities for the agents
+-- Setting up GitHub Actions to run the agents in containers when the PR is assigned to an agent identity 
 -A guide on how to run developer and code reviewer agents locally
