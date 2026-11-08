@@ -1,9 +1,15 @@
 name: release-images
 
 # Builds the developer and reviewer agent images and pushes them to GHCR.
-# Triggered automatically when a v* tag is pushed; also available as a manual
-# dispatch to re-push an existing tag (e.g. to update the moving major tag
-# after a registry incident).
+# Triggered automatically when a full-version tag (e.g. v1.2.3, v1.2.3-rc.1)
+# is pushed; also available as a manual dispatch to re-push an existing tag
+# (e.g. to update the moving major tag after a registry incident).
+#
+# The push trigger deliberately matches only full semantic version tags
+# (v[0-9]+.[0-9]+.[0-9]+*) and not the moving major tag (e.g. v0, v1).
+# Each release pushes two tags — the full version and the major — so the old
+# 'v*' trigger ran this workflow twice per release; the second run raced the
+# first to overwrite the major tag. See issue #801.
 #
 # Published image paths:
 #   ghcr.io/<owner>/<repo>/developer:<full-tag>  (e.g. v1.2.3)
@@ -18,7 +24,7 @@ name: release-images
 on:
   push:
     tags:
-      - 'v*'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
   workflow_dispatch:
     inputs:
       tag:

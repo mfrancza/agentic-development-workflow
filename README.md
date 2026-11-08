@@ -406,7 +406,7 @@ See [`docs/design/configurable-model-pair-preferences.md`](docs/design/configura
 
 ### Published container images
 
-The developer and reviewer images are published to GHCR on every `v*` tag push by [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml). Two tags are published per release:
+The developer and reviewer images are published to GHCR on each full-version tag push (e.g. `v0.2.1`, `v1.2.3-rc.1`) by [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml). Two tags are published per release:
 
 - **Full tag** (e.g. `v0.2.1`) — immutable; adopters should pin this (see [Version pinning](docs/adopting.md#version-pinning)).
 - **Major tag** (e.g. `v0`) — a moving pointer updated on every release within the same major version. Before 1.0, minor releases may contain breaking changes, so following it is not advised.
@@ -438,7 +438,7 @@ gh workflow run release-images.yml \
 
 - Developer agent container with seven actions: `implement`, `groom`, `design`, `fix-checks`, `resolve-conflicts`, `respond-review`, `fix-deployment`.
 - Grooming agent with label criteria in [`agents/grooming/label-criteria.json`](agents/grooming/label-criteria.json).
-- GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/), plus a `CI` workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) that runs `tsc --noEmit` and `vitest run` on every PR, and a `release-images` workflow ([`.github/workflows/release-images.yml`](.github/workflows/release-images.yml)) that publishes both agent images to GHCR on each `v*` tag.
+- GitHub Actions workflows for each action under [`.github/workflows/`](.github/workflows/), plus a `CI` workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) that runs `tsc --noEmit` and `vitest run` on every PR, and a `release-images` workflow ([`.github/workflows/release-images.yml`](.github/workflows/release-images.yml)) that publishes both agent images to GHCR on each full-version tag (e.g. `v1.2.3`).
 - Shared TypeScript package at [`.github/scripts/`](.github/scripts/) for workflow activities (complex logic extracted from inline `run:` blocks); see [AGENTS.md](AGENTS.md#workflow-activity-conventions) for conventions.
 - Terraform for repo settings, `main` branch-protection ruleset, and repo-level `AGENT_ALLOWLIST` / `DEFAULT_MODEL` / `AUTO_TRIGGER_AGENTS` Actions variables.
 - Claude model override via `model:<name>` labels on issues (developer/grooming/fix-deployment runs) and PRs (reviewer agent runs).

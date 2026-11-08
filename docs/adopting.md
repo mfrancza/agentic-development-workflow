@@ -2138,7 +2138,8 @@ mfrancza/agentic-development-workflow/...@v0` fails with "ref not found".
 yet, or the container images have not been published to GHCR for that tag.
 The `release` workflow (triggered manually by the maintainer via
 `workflow_dispatch`) creates the tags; the `release-images` workflow publishes
-the container images automatically when a `v*` tag is pushed.
+the container images automatically when the full-version tag (e.g. `v0.5.0`)
+is pushed.
 
 **Fix:** Check whether a release tag exists:
 
