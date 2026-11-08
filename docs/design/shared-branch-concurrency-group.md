@@ -171,5 +171,3 @@ No `README.md` changes are required — the shared group is an internal workflow
 Issues #809 and #810 can proceed in parallel — the implementation task's test enforces the invariant independently of the documentation, and the documentation task's text is derivable from this design doc without waiting on code. Issue #811 (end-to-end validation) depends on both: the implementation must be merged for the groups to actually serialise, and the documentation must be merged so the validation plan matches the authoritative description.
 
 Dependencies are recorded natively as GitHub blocked-by relationships on the sub-issues.
-
-Dependencies are recorded natively as GitHub blocked-by relationships on the sub-issues.
