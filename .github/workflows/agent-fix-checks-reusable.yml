@@ -176,7 +176,7 @@ jobs:
     # concurrency declaration. This keeps rejected event deliveries out of
     # the per-PR queue entirely.
     concurrency:
-      group: agent-fix-checks-pr-${{ inputs.event-name == '' && inputs.pr-number || needs.resolve-trigger.outputs.pr_number }}
+      group: agent-branch-pr-${{ inputs.event-name == '' && inputs.pr-number || needs.resolve-trigger.outputs.pr_number }}
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
