@@ -249,7 +249,7 @@ jobs:
   respond-review:
     needs: [feedback-gate, authorize]
     concurrency:
-      group: agent-respond-review-pr-${{ inputs.pr-number }}
+      group: agent-branch-pr-${{ inputs.pr-number }}
       cancel-in-progress: false
     runs-on: ubuntu-24.04
     timeout-minutes: 30

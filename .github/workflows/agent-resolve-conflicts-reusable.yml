@@ -155,7 +155,7 @@ jobs:
         pr_number: ${{ fromJSON(needs.find-conflicted-prs.outputs.conflicted_prs) }}
       fail-fast: false
     concurrency:
-      group: agent-resolve-conflicts-pr-${{ matrix.pr_number }}
+      group: agent-branch-pr-${{ matrix.pr_number }}
       cancel-in-progress: false
 
     steps:
