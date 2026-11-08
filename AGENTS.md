@@ -87,7 +87,7 @@ See [`docs/design-philosophy.md`](docs/design-philosophy.md) for the reasoning b
 
 The developer workflows build the container from [`docker/`](docker/) and mint a short-lived installation token from the `developer-agent` GitHub App. The **reviewer image** is built from [`docker/reviewer/`](docker/reviewer/) and uses the `reviewer-agent` App identity (see the reviewer image section below). The `agent-review` workflow triggers it when the `agent:review` label is applied to a PR.
 
-Both images are published to GHCR on every `v*` tag push by [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml):
+Both images are published to GHCR on each full-version tag push (e.g. `v1.2.3`, `v1.2.3-rc.1`) by [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml):
 - `ghcr.io/mfrancza/agentic-development-workflow/developer:<full-tag>` and `:v<major>` (moving major tag)
 - `ghcr.io/mfrancza/agentic-development-workflow/reviewer:<full-tag>` and `:v<major>`
 
@@ -169,7 +169,7 @@ The Terraform-managed `AUTO_TRIGGER_AGENTS` Actions variable (a JSON object) con
 - **Developer agent container** — implemented at [`docker/`](docker/).
 - **Terraform** for repo settings, branch protection, and per-workflow config — implemented at [`terraform/`](terraform/). Agent App identities are configured out of band (see README).
 - **GitHub Actions workflows** for each agent action — implemented at [`.github/workflows/`](.github/workflows/).
-- **GHCR image release workflow** — [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml) publishes the developer and reviewer images on every `v*` tag push.
+- **GHCR image release workflow** — [`.github/workflows/release-images.yml`](.github/workflows/release-images.yml) publishes the developer and reviewer images on each full-version tag push (e.g. `v1.2.3`).
 - **Local development guide** for running the developer and reviewer agents locally — see the [Reproduce this yourself](README.md#reproduce-this-yourself) section of [README.md](README.md).
 
 ## Claude Code Identity
