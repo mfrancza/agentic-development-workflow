@@ -110,21 +110,13 @@ export async function listDeveloperAgentPrs(
 }
 
 /**
- * Hard cap on the number of open PRs fetched by listAllOpenPrs.
- * The GitHub Search API itself limits results to 1,000 items; this constant
- * documents that boundary explicitly and guards the pagination loop.
- */
-export const MAX_ALL_OPEN_PRS = 1000;
-
-/**
  * Lists all open PRs in the repository without an author filter, paginating
- * through Search API pages (100 items per page) until all results have been
- * collected or MAX_ALL_OPEN_PRS is reached.
+ * through REST Pulls API pages (100 items per page) until all results have been
+ * collected. Uses GET /repos/{owner}/{repo}/pulls, which imposes no hard result
+ * cap (unlike the Search API's 1,000-item ceiling), so every open PR is
+ * returned regardless of how many the repository has.
  *
- * Pagination stops when:
- *   - A page returns fewer items than requested (last page), or
- *   - The accumulated count reaches MAX_ALL_OPEN_PRS (the Search API's
- *     own hard limit of 1,000 results, made explicit here).
+ * Pagination stops when a page returns fewer items than requested (last page).
  */
 export async function listAllOpenPrs(
   octokit: OctokitType,
@@ -135,22 +127,24 @@ export async function listAllOpenPrs(
   const numbers: number[] = [];
   let page = 1;
 
-  while (numbers.length < MAX_ALL_OPEN_PRS) {
-    const response = await octokit.rest.search.issuesAndPullRequests({
-      q: `is:pr is:open repo:${owner}/${name}`,
+  while (true) {
+    const response = await octokit.rest.pulls.list({
+      owner,
+      repo: name,
+      state: "open",
       per_page: perPage,
       page,
     });
-    const items = response.data.items;
-    for (const item of items) {
-      numbers.push(item.number);
+    const items = response.data;
+    for (const pr of items) {
+      numbers.push(pr.number);
     }
     // Stop when we've reached the last page (fewer items than requested).
     if (items.length < perPage) break;
     page++;
   }
 
-  return numbers.slice(0, MAX_ALL_OPEN_PRS);
+  return numbers;
 }
 
 /**
@@ -186,9 +180,9 @@ export async function isSameRepoHead(
  * When allAuthors is false (the default), only developer-agent-authored PRs
  * are enumerated using the GitHub search API with an `author:` qualifier.
  *
- * When allAuthors is true, all open PRs in the repository are enumerated
- * (search query drops the `author:` qualifier). Each candidate is then checked
- * via GET /repos/{owner}/{repo}/pulls/{number} to exclude cross-repository
+ * When allAuthors is true, all open PRs in the repository are enumerated via
+ * the REST Pulls API (no result cap). Each candidate is then checked via
+ * GET /repos/{owner}/{repo}/pulls/{number} to exclude cross-repository
  * (fork-headed) PRs before the mergeability poll runs.
  */
 export async function findConflictedPrs(

@@ -7,7 +7,6 @@ import {
   isSameRepoHead,
   findConflictedPrs,
   DEFAULT_DELAYS,
-  MAX_ALL_OPEN_PRS,
 } from "../src/find-conflicted-prs.js";
 import { getOctokit } from "../src/lib/octokit.js";
 
@@ -26,6 +25,19 @@ function makeSearchOctokit(search: ReturnType<typeof vi.fn>): OctokitType {
   } as unknown as OctokitType;
 }
 
+/** Build a mock Octokit with only a REST pulls.list method. */
+function makePullsListOctokit(
+  pullsList: ReturnType<typeof vi.fn>
+): OctokitType {
+  return {
+    graphql: vi.fn(),
+    rest: {
+      search: { issuesAndPullRequests: vi.fn() },
+      pulls: { list: pullsList, get: vi.fn() },
+    },
+  } as unknown as OctokitType;
+}
+
 /** Build a mock Octokit with only a REST pulls.get method. */
 function makePullsGetOctokit(
   pullsGet: ReturnType<typeof vi.fn>
@@ -34,12 +46,12 @@ function makePullsGetOctokit(
     graphql: vi.fn(),
     rest: {
       search: { issuesAndPullRequests: vi.fn() },
-      pulls: { get: pullsGet },
+      pulls: { list: vi.fn(), get: pullsGet },
     },
   } as unknown as OctokitType;
 }
 
-/** Build a mock Octokit with both graphql and search. */
+/** Build a mock Octokit with both graphql and search (default-mode tests). */
 function makeFullOctokit(
   graphql: ReturnType<typeof vi.fn>,
   search: ReturnType<typeof vi.fn>
@@ -48,22 +60,22 @@ function makeFullOctokit(
     graphql,
     rest: {
       search: { issuesAndPullRequests: search },
-      pulls: { get: vi.fn() },
+      pulls: { list: vi.fn(), get: vi.fn() },
     },
   } as unknown as OctokitType;
 }
 
-/** Build a mock Octokit with graphql, search, and pulls.get. */
+/** Build a mock Octokit with graphql, pulls.list, and pulls.get (all-authors-mode tests). */
 function makeFullOctokitWithPulls(
   graphql: ReturnType<typeof vi.fn>,
-  search: ReturnType<typeof vi.fn>,
+  pullsList: ReturnType<typeof vi.fn>,
   pullsGet: ReturnType<typeof vi.fn>
 ): OctokitType {
   return {
     graphql,
     rest: {
-      search: { issuesAndPullRequests: search },
-      pulls: { get: pullsGet },
+      search: { issuesAndPullRequests: vi.fn() },
+      pulls: { list: pullsList, get: pullsGet },
     },
   } as unknown as OctokitType;
 }
@@ -318,15 +330,15 @@ describe("listDeveloperAgentPrs", () => {
 // ---------------------------------------------------------------------------
 
 describe("listAllOpenPrs", () => {
-  it("returns PR numbers extracted from search results without author filter", async () => {
-    const search = vi
+  it("returns PR numbers extracted from REST pulls results", async () => {
+    const pullsList = vi
       .fn()
       .mockResolvedValueOnce({
-        data: { items: [{ number: 1 }, { number: 2 }, { number: 3 }] },
+        data: [{ number: 1 }, { number: 2 }, { number: 3 }],
       });
 
     const result = await listAllOpenPrs(
-      makeSearchOctokit(search),
+      makePullsListOctokit(pullsList),
       "owner",
       "repo"
     );
@@ -334,23 +346,25 @@ describe("listAllOpenPrs", () => {
     expect(result).toEqual([1, 2, 3]);
   });
 
-  it("passes a search query without an author qualifier, starting at page 1", async () => {
-    const search = vi.fn().mockResolvedValueOnce({ data: { items: [] } });
+  it("calls the REST Pulls API with owner/repo/state=open, starting at page 1", async () => {
+    const pullsList = vi.fn().mockResolvedValueOnce({ data: [] });
 
-    await listAllOpenPrs(makeSearchOctokit(search), "myorg", "myrepo");
+    await listAllOpenPrs(makePullsListOctokit(pullsList), "myorg", "myrepo");
 
-    expect(search).toHaveBeenCalledWith({
-      q: "is:pr is:open repo:myorg/myrepo",
+    expect(pullsList).toHaveBeenCalledWith({
+      owner: "myorg",
+      repo: "myrepo",
+      state: "open",
       per_page: 100,
       page: 1,
     });
   });
 
   it("returns an empty array when no open PRs exist", async () => {
-    const search = vi.fn().mockResolvedValueOnce({ data: { items: [] } });
+    const pullsList = vi.fn().mockResolvedValueOnce({ data: [] });
 
     const result = await listAllOpenPrs(
-      makeSearchOctokit(search),
+      makePullsListOctokit(pullsList),
       "owner",
       "repo"
     );
@@ -362,13 +376,13 @@ describe("listAllOpenPrs", () => {
     const page1Items = Array.from({ length: 100 }, (_, i) => ({ number: i + 1 }));
     const page2Items = [{ number: 101 }, { number: 102 }];
 
-    const search = vi
+    const pullsList = vi
       .fn()
-      .mockResolvedValueOnce({ data: { items: page1Items } })
-      .mockResolvedValueOnce({ data: { items: page2Items } });
+      .mockResolvedValueOnce({ data: page1Items })
+      .mockResolvedValueOnce({ data: page2Items });
 
     const result = await listAllOpenPrs(
-      makeSearchOctokit(search),
+      makePullsListOctokit(pullsList),
       "owner",
       "repo"
     );
@@ -378,38 +392,50 @@ describe("listAllOpenPrs", () => {
     expect(result[99]).toBe(100);
     expect(result[100]).toBe(101);
     expect(result[101]).toBe(102);
-    expect(search).toHaveBeenCalledTimes(2);
-    expect(search).toHaveBeenNthCalledWith(1, {
-      q: "is:pr is:open repo:owner/repo",
+    expect(pullsList).toHaveBeenCalledTimes(2);
+    expect(pullsList).toHaveBeenNthCalledWith(1, {
+      owner: "owner",
+      repo: "repo",
+      state: "open",
       per_page: 100,
       page: 1,
     });
-    expect(search).toHaveBeenNthCalledWith(2, {
-      q: "is:pr is:open repo:owner/repo",
+    expect(pullsList).toHaveBeenNthCalledWith(2, {
+      owner: "owner",
+      repo: "repo",
+      state: "open",
       per_page: 100,
       page: 2,
     });
   });
 
-  it(`stops paginating at the MAX_ALL_OPEN_PRS (${MAX_ALL_OPEN_PRS}) cap`, async () => {
-    // Simulate exactly MAX_ALL_OPEN_PRS items spread across pages of 100.
-    const totalPages = MAX_ALL_OPEN_PRS / 100; // 10 pages for the default cap of 1000
-    const search = vi.fn();
-    for (let p = 0; p < totalPages; p++) {
+  it("paginates beyond 1,000 results (no hard cap unlike the Search API)", async () => {
+    // Simulate 1,050 open PRs: 10 full pages of 100 + a partial page of 50.
+    // This proves there is no 1,000-item ceiling equivalent to the old Search API cap.
+    const fullPages = 10;
+    const lastPageSize = 50;
+    const pullsList = vi.fn();
+    for (let p = 0; p < fullPages; p++) {
       const start = p * 100 + 1;
       const items = Array.from({ length: 100 }, (_, i) => ({ number: start + i }));
-      search.mockResolvedValueOnce({ data: { items } });
+      pullsList.mockResolvedValueOnce({ data: items });
     }
+    // Page 11: partial page — signals the last page and terminates pagination.
+    const lastStart = fullPages * 100 + 1;
+    const lastItems = Array.from({ length: lastPageSize }, (_, i) => ({ number: lastStart + i }));
+    pullsList.mockResolvedValueOnce({ data: lastItems });
 
     const result = await listAllOpenPrs(
-      makeSearchOctokit(search),
+      makePullsListOctokit(pullsList),
       "owner",
       "repo"
     );
 
-    expect(result).toHaveLength(MAX_ALL_OPEN_PRS);
-    // Should have fetched exactly totalPages pages and then stopped.
-    expect(search).toHaveBeenCalledTimes(totalPages);
+    expect(result).toHaveLength(1050);
+    expect(pullsList).toHaveBeenCalledTimes(fullPages + 1);
+    // Confirm PR numbers beyond the old 1,000-item Search API cap are present.
+    expect(result[1000]).toBe(1001);
+    expect(result[1049]).toBe(1050);
   });
 });
 
@@ -580,9 +606,9 @@ describe("findConflictedPrs", () => {
 // ---------------------------------------------------------------------------
 
 describe("findConflictedPrs (allAuthors = true)", () => {
-  it("enumerates all open PRs without an author qualifier", async () => {
-    const search = vi.fn().mockResolvedValueOnce({
-      data: { items: [{ number: 1 }] },
+  it("enumerates all open PRs via the REST Pulls API (no author filter)", async () => {
+    const pullsList = vi.fn().mockResolvedValueOnce({
+      data: [{ number: 1 }],
     });
     const pullsGet = vi.fn().mockResolvedValueOnce({
       data: {
@@ -595,7 +621,7 @@ describe("findConflictedPrs (allAuthors = true)", () => {
       .mockResolvedValue({ repository: { pullRequest: { mergeable: "CONFLICTING" } } });
 
     await findConflictedPrs(
-      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      makeFullOctokitWithPulls(graphql, pullsList, pullsGet),
       "owner",
       "repo",
       "app/mfrancza-developer-agent",
@@ -604,17 +630,19 @@ describe("findConflictedPrs (allAuthors = true)", () => {
       true
     );
 
-    // The search query must not include an author qualifier, and must start at page 1.
-    expect(search).toHaveBeenCalledWith({
-      q: "is:pr is:open repo:owner/repo",
+    // Must call REST Pulls API (not Search API) with state=open, starting at page 1.
+    expect(pullsList).toHaveBeenCalledWith({
+      owner: "owner",
+      repo: "repo",
+      state: "open",
       per_page: 100,
       page: 1,
     });
   });
 
   it("returns CONFLICTING same-repo PRs and skips fork-headed PRs", async () => {
-    const search = vi.fn().mockResolvedValueOnce({
-      data: { items: [{ number: 10 }, { number: 20 }, { number: 30 }] },
+    const pullsList = vi.fn().mockResolvedValueOnce({
+      data: [{ number: 10 }, { number: 20 }, { number: 30 }],
     });
     // PR 10: same-repo, PR 20: fork, PR 30: same-repo
     const pullsGet = vi
@@ -642,7 +670,7 @@ describe("findConflictedPrs (allAuthors = true)", () => {
       .mockResolvedValue({ repository: { pullRequest: { mergeable: "CONFLICTING" } } });
 
     const result = await findConflictedPrs(
-      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      makeFullOctokitWithPulls(graphql, pullsList, pullsGet),
       "owner",
       "repo",
       "app/mfrancza-developer-agent",
@@ -658,8 +686,8 @@ describe("findConflictedPrs (allAuthors = true)", () => {
   });
 
   it("excludes PRs whose head.repo is null (deleted fork)", async () => {
-    const search = vi.fn().mockResolvedValueOnce({
-      data: { items: [{ number: 5 }, { number: 6 }] },
+    const pullsList = vi.fn().mockResolvedValueOnce({
+      data: [{ number: 5 }, { number: 6 }],
     });
     // PR 5: deleted fork (head.repo === null); PR 6: same-repo
     const pullsGet = vi
@@ -681,7 +709,7 @@ describe("findConflictedPrs (allAuthors = true)", () => {
       .mockResolvedValue({ repository: { pullRequest: { mergeable: "CONFLICTING" } } });
 
     const result = await findConflictedPrs(
-      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      makeFullOctokitWithPulls(graphql, pullsList, pullsGet),
       "owner",
       "repo",
       "app/mfrancza-developer-agent",
@@ -695,8 +723,8 @@ describe("findConflictedPrs (allAuthors = true)", () => {
   });
 
   it("returns an empty array when all open PRs are fork-headed", async () => {
-    const search = vi.fn().mockResolvedValueOnce({
-      data: { items: [{ number: 1 }, { number: 2 }] },
+    const pullsList = vi.fn().mockResolvedValueOnce({
+      data: [{ number: 1 }, { number: 2 }],
     });
     const pullsGet = vi
       .fn()
@@ -709,7 +737,7 @@ describe("findConflictedPrs (allAuthors = true)", () => {
     const graphql = vi.fn();
 
     const result = await findConflictedPrs(
-      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      makeFullOctokitWithPulls(graphql, pullsList, pullsGet),
       "owner",
       "repo",
       "app/mfrancza-developer-agent",
@@ -724,12 +752,12 @@ describe("findConflictedPrs (allAuthors = true)", () => {
   });
 
   it("returns an empty array when there are no open PRs", async () => {
-    const search = vi.fn().mockResolvedValueOnce({ data: { items: [] } });
+    const pullsList = vi.fn().mockResolvedValueOnce({ data: [] });
     const pullsGet = vi.fn();
     const graphql = vi.fn();
 
     const result = await findConflictedPrs(
-      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      makeFullOctokitWithPulls(graphql, pullsList, pullsGet),
       "owner",
       "repo",
       "app/mfrancza-developer-agent",
@@ -745,8 +773,8 @@ describe("findConflictedPrs (allAuthors = true)", () => {
   });
 
   it("returns an empty array when all same-repo PRs are MERGEABLE", async () => {
-    const search = vi.fn().mockResolvedValueOnce({
-      data: { items: [{ number: 11 }, { number: 22 }] },
+    const pullsList = vi.fn().mockResolvedValueOnce({
+      data: [{ number: 11 }, { number: 22 }],
     });
     const pullsGet = vi
       .fn()
@@ -761,7 +789,7 @@ describe("findConflictedPrs (allAuthors = true)", () => {
       .mockResolvedValue({ repository: { pullRequest: { mergeable: "MERGEABLE" } } });
 
     const result = await findConflictedPrs(
-      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      makeFullOctokitWithPulls(graphql, pullsList, pullsGet),
       "owner",
       "repo",
       "app/mfrancza-developer-agent",
