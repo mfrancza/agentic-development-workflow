@@ -96,6 +96,16 @@ See [`docs/design-philosophy.md`](docs/design-philosophy.md) for the reasoning b
   - `resolve-conflicts`: the next push to `main` (or a manual `workflow_dispatch` with `pr_number`) re-enumerates open agent PRs and picks up the still-conflicted PR.
 - The enforcing static test is `.github/scripts/test/branch-concurrency-group.test.ts`, which asserts that all three reusables contain exactly one line matching the `agent-branch-pr-` prefix and that none contains any of the retired per-action prefixes.
 
+### Pre-commit checks backstop
+
+For actions that touch `.github/` (`implement`, `fix-checks`, `respond-review`, `fix-deployment`), the entrypoint calls `pre_commit_checks_run` from [`docker/scripts/lib/pre-commit-checks.sh`](docker/scripts/lib/pre-commit-checks.sh) after the agent exits and before `git push`. When the diff `HEAD_BEFORE_CLAUDE..HEAD` touches `.github/`, the helper runs the configured check command in the configured directory and posts a PR comment on failure. The push always proceeds regardless of the outcome (fail-open; CI is the enforcement layer).
+
+Deployment configuration (see [`docker/scripts/lib/pre-commit-checks.sh`](docker/scripts/lib/pre-commit-checks.sh) for the full contract):
+- `PRE_COMMIT_SCRIPTS_DIR` *(default: `.github/scripts`)* — path relative to `WORK_DIR` of the directory where the check command runs. Set to an empty string to disable checks entirely.
+- `PRE_COMMIT_CHECK_CMD` *(no default; unset or empty = checks skipped)* — shell command run inside that directory, responsible for both setup (e.g. dependency installation) and the actual checks. Configure this per deployment so the Docker image does not assume any particular repo stack.
+
+The developer-agent prompts in [`docker/scripts/prompts/`](docker/scripts/prompts/) carry the corresponding agent-side instruction to self-check before committing when the diff touches `.github/`. See [`docs/design/developer-agent-pre-commit-checks.md`](docs/design/developer-agent-pre-commit-checks.md) for the full design rationale.
+
 7. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
 
 The developer workflows build the container from [`docker/`](docker/) and mint a short-lived installation token from the `developer-agent` GitHub App. The **reviewer image** is built from [`docker/reviewer/`](docker/reviewer/) and uses the `reviewer-agent` App identity (see the reviewer image section below). The `agent-review` workflow triggers it when the `agent:review` label is applied to a PR.
