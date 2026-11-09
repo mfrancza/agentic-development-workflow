@@ -1,5 +1,5 @@
 /**
- * Static contract test for the all-authors input added to
+ * Static contract test for the author-allowlist input added to
  * agent-resolve-conflicts-reusable.yml and agent-resolve-conflicts.yml
  * (issue #804).
  *
@@ -25,49 +25,49 @@ const callerPath = new URL(
 const caller = readFileSync(callerPath, "utf8");
 
 describe(
-  "agent-resolve-conflicts-reusable.yml — all-authors input contract",
+  "agent-resolve-conflicts-reusable.yml — author-allowlist input contract",
   () => {
-    it("declares the all-authors input so external callers can opt into the all-authors sweep", () => {
+    it("declares the author-allowlist input so external callers can opt into the allowlist sweep", () => {
       // The input must be present in the workflow_call inputs block so that
-      // callers can pass through the RESOLVE_CONFLICTS_ALL_AUTHORS variable.
-      expect(reusable).toContain("all-authors:");
+      // callers can pass through the RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST variable.
+      expect(reusable).toContain("author-allowlist:");
     });
 
-    it("defaults all-authors to 'false' for backward compatibility", () => {
-      // The default must be 'false' so that callers that omit the input
+    it("defaults author-allowlist to '[]' for backward compatibility", () => {
+      // The default must be '[]' so that callers that omit the input
       // continue to enumerate only developer-agent PRs without any behavioral
       // change. The single-quoted form matches YAML scalar conventions in this
       // repo's workflow files.
-      expect(reusable).toContain("default: 'false'");
+      expect(reusable).toContain("default: '[]'");
     });
 
-    it("declares all-authors exactly once (a duplicate YAML key makes GitHub reject the workflow)", () => {
+    it("declares author-allowlist exactly once (a duplicate YAML key makes GitHub reject the workflow)", () => {
       // Two PRs adding the same input in different positions can merge without
       // a textual conflict but produce a duplicate mapping key. GitHub then
       // refuses to load the workflow (zero-job failure on every push).
-      const declarations = reusable.match(/^ {6}all-authors:\s*$/gm) ?? [];
+      const declarations = reusable.match(/^ {6}author-allowlist:\s*$/gm) ?? [];
       expect(declarations).toHaveLength(1);
     });
 
-    it("passes all-authors to the find-conflicted-prs action as the all-authors input", () => {
+    it("passes author-allowlist to the find-conflicted-prs action as the author-allowlist input", () => {
       // The value supplied (or defaulted) by the caller must reach the action
       // so that it actually controls which PRs are enumerated.
       expect(reusable).toContain(
-        "all-authors: ${{ inputs.all-authors }}",
+        "author-allowlist: ${{ inputs.author-allowlist }}",
       );
     });
   },
 );
 
 describe(
-  "agent-resolve-conflicts.yml — all-authors pass-through contract",
+  "agent-resolve-conflicts.yml — author-allowlist pass-through contract",
   () => {
-    it("passes all-authors to the reusable workflow from RESOLVE_CONFLICTS_ALL_AUTHORS", () => {
-      // The caller stub must wire vars.RESOLVE_CONFLICTS_ALL_AUTHORS through
-      // to the reusable workflow's all-authors input so that the Terraform
+    it("passes author-allowlist to the reusable workflow from RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST", () => {
+      // The caller stub must wire vars.RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST through
+      // to the reusable workflow's author-allowlist input so that the Terraform
       // variable controls the runtime behavior.
       expect(caller).toContain(
-        "all-authors: ${{ vars.RESOLVE_CONFLICTS_ALL_AUTHORS }}",
+        "author-allowlist: ${{ vars.RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST }}",
       );
     });
   },

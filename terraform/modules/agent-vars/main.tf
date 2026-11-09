@@ -171,15 +171,14 @@ resource "github_actions_variable" "review_model_pairing" {
   value         = jsonencode(var.review_model_pairing)
 }
 
-# Expose the resolve-conflicts all-authors flag as a repository Actions variable
-# so agent-resolve-conflicts.yml can pass it to the reusable workflow and on to
-# the find-conflicted-prs action. When 'true', the finder drops the
-# author:<developer-author> qualifier from the GitHub search query and sweeps
-# every open PR, excluding fork-headed PRs. When 'false' (the default), only
-# developer-agent-authored PRs are enumerated — the existing behavior is fully
-# preserved.
-resource "github_actions_variable" "resolve_conflicts_all_authors" {
+# Expose the resolve-conflicts author allowlist as a JSON-encoded repository
+# Actions variable so agent-resolve-conflicts.yml can pass it to the reusable
+# workflow and on to the find-conflicted-prs action. An empty JSON array (the
+# default "[]") preserves the existing agent-only behavior. ["*"] sweeps every
+# author; an explicit list sweeps developer-agent plus those logins. Fork-headed
+# PRs are always excluded from the sweep.
+resource "github_actions_variable" "resolve_conflicts_author_allowlist" {
   repository    = var.repository
-  variable_name = "RESOLVE_CONFLICTS_ALL_AUTHORS"
-  value         = tostring(var.resolve_conflicts_all_authors)
+  variable_name = "RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST"
+  value         = jsonencode(var.resolve_conflicts_author_allowlist)
 }

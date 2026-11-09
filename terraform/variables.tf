@@ -175,8 +175,23 @@ variable "review_model_pairing" {
   }
 }
 
-variable "resolve_conflicts_all_authors" {
-  description = "When true, the push-triggered resolve-conflicts enumeration sweeps every open PR in the repository rather than only developer-agent-authored PRs. Cross-repository (fork-headed) PRs are always excluded from the sweep because the developer-agent App cannot push to fork branches. Stored as the RESOLVE_CONFLICTS_ALL_AUTHORS Actions variable (values: 'true' / 'false'). Defaults to false to preserve the existing agent-only behavior."
-  type        = bool
-  default     = false
+variable "resolve_conflicts_author_allowlist" {
+  description = "JSON array of GitHub logins whose open PRs are swept for merge conflicts during the resolve-conflicts workflow. Empty list (the default) preserves the existing agent-only behavior. Use [\"*\"] to sweep every author; use [\"alice\", \"bob\"] to sweep developer-agent plus those logins. Cross-repository (fork-headed) PRs are always excluded. Stored as the JSON-encoded RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST Actions variable."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition = (
+      length(var.resolve_conflicts_author_allowlist) == 0 ||
+      (
+        alltrue([for entry in var.resolve_conflicts_author_allowlist : trimspace(entry) != ""]) &&
+        (
+          (length(var.resolve_conflicts_author_allowlist) == 1 && var.resolve_conflicts_author_allowlist[0] == "*") ||
+          (!contains(var.resolve_conflicts_author_allowlist, "*"))
+        ) &&
+        length(distinct([for entry in var.resolve_conflicts_author_allowlist : lower(entry)])) == length(var.resolve_conflicts_author_allowlist)
+      )
+    )
+    error_message = "resolve_conflicts_author_allowlist entries must be non-empty strings; wildcard \"*\" may only appear as the sole entry; entries must be unique (case-insensitive)."
+  }
 }

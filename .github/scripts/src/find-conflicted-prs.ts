@@ -14,10 +14,67 @@ export type MergeableState = "CONFLICTING" | "MERGEABLE" | "UNKNOWN";
  */
 export const DEFAULT_DELAYS: readonly number[] = [5, 10, 20, 40, 80];
 
+/** Maximum number of REST Pulls API pages to scan during enumeration. */
+export const MAX_SCAN_PAGES = 50;
+
+/** Maximum number of in-scope PR candidates to collect during enumeration. */
+export const MAX_CANDIDATES = 100;
+
 /** Production sleep: real timer. Injected so tests can replace it. */
 export function defaultSleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/**
+ * Interface for a rate-limit guard. Implementations reserve `count` slots
+ * in a sliding-window budget before the caller issues API requests.
+ */
+export interface RateLimitGuard {
+  acquire(count: number, sleep: (ms: number) => Promise<void>): Promise<void>;
+}
+
+/**
+ * Real rate limiter implementing a 30-request-per-minute sliding window.
+ * Callers acquire slots before each batch of API requests; if the window is
+ * full, acquire() sleeps until enough capacity opens up.
+ */
+export class RateLimiter implements RateLimitGuard {
+  private timestamps: number[] = [];
+  private readonly maxPerMin: number;
+  private readonly windowMs: number;
+
+  constructor(maxPerMin = 30, windowMs = 60_000) {
+    this.maxPerMin = maxPerMin;
+    this.windowMs = windowMs;
+  }
+
+  async acquire(count: number, sleep: (ms: number) => Promise<void>): Promise<void> {
+    while (true) {
+      const now = Date.now();
+      const cutoff = now - this.windowMs;
+      let i = 0;
+      while (i < this.timestamps.length && this.timestamps[i]! <= cutoff) i++;
+      if (i > 0) this.timestamps.splice(0, i);
+
+      if (this.timestamps.length + count <= this.maxPerMin) {
+        const ts = Date.now();
+        for (let j = 0; j < count; j++) this.timestamps.push(ts);
+        return;
+      }
+
+      const oldest = this.timestamps[0]!;
+      const waitMs = oldest + this.windowMs - Date.now() + 1;
+      await sleep(Math.max(waitMs, 100));
+    }
+  }
+}
+
+/**
+ * No-op rate limiter for tests: never blocks, never sleeps.
+ */
+export const noopRateLimiter: RateLimitGuard = {
+  acquire: async () => {},
+};
 
 /**
  * Validates the optional pr_number input from workflow_dispatch.
@@ -36,6 +93,77 @@ export function validatePrNumberInput(input: string): number | null {
     );
   }
   return parseInt(trimmed, 10);
+}
+
+/**
+ * Validates the RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST env var value.
+ * Throws with descriptive message on any violation (which becomes ::error::
+ * via core.setFailed in run()).
+ *
+ * Rules:
+ *   1. Must be valid JSON
+ *   2. Must be an array
+ *   3. All entries must be non-empty strings
+ *   4. Wildcard "*" may only appear as the sole entry
+ *   5. No duplicate entries (case-insensitive)
+ *
+ * @returns The parsed string array.
+ * @throws  A descriptive Error on any rule violation.
+ */
+export function validateAuthorAllowlist(input: string): string[] {
+  // Rule 1: valid JSON
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    throw new Error(
+      `RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST is not valid JSON: ${input}`
+    );
+  }
+
+  // Rule 2: array type
+  if (!Array.isArray(parsed)) {
+    throw new Error(
+      `RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST must be a JSON array`
+    );
+  }
+
+  // Rule 3: non-empty string entries
+  for (let i = 0; i < parsed.length; i++) {
+    if (typeof parsed[i] !== "string" || parsed[i] === "") {
+      throw new Error(
+        `RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST contains a non-string or empty-string entry at index ${i}`
+      );
+    }
+  }
+
+  const arr = parsed as string[];
+
+  // Rule 4: wildcard as sole entry
+  if (arr.includes("*") && arr.length > 1) {
+    throw new Error(
+      `RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST: wildcard "*" may only appear as the sole entry; remove other logins or use ["*"] alone to sweep all authors`
+    );
+  }
+
+  // Rule 5: no duplicates (case-insensitive)
+  const seen = new Set<string>();
+  const dupes: string[] = [];
+  for (const s of arr) {
+    const lower = s.toLowerCase();
+    if (seen.has(lower)) {
+      if (!dupes.includes(lower)) dupes.push(lower);
+    } else {
+      seen.add(lower);
+    }
+  }
+  if (dupes.length > 0) {
+    throw new Error(
+      `RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST contains duplicate entries: ${dupes.join(", ")}`
+    );
+  }
+
+  return arr;
 }
 
 /**
@@ -174,16 +302,189 @@ export async function isSameRepoHead(
 }
 
 /**
+ * Enumerates in-scope open PRs using REST Pulls API with integrated filters.
+ * Fork filter and author filter are applied from the page response (no extra
+ * API call per PR). Bounded by MAX_SCAN_PAGES and MAX_CANDIDATES with
+ * ::warning:: annotations when either limit is reached.
+ *
+ * @param author           The `app/<slug>` author string; normalized to `<slug>[bot]`
+ *                         for REST API login comparison.
+ * @param authorAllowlist  Non-empty allowlist: ["*"] sweeps all authors; an
+ *                         explicit list sweeps developer-agent + those logins.
+ */
+export async function enumerateInScopePrs(
+  octokit: OctokitType,
+  owner: string,
+  name: string,
+  author: string,
+  authorAllowlist: string[],
+  sleep: (ms: number) => Promise<void>,
+  rateLimiter: RateLimitGuard
+): Promise<number[]> {
+  const perPage = 100;
+
+  // Bot-login normalization: strip "app/" prefix, append "[bot]"
+  const developerBotLogin = author.replace(/^app\//, "") + "[bot]";
+
+  const isWildcard = authorAllowlist.length === 1 && authorAllowlist[0] === "*";
+  const allowedLogins = isWildcard
+    ? null
+    : new Set([developerBotLogin, ...authorAllowlist].map((s) => s.toLowerCase()));
+
+  const candidates: number[] = [];
+  let scanBudgetExhausted = false;
+
+  for (let page = 1; page <= MAX_SCAN_PAGES; page++) {
+    await rateLimiter.acquire(1, sleep);
+
+    const response = await octokit.rest.pulls.list({
+      owner,
+      repo: name,
+      state: "open",
+      per_page: perPage,
+      page,
+    });
+    const items = response.data;
+
+    for (const pr of items) {
+      // Fork filter: null head.repo = deleted fork, also exclude cross-repo PRs
+      if (!pr.head.repo || pr.head.repo.full_name !== pr.base.repo.full_name) {
+        continue;
+      }
+
+      // Author filter (for explicit list)
+      if (allowedLogins !== null) {
+        const prLogin = (pr.user?.login ?? "").toLowerCase();
+        if (!allowedLogins.has(prLogin)) {
+          continue;
+        }
+      }
+
+      candidates.push(pr.number);
+
+      if (candidates.length >= MAX_CANDIDATES) {
+        core.warning(
+          `conflict sweep capped at 100 candidates; additional in-scope PRs may not have been evaluated — reduce open PR count or use an explicit author allowlist to limit scope`
+        );
+        return candidates;
+      }
+    }
+
+    if (items.length < perPage) break;
+
+    if (page === MAX_SCAN_PAGES) {
+      scanBudgetExhausted = true;
+      break;
+    }
+  }
+
+  if (scanBudgetExhausted) {
+    core.warning(
+      `conflict sweep scan budget exhausted after 50 pages; only ${candidates.length} in-scope candidates found; additional in-scope PRs may not have been evaluated — reduce open PR count or use an explicit author allowlist to limit scope`
+    );
+  }
+
+  return candidates;
+}
+
+/**
+ * Polls candidates with P=5 bounded concurrency.
+ * Reserves rate-limit slots atomically before each wave.
+ * Returns PR numbers whose mergeability settled as CONFLICTING.
+ */
+export async function pollCandidatesWithBoundedConcurrency(
+  octokit: OctokitType,
+  owner: string,
+  name: string,
+  candidates: number[],
+  delays: readonly number[],
+  sleep: (ms: number) => Promise<void>,
+  rateLimiter: RateLimitGuard
+): Promise<number[]> {
+  const P = 5;
+  const conflicted: number[] = [];
+
+  for (let i = 0; i < candidates.length; i += P) {
+    const batch = candidates.slice(i, i + P);
+    const states = new Map<number, MergeableState>(
+      batch.map((n) => [n, "UNKNOWN" as MergeableState])
+    );
+
+    for (let attempt = 0; attempt < delays.length; attempt++) {
+      const unknownPrs = batch.filter((n) => states.get(n) === "UNKNOWN");
+      if (unknownPrs.length === 0) break;
+
+      // Atomically reserve slots for this wave
+      await rateLimiter.acquire(unknownPrs.length, sleep);
+
+      // Fire queries in parallel
+      const waveResults = await Promise.all(
+        unknownPrs.map(async (prNum) => {
+          try {
+            const result = await octokit.graphql<{
+              repository: { pullRequest: { mergeable: MergeableState } };
+            }>(
+              `query($owner: String!, $name: String!, $number: Int!) {
+                repository(owner: $owner, name: $name) {
+                  pullRequest(number: $number) {
+                    mergeable
+                  }
+                }
+              }`,
+              { owner, name, number: prNum }
+            );
+            return { prNum, state: result.repository.pullRequest.mergeable };
+          } catch {
+            return { prNum, state: "UNKNOWN" as MergeableState };
+          }
+        })
+      );
+
+      for (const { prNum, state } of waveResults) {
+        states.set(prNum, state);
+      }
+
+      const allResolved = batch.every((n) => states.get(n) !== "UNKNOWN");
+      if (allResolved) break;
+
+      if (attempt < delays.length - 1) {
+        const stillUnknown = batch.filter((n) => states.get(n) === "UNKNOWN");
+        console.log(
+          `Batch [${batch.join(", ")}]: ${stillUnknown.length} PR(s) still UNKNOWN (attempt ${attempt + 1}/${delays.length}); waiting ${delays[attempt]}s...`
+        );
+        await sleep(delays[attempt]! * 1000);
+      }
+    }
+
+    for (const prNum of batch) {
+      const state = states.get(prNum)!;
+      if (state === "CONFLICTING") {
+        console.log(`PR #${prNum} is CONFLICTING — queued for resolution`);
+        conflicted.push(prNum);
+      } else {
+        console.log(`PR #${prNum} mergeability: ${state} — skipping`);
+      }
+    }
+  }
+
+  return conflicted;
+}
+
+/**
  * Enumerates open PRs and returns those that are CONFLICTING after the
  * mergeability poll settles.
  *
- * When allAuthors is false (the default), only developer-agent-authored PRs
- * are enumerated using the GitHub search API with an `author:` qualifier.
+ * When authorAllowlist is empty (the default), only developer-agent-authored
+ * PRs are enumerated using the GitHub search API with an `author:` qualifier
+ * (existing behavior — unchanged).
  *
- * When allAuthors is true, all open PRs in the repository are enumerated via
- * the REST Pulls API (no result cap). Each candidate is then checked via
- * GET /repos/{owner}/{repo}/pulls/{number} to exclude cross-repository
- * (fork-headed) PRs before the mergeability poll runs.
+ * When authorAllowlist is non-empty:
+ *   - ["*"] sweeps all authors (every open same-repo PR)
+ *   - ["alice", "bob"] sweeps developer-agent + those explicit logins
+ * Enumeration uses the REST Pulls API with integrated fork filter and author
+ * filter (no extra API call per PR). Bounded by MAX_SCAN_PAGES and
+ * MAX_CANDIDATES. Polling uses P=5 bounded concurrency with the shared
+ * rateLimiter.
  */
 export async function findConflictedPrs(
   octokit: OctokitType,
@@ -192,78 +493,74 @@ export async function findConflictedPrs(
   author: string,
   delays: readonly number[],
   sleep: (ms: number) => Promise<void>,
-  allAuthors = false
+  authorAllowlist: string[] = [],
+  rateLimiter: RateLimitGuard = new RateLimiter()
 ): Promise<number[]> {
-  let prNumbers: number[];
-
-  if (allAuthors) {
-    const allPrs = await listAllOpenPrs(octokit, owner, name);
-
-    if (allPrs.length === 0) {
-      console.log("No open PRs found.");
-      return [];
-    }
-
-    console.log(
-      `Open PRs (all authors): ${allPrs.join(" ")} — filtering to same-repo heads`
-    );
-
-    // Exclude fork-headed PRs: the developer-agent App can only push to
-    // branches on the base repository, so including fork PRs would guarantee
-    // a runtime failure after a wasted token mint and container boot.
-    const sameRepoPrs: number[] = [];
-    for (const prNum of allPrs) {
-      const sameRepo = await isSameRepoHead(octokit, owner, name, prNum);
-      if (sameRepo) {
-        sameRepoPrs.push(prNum);
-      } else {
-        console.log(`PR #${prNum} is fork-headed — skipping`);
-      }
-    }
-    prNumbers = sameRepoPrs;
-  } else {
-    prNumbers = await listDeveloperAgentPrs(octokit, owner, name, author);
-  }
-
-  if (prNumbers.length === 0) {
-    console.log(
-      allAuthors
-        ? "No same-repo open PRs found."
-        : "No open developer-agent PRs found."
-    );
-    return [];
-  }
-
-  console.log(`Open PRs: ${prNumbers.join(" ")}`);
-
-  const conflicted: number[] = [];
-  for (const prNum of prNumbers) {
-    const mergeable = await pollMergeability(
+  if (authorAllowlist.length > 0) {
+    const inScopePrs = await enumerateInScopePrs(
       octokit,
       owner,
       name,
-      prNum,
-      delays,
-      sleep
+      author,
+      authorAllowlist,
+      sleep,
+      rateLimiter
     );
-    if (mergeable === "CONFLICTING") {
-      console.log(`PR #${prNum} is CONFLICTING — queued for resolution`);
-      conflicted.push(prNum);
-    } else {
-      console.log(`PR #${prNum} mergeability: ${mergeable} — skipping`);
-    }
-  }
 
-  return conflicted;
+    if (inScopePrs.length === 0) {
+      console.log("No in-scope open PRs found.");
+      return [];
+    }
+
+    console.log(`In-scope open PRs: ${inScopePrs.join(" ")}`);
+
+    return pollCandidatesWithBoundedConcurrency(
+      octokit,
+      owner,
+      name,
+      inScopePrs,
+      delays,
+      sleep,
+      rateLimiter
+    );
+  } else {
+    // Default: agent-only (existing behavior preserved)
+    const prNumbers = await listDeveloperAgentPrs(octokit, owner, name, author);
+
+    if (prNumbers.length === 0) {
+      console.log("No open developer-agent PRs found.");
+      return [];
+    }
+
+    console.log(`Open PRs: ${prNumbers.join(" ")}`);
+
+    const conflicted: number[] = [];
+    for (const prNum of prNumbers) {
+      const mergeable = await pollMergeability(
+        octokit,
+        owner,
+        name,
+        prNum,
+        delays,
+        sleep
+      );
+      if (mergeable === "CONFLICTING") {
+        console.log(`PR #${prNum} is CONFLICTING — queued for resolution`);
+        conflicted.push(prNum);
+      } else {
+        console.log(`PR #${prNum} mergeability: ${mergeable} — skipping`);
+      }
+    }
+    return conflicted;
+  }
 }
 
 async function run(): Promise<void> {
   const token = core.getInput("token", { required: true });
   const repo = core.getInput("repo", { required: true });
   const prNumberInput = core.getInput("pr_number");
-  const author =
-    core.getInput("author") || "app/mfrancza-developer-agent";
-  const allAuthors = core.getInput("all_authors") === "true";
+  const author = core.getInput("author") || "app/mfrancza-developer-agent";
+  const authorAllowlistRaw = core.getInput("author_allowlist") || "[]";
 
   const [owner, name] = repo.split("/");
   const octokit = getOctokit(token);
@@ -271,6 +568,14 @@ async function run(): Promise<void> {
   let manualPr: number | null;
   try {
     manualPr = validatePrNumberInput(prNumberInput);
+  } catch (error: unknown) {
+    core.setFailed(error instanceof Error ? error.message : String(error));
+    return;
+  }
+
+  let authorAllowlist: string[];
+  try {
+    authorAllowlist = validateAuthorAllowlist(authorAllowlistRaw);
   } catch (error: unknown) {
     core.setFailed(error instanceof Error ? error.message : String(error));
     return;
@@ -303,7 +608,7 @@ async function run(): Promise<void> {
     author,
     DEFAULT_DELAYS,
     defaultSleep,
-    allAuthors
+    authorAllowlist
   );
   console.log(`Conflicted PRs: ${JSON.stringify(conflicted)}`);
   core.setOutput("conflicted_prs", JSON.stringify(conflicted));

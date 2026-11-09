@@ -84,7 +84,7 @@ module "agent_vars" {
   auto_trigger_agents                              = var.auto_trigger_agents
   reviewer_models                                  = var.reviewer_models
   review_model_pairing                             = var.review_model_pairing
-  resolve_conflicts_all_authors                    = var.resolve_conflicts_all_authors
+  resolve_conflicts_author_allowlist               = var.resolve_conflicts_author_allowlist
 }
 
 module "branch_protection" {

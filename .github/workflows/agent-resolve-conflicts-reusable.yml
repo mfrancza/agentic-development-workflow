@@ -31,18 +31,18 @@ on:
         type: string
         required: false
         default: 'app/mfrancza-developer-agent'
-      all-authors:
+      author-allowlist:
         description: >
-          When 'true', the conflict-finder enumeration drops the
-          author:<developer-author> qualifier so every open PR in the repository
-          is considered. Cross-repository (fork-headed) PRs are excluded from
-          the results. Corresponds to the RESOLVE_CONFLICTS_ALL_AUTHORS
-          repository variable set by Terraform. Ignored when pr-number is set
-          (enumeration is skipped). Defaults to 'false' to preserve the
-          existing agent-only behavior.
+          JSON array of GitHub logins whose open PRs are swept for merge
+          conflicts. Empty array (the default) preserves the existing
+          agent-only behavior. Use ["*"] to sweep every author; use
+          ["alice", "bob"] to sweep the developer-agent plus those logins.
+          Cross-repository (fork-headed) PRs are always excluded. Corresponds
+          to the RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST repository variable set by
+          Terraform. Ignored when pr-number is set (enumeration is skipped).
         type: string
         required: false
-        default: 'false'
+        default: '[]'
       escalation-assignee:
         description: >
           GitHub login to assign escalation issues to (e.g.
@@ -156,7 +156,7 @@ jobs:
           repo: ${{ github.repository }}
           pr-number: ${{ inputs.pr-number }}
           author: ${{ inputs.developer-author }}
-          all-authors: ${{ inputs.all-authors }}
+          author-allowlist: ${{ inputs.author-allowlist }}
 
   resolve:
     needs: find-conflicted-prs
