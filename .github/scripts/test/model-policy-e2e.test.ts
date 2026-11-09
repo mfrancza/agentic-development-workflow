@@ -134,7 +134,7 @@ beforeEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 1: repo-wide default is sonnet
+// Assertion 1: DEFAULT_MODEL is wired to the review worker
 // ---------------------------------------------------------------------------
 
 describe("Model policy — (1) repo-wide DEFAULT_MODEL is wired to the review worker", () => {
@@ -145,7 +145,7 @@ describe("Model policy — (1) repo-wide DEFAULT_MODEL is wired to the review wo
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 2: design stage uses opus when no model label is present
+// Assertion 2: DESIGN_DEFAULT_MODEL is wired to the design stage
 // ---------------------------------------------------------------------------
 
 describe("Model policy — (2) design stage uses DESIGN_DEFAULT_MODEL when set", () => {
