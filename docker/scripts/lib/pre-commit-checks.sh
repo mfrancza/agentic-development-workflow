@@ -77,6 +77,11 @@ pre_commit_checks_run() {
         truncation_prefix="(…truncated — full output in container logs…)
 "
         output_block="$(tail -n 200 "${check_output_file}")"
+        # Emit the complete output to the container log before discarding the
+        # file, so that the truncation marker's promise ("full output in
+        # container logs") is not false.
+        log "pre-commit-checks: full check output (${line_count} lines):"
+        cat "${check_output_file}"
     else
         output_block="$(cat "${check_output_file}")"
     fi

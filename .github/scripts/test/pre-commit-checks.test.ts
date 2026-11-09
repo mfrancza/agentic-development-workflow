@@ -349,4 +349,22 @@ describe("pre-commit-checks backstop", () => {
     expect(commentBody).not.toBeNull();
     expect(commentBody).not.toContain("Agent run:");
   });
+
+  it("emits full output to container logs when output is truncated", () => {
+    // 250 lines of output: only the last 200 go into the PR comment, but
+    // ALL 250 must appear in the container log (stdout) so the truncation
+    // marker's promise ("full output in container logs") is true.
+    const { output, commentBody } = runChecks({
+      npmCheckLines: 250,
+      npmCheckExit: 1,
+    });
+    // PR comment is still capped at 200 lines
+    expect(commentBody).not.toBeNull();
+    expect(commentBody).toContain("(…truncated — full output in container logs…)");
+    expect(commentBody).not.toContain("output line 50\n");
+    // But the full 250-line output must be present in the container log
+    expect(output).toContain("output line 1\n");
+    expect(output).toContain("output line 50\n");
+    expect(output).toContain("output line 250");
+  });
 });
