@@ -72,7 +72,7 @@ Check the vendor's availability before choosing an older model ID from Terraform
 
 The [current Anthropic overview][anthropic-models] also describes models outside these grooming
 tiers, including Fable 5.1. It now recommends starting with Opus 5 for most workloads.
-**Sonnet is this repository's cost-conscious Anthropic grooming choice, not Anthropic's current default recommendation, and not the repository's global default (which is `gpt-6.1-terra`).**
+**Sonnet is this repository's cost-conscious Anthropic grooming choice, not Anthropic's current default recommendation.**
 Do not extend grooming to additional families just because the vendor offers them.
 `model:claude-fable-5-1` is provisioned for manual selection (operators may apply it to override the
 default) but is not a grooming-agent choice — the groomer selects only tier aliases for Anthropic.
@@ -326,11 +326,10 @@ Models present only in a vendor catalog are not automatically provisioned in thi
 
 ## Repo Defaults
 
-The configured fallback is `gpt-6.1-terra` (set in
-[`terraform/terraform.tfvars`](../terraform/terraform.tfvars), overriding the variable default of
-`sonnet` in [`terraform/variables.tf`](../terraform/variables.tf)), exported by the
+The configured fallback is set in
+[`terraform/terraform.tfvars`](../terraform/terraform.tfvars), exported by the
 [`agent-vars` module](../terraform/modules/agent-vars/main.tf).
-It is a fallback, not evidence that every workflow always runs `gpt-6.1-terra`, and operators can change it.
+It is a fallback, not evidence that every workflow always runs the configured model, and operators can change it.
 
 `DESIGN_DEFAULT_MODEL` is an optional agent-specific override for the designer (`AGENT_ACTION=design`):
 the design workflow uses it as the fallback when no `model:*` label is present, and falls through to
@@ -373,13 +372,11 @@ on the PR too: an issue's review override alone is not read by the reviewer work
 Entries below record changes at their original dates; historical model lists and prices are not
 current selection guidance.
 
-- **2026-11-09 (rev 14)** — Updated default-model references (Issue #836, PR #842): updated
-  *Repo Defaults* to reflect that `DEFAULT_MODEL` is now `gpt-6.1-terra` and `DESIGN_DEFAULT_MODEL`
-  is now `gpt-6.1-sol` (set via `terraform/terraform.tfvars`, overriding the `variables.tf` default).
-  Removed the stale "This remains the repository default" note from the Sonnet tier description;
-  updated the Sonnet note to clarify it is the cost-conscious Anthropic grooming choice, not the
-  global repository default. Updated `groom.md` step 3.2's OpenAI allowlist to include
-  `gpt-6.1-sol`, `gpt-6.1-terra`, and `gpt-6-luna` so the groomer recognizes the new anchors.
+- **2026-11-09 (rev 14)** — Updated default models (Issue #836, PR #842): removed the stale
+  "This remains the repository default" note from the Sonnet tier description; updated the Sonnet
+  note to clarify it is the cost-conscious Anthropic grooming choice. Updated `groom.md` step 3.2's
+  OpenAI allowlist to include `gpt-6.1-sol`, `gpt-6.1-terra`, and `gpt-6-luna` so the groomer
+  recognizes the new anchors.
 
 - **2026-11-09 (rev 13)** — Added newly available models (Issue #833): `claude-fable-5-1`
   (Anthropic; opus class; provisioned for manual selection, not a grooming-agent tier), `gpt-6.1-sol`

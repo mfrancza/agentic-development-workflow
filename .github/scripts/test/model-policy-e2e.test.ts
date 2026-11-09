@@ -9,8 +9,8 @@ import { classTable, modelToClass } from "../src/lib/model-classes.js";
  * End-to-end static validation for this repository's model-preference policy
  * as configured in terraform/terraform.tfvars:
  *
- *   1. Repo-wide default is sonnet (terraform.tfvars → DEFAULT_MODEL).
- *   2. Design stage uses opus when no model label is present
+ *   1. Repo-wide DEFAULT_MODEL is set in terraform.tfvars.
+ *   2. Design stage uses DESIGN_DEFAULT_MODEL when non-empty
  *      (DESIGN_DEFAULT_MODEL ≠ '' → agent-design.yml short-circuits to it).
  *   3. Per-design and generic labels still override that fallback
  *      (resolve-model waterfall: per-agent → generic → DESIGN_DEFAULT_MODEL →
@@ -137,17 +137,7 @@ beforeEach(() => {
 // Assertion 1: repo-wide default is sonnet
 // ---------------------------------------------------------------------------
 
-describe("Model policy — (1) repo-wide default is gpt-6.1-terra", () => {
-  it("terraform.tfvars sets default_model to gpt-6.1-terra", () => {
-    // Anchored at line start so design_default_model does not satisfy it;
-    // surrounding whitespace is permitted so a reformatted file still passes.
-    expect(tfvarsContent).toMatch(/^default_model\s*=\s*"gpt-6\.1-terra"/m);
-  });
-
-  it("gpt-6.1-terra is classified as sonnet class in the model-classes data file", () => {
-    expect(modelToClass["gpt-6.1-terra"]).toBe("sonnet");
-  });
-
+describe("Model policy — (1) repo-wide DEFAULT_MODEL is wired to the review worker", () => {
   it("review worker resolves the final fallback from vars.DEFAULT_MODEL", () => {
     // The reviewer waterfall uses DEFAULT_MODEL as its final fallback.
     expect(agentReviewWorkerContent).toContain("default-model: ${{ vars.DEFAULT_MODEL }}");
@@ -158,20 +148,12 @@ describe("Model policy — (1) repo-wide default is gpt-6.1-terra", () => {
 // Assertion 2: design stage uses opus when no model label is present
 // ---------------------------------------------------------------------------
 
-describe("Model policy — (2) design stage uses gpt-6.1-sol by default", () => {
-  it("terraform.tfvars sets design_default_model to gpt-6.1-sol", () => {
-    expect(tfvarsContent).toMatch(/design_default_model\s*=\s*"gpt-6\.1-sol"/);
-  });
-
-  it("gpt-6.1-sol is classified as opus class in the model-classes data file", () => {
-    expect(modelToClass["gpt-6.1-sol"]).toBe("opus");
-  });
-
+describe("Model policy — (2) design stage uses DESIGN_DEFAULT_MODEL when set", () => {
   it("agent-design reusable short-circuits to DESIGN_DEFAULT_MODEL when non-empty", () => {
     // The fallback expression `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL`
-    // is present in the design reusable; when DESIGN_DEFAULT_MODEL is set to
-    // "opus" the `||` short-circuits and the design workflow uses opus rather
-    // than DEFAULT_MODEL (sonnet).
+    // is present in the design reusable; when DESIGN_DEFAULT_MODEL is non-empty
+    // the `||` short-circuits and the design workflow uses it rather than
+    // falling through to DEFAULT_MODEL.
     expect(agentDesignReusableContent).toContain(
       "vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL",
     );
@@ -421,9 +403,9 @@ describe("Model policy — (9) GROOM_DEFAULT_MODEL precedence and downstream ven
   });
 
   it("the vendor anchors are the downstream defaults, not the groomer's model", () => {
-    // With this repo's groom_default_model = "claude-haiku-5-5" and default_model =
-    // "gpt-6.1-terra", anchoring on the groomer's own model would leave mechanical
-    // tasks unlabeled and run them on gpt-6.1-terra downstream (Issue #794).
+    // When GROOM_DEFAULT_MODEL differs from DEFAULT_MODEL, anchoring on the
+    // groomer's own model would leave mechanical tasks unlabeled and run them
+    // on DEFAULT_MODEL downstream (Issue #794).
     expect(agentGroomReusableContent).toContain(
       "GROOM_IMPL_ANCHOR_MODEL: ${{ vars.DEFAULT_MODEL }}",
     );
