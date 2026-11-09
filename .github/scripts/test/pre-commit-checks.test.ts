@@ -41,7 +41,10 @@ interface RunOptions {
    *  Set to empty string "" to disable npm checks. */
   preCommitScriptsDir?: string;
   /** Value of PRE_COMMIT_CHECK_CMD injected into the environment.
-   *  Omit to leave unset (helper defaults to "npm run typecheck && npm test"). */
+   *  Omit to use the test-helper default ("npm run typecheck && npm test").
+   *  Pass `undefined` explicitly (i.e. include the key) to leave the variable
+   *  unset in the child env, which triggers the helper's skip-if-no-command
+   *  behaviour. */
   preCommitCheckCmd?: string;
 }
 
@@ -200,11 +203,21 @@ pre_commit_checks_run "$HEAD_BEFORE_SHA" "$PR_NUMBER"
         // (which Node strips from the child env) so the variable is absent
         // even when the outer CI environment has it set.
         GITHUB_RUN_ID: options.githubRunId,
-        // PRE_COMMIT_SCRIPTS_DIR / PRE_COMMIT_CHECK_CMD: undefined strips
-        // the variable from the child env so the helper uses its built-in
-        // defaults; set to "" to test the "disable" path.
+        // PRE_COMMIT_SCRIPTS_DIR: undefined strips the variable so the helper
+        // uses its built-in default (".github/scripts"); "" disables checks.
         PRE_COMMIT_SCRIPTS_DIR: options.preCommitScriptsDir,
-        PRE_COMMIT_CHECK_CMD: options.preCommitCheckCmd,
+        // PRE_COMMIT_CHECK_CMD: the helper has NO built-in default — an unset
+        // variable causes it to skip npm checks.  When the caller does not
+        // include "preCommitCheckCmd" in the options object at all, supply the
+        // repo-conventional command so that tests which exercise npm behaviour
+        // continue to work without each test having to specify it explicitly.
+        // Pass `preCommitCheckCmd: undefined` (key present, value undefined)
+        // to explicitly leave the variable out of the child env and test the
+        // skip-if-no-command path.
+        PRE_COMMIT_CHECK_CMD:
+          "preCommitCheckCmd" in options
+            ? options.preCommitCheckCmd
+            : "npm run typecheck && npm test",
       },
     },
   );
@@ -408,6 +421,23 @@ describe("pre-commit-checks backstop", () => {
     });
     expect(output).toContain(
       "pre-commit-checks: PRE_COMMIT_SCRIPTS_DIR is empty; skipping npm checks",
+    );
+    expect(commentBody).toBeNull();
+  });
+
+  it("skips npm checks when PRE_COMMIT_CHECK_CMD is not set", () => {
+    // The helper has no built-in default for PRE_COMMIT_CHECK_CMD so that
+    // repo-specific commands are not baked into the Docker image.  When the
+    // variable is absent the checks must be silently skipped.
+    const { output, commentBody } = runChecks({
+      // Pass the key with value undefined so "preCommitCheckCmd" in options
+      // is true — the test-helper then leaves PRE_COMMIT_CHECK_CMD out of
+      // the child env, simulating a deployment that has not set the variable.
+      preCommitCheckCmd: undefined,
+      diffFiles: ".github/foo.ts",
+    });
+    expect(output).toContain(
+      "pre-commit-checks: PRE_COMMIT_CHECK_CMD is not set; skipping npm checks",
     );
     expect(commentBody).toBeNull();
   });

@@ -19,8 +19,9 @@ set -euo pipefail
 #                           when deploying the Docker image to a repo that
 #                           uses a different check mechanism or none at all.
 #   PRE_COMMIT_CHECK_CMD    Shell command executed after `npm ci` inside the
-#                           scripts directory.  Defaults to
-#                           "npm run typecheck && npm test".
+#                           scripts directory.  When unset or empty, npm checks
+#                           are skipped — configure this per-deployment to avoid
+#                           baking repo-specific commands into the Docker image.
 # Required args: 1=head-before-sha  2=pr-number
 
 # pre_commit_checks_run <head-before-sha> <pr-number>
@@ -37,15 +38,19 @@ pre_commit_checks_run() {
     : "${GH_TOKEN:?pre_commit_checks_run: GH_TOKEN is required}"
 
     # Optional env: scripts directory and check command.
-    # Use single-dash expansion for PRE_COMMIT_SCRIPTS_DIR so an explicitly
-    # empty value ("") is preserved and treated as "disable", while an unset
-    # variable falls back to the repo-conventional default.
+    # Use single-dash expansion so an explicitly empty value is preserved and
+    # treated as "disable" for both variables.  PRE_COMMIT_CHECK_CMD has no
+    # built-in default to avoid baking repo-specific commands into the image.
     local scripts_rel="${PRE_COMMIT_SCRIPTS_DIR-.github/scripts}"
-    local check_cmd="${PRE_COMMIT_CHECK_CMD:-npm run typecheck && npm test}"
+    local check_cmd="${PRE_COMMIT_CHECK_CMD-}"
 
-    # An empty scripts dir disables npm checks for this deployment.
+    # An empty scripts dir or an unset/empty check command disables npm checks.
     if [[ -z "${scripts_rel}" ]]; then
         log "pre-commit-checks: PRE_COMMIT_SCRIPTS_DIR is empty; skipping npm checks"
+        return 0
+    fi
+    if [[ -z "${check_cmd}" ]]; then
+        log "pre-commit-checks: PRE_COMMIT_CHECK_CMD is not set; skipping npm checks"
         return 0
     fi
 
