@@ -7,6 +7,7 @@ import {
   isSameRepoHead,
   findConflictedPrs,
   DEFAULT_DELAYS,
+  MAX_ALL_OPEN_PRS,
 } from "../src/find-conflicted-prs.js";
 import { getOctokit } from "../src/lib/octokit.js";
 
@@ -333,7 +334,7 @@ describe("listAllOpenPrs", () => {
     expect(result).toEqual([1, 2, 3]);
   });
 
-  it("passes a search query without an author qualifier", async () => {
+  it("passes a search query without an author qualifier, starting at page 1", async () => {
     const search = vi.fn().mockResolvedValueOnce({ data: { items: [] } });
 
     await listAllOpenPrs(makeSearchOctokit(search), "myorg", "myrepo");
@@ -341,6 +342,7 @@ describe("listAllOpenPrs", () => {
     expect(search).toHaveBeenCalledWith({
       q: "is:pr is:open repo:myorg/myrepo",
       per_page: 100,
+      page: 1,
     });
   });
 
@@ -354,6 +356,60 @@ describe("listAllOpenPrs", () => {
     );
 
     expect(result).toEqual([]);
+  });
+
+  it("paginates through multiple pages to collect all PR numbers", async () => {
+    const page1Items = Array.from({ length: 100 }, (_, i) => ({ number: i + 1 }));
+    const page2Items = [{ number: 101 }, { number: 102 }];
+
+    const search = vi
+      .fn()
+      .mockResolvedValueOnce({ data: { items: page1Items } })
+      .mockResolvedValueOnce({ data: { items: page2Items } });
+
+    const result = await listAllOpenPrs(
+      makeSearchOctokit(search),
+      "owner",
+      "repo"
+    );
+
+    expect(result).toHaveLength(102);
+    expect(result[0]).toBe(1);
+    expect(result[99]).toBe(100);
+    expect(result[100]).toBe(101);
+    expect(result[101]).toBe(102);
+    expect(search).toHaveBeenCalledTimes(2);
+    expect(search).toHaveBeenNthCalledWith(1, {
+      q: "is:pr is:open repo:owner/repo",
+      per_page: 100,
+      page: 1,
+    });
+    expect(search).toHaveBeenNthCalledWith(2, {
+      q: "is:pr is:open repo:owner/repo",
+      per_page: 100,
+      page: 2,
+    });
+  });
+
+  it(`stops paginating at the MAX_ALL_OPEN_PRS (${MAX_ALL_OPEN_PRS}) cap`, async () => {
+    // Simulate exactly MAX_ALL_OPEN_PRS items spread across pages of 100.
+    const totalPages = MAX_ALL_OPEN_PRS / 100; // 10 pages for the default cap of 1000
+    const search = vi.fn();
+    for (let p = 0; p < totalPages; p++) {
+      const start = p * 100 + 1;
+      const items = Array.from({ length: 100 }, (_, i) => ({ number: start + i }));
+      search.mockResolvedValueOnce({ data: { items } });
+    }
+
+    const result = await listAllOpenPrs(
+      makeSearchOctokit(search),
+      "owner",
+      "repo"
+    );
+
+    expect(result).toHaveLength(MAX_ALL_OPEN_PRS);
+    // Should have fetched exactly totalPages pages and then stopped.
+    expect(search).toHaveBeenCalledTimes(totalPages);
   });
 });
 
@@ -548,10 +604,11 @@ describe("findConflictedPrs (allAuthors = true)", () => {
       true
     );
 
-    // The search query must not include an author qualifier.
+    // The search query must not include an author qualifier, and must start at page 1.
     expect(search).toHaveBeenCalledWith({
       q: "is:pr is:open repo:owner/repo",
       per_page: 100,
+      page: 1,
     });
   });
 

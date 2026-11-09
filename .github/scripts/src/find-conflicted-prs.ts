@@ -110,20 +110,47 @@ export async function listDeveloperAgentPrs(
 }
 
 /**
- * Lists all open PRs in the repository (up to 100), without author filter.
- * Uses the GitHub search API without the `author:` qualifier so every open PR
- * is returned, regardless of who authored it.
+ * Hard cap on the number of open PRs fetched by listAllOpenPrs.
+ * The GitHub Search API itself limits results to 1,000 items; this constant
+ * documents that boundary explicitly and guards the pagination loop.
+ */
+export const MAX_ALL_OPEN_PRS = 1000;
+
+/**
+ * Lists all open PRs in the repository without an author filter, paginating
+ * through Search API pages (100 items per page) until all results have been
+ * collected or MAX_ALL_OPEN_PRS is reached.
+ *
+ * Pagination stops when:
+ *   - A page returns fewer items than requested (last page), or
+ *   - The accumulated count reaches MAX_ALL_OPEN_PRS (the Search API's
+ *     own hard limit of 1,000 results, made explicit here).
  */
 export async function listAllOpenPrs(
   octokit: OctokitType,
   owner: string,
   name: string
 ): Promise<number[]> {
-  const response = await octokit.rest.search.issuesAndPullRequests({
-    q: `is:pr is:open repo:${owner}/${name}`,
-    per_page: 100,
-  });
-  return response.data.items.map((item) => item.number);
+  const perPage = 100;
+  const numbers: number[] = [];
+  let page = 1;
+
+  while (numbers.length < MAX_ALL_OPEN_PRS) {
+    const response = await octokit.rest.search.issuesAndPullRequests({
+      q: `is:pr is:open repo:${owner}/${name}`,
+      per_page: perPage,
+      page,
+    });
+    const items = response.data.items;
+    for (const item of items) {
+      numbers.push(item.number);
+    }
+    // Stop when we've reached the last page (fewer items than requested).
+    if (items.length < perPage) break;
+    page++;
+  }
+
+  return numbers.slice(0, MAX_ALL_OPEN_PRS);
 }
 
 /**
