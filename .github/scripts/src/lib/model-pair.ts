@@ -597,6 +597,16 @@ export function selectReviewerModel(
  * found in `modelToClass`.  The scan picks whichever class lists the model
  * first, which is correct for single-class entries but may be wrong for
  * dual-class configurations — callers SHOULD pass the authoritative map.
+ *
+ * Last resort: when both the reverse-map lookup and the forward-table scan
+ * miss, a Claude-family prefix lookup normalizes unmapped Claude snapshot IDs
+ * (including future or hallucinated IDs) to their tier class:
+ *   - `claude-haiku-*`  → `"haiku"`
+ *   - `claude-sonnet-*` → `"sonnet"`
+ *   - `claude-opus-*`   → `"opus"`
+ * Any other `claude-*` ID that does not match one of the three families
+ * remains unresolved and the resolver continues its existing fallback behavior.
+ * (Decision 4 of docs/design/auto-review-marker-race.md)
  */
 function getClassFromTable(
   modelId: string,
@@ -613,6 +623,10 @@ function getClassFromTable(
       if ((models as string[]).includes(modelId)) return className;
     }
   }
+  // Last resort: Claude-family prefix normalization for unmapped snapshot IDs.
+  if (/^claude-haiku-/.test(modelId)) return "haiku";
+  if (/^claude-sonnet-/.test(modelId)) return "sonnet";
+  if (/^claude-opus-/.test(modelId)) return "opus";
   return undefined;
 }
 

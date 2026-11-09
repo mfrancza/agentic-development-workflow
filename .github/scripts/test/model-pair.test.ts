@@ -545,6 +545,90 @@ describe("selectReviewerModel — unknown authoring model", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Claude-family prefix normalization (Decision 4 of auto-review-marker-race.md)
+// ---------------------------------------------------------------------------
+
+describe("selectReviewerModel — claude-family prefix normalization", () => {
+  // These tests verify that when an authoring model ID is not present in
+  // modelToClass and not found by the forward-table scan, the
+  // claude-<family>-* prefix lookup normalizes it to its tier class so the
+  // resolver pairs by class instead of silently falling through to DEFAULT_MODEL.
+
+  it("normalizes claude-sonnet-4-6 (hallucinated ID from PR #790) to sonnet class", () => {
+    // claude-sonnet-4-6 is not in TEST_CLASS_TABLE or modelToClass; the prefix
+    // lookup should normalize it to "sonnet" and pair cross-vendor.
+    const result = selectReviewerModel(
+      "claude-sonnet-4-6",
+      cfg({ preferred_vendors: ["openai", "xai", "anthropic"] }),
+      ALL_PROVIDERS,
+      TEST_CLASS_TABLE,
+      DEFAULT,
+    );
+    expect(result.model).toBe("gpt-5.6-terra"); // openai sonnet-class canonical
+    expect(result.source).toBe("primary");
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("normalizes claude-haiku-5-0 to haiku class", () => {
+    const result = selectReviewerModel(
+      "claude-haiku-5-0",
+      cfg({ preferred_vendors: ["openai", "xai", "anthropic"] }),
+      ALL_PROVIDERS,
+      TEST_CLASS_TABLE,
+      DEFAULT,
+    );
+    expect(result.model).toBe("gpt-5.6-luna"); // openai haiku-class canonical
+    expect(result.source).toBe("primary");
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("normalizes claude-opus-9-9 to opus class", () => {
+    const result = selectReviewerModel(
+      "claude-opus-9-9",
+      cfg({ preferred_vendors: ["openai", "xai", "anthropic"] }),
+      ALL_PROVIDERS,
+      TEST_CLASS_TABLE,
+      DEFAULT,
+    );
+    expect(result.model).toBe("gpt-5.6-sol"); // openai opus-class canonical
+    expect(result.source).toBe("primary");
+    expect(result.warnings).toHaveLength(0);
+  });
+
+  it("leaves claude-mystery-1-0 unresolved; resolver falls through to DEFAULT_MODEL", () => {
+    // "mystery" does not match haiku, sonnet, or opus — the prefix lookup
+    // returns undefined and the existing warning/fallback path runs.
+    const result = selectReviewerModel(
+      "claude-mystery-1-0",
+      cfg({ fallback_chain: ["default-model"] }),
+      ALL_PROVIDERS,
+      TEST_CLASS_TABLE,
+      "haiku",
+    );
+    expect(result.model).toBe("haiku");
+    expect(result.source).toBe("fallback:default-model");
+    expect(result.warnings.some((w) => w.includes("not in the class table"))).toBe(true);
+  });
+
+  it("regression: claude-sonnet-4-5 in modelToClass resolves via modelToClass, not prefix normalization", () => {
+    // modelToClass takes precedence — the prefix lookup must not fire for a
+    // model that is already mapped in the authoritative reverse table.
+    const modelToClass: Record<string, string> = { "claude-sonnet-4-5": "sonnet" };
+    const result = selectReviewerModel(
+      "claude-sonnet-4-5",
+      cfg({ preferred_vendors: ["openai", "xai", "anthropic"] }),
+      ALL_PROVIDERS,
+      TEST_CLASS_TABLE,
+      DEFAULT,
+      modelToClass,
+    );
+    expect(result.model).toBe("gpt-5.6-terra"); // openai sonnet-class canonical
+    expect(result.source).toBe("primary");
+    expect(result.warnings).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Dual-class model resolution via modelToClass (not forward scan)
 // ---------------------------------------------------------------------------
 
