@@ -38,7 +38,11 @@ pre_commit_checks_run() {
         return 0
     fi
 
-    if ! printf '%s\n' "$changed_paths" | grep -q '^\.github/'; then
+    # Use a here-string instead of printf | grep -q to avoid SIGPIPE.
+    # grep -q exits on the first match, which would cause printf to receive
+    # SIGPIPE for large path lists; with pipefail that makes the pipeline
+    # non-zero, so the negated `if !` would incorrectly skip the checks.
+    if ! grep -q '^\.github/' <<< "$changed_paths"; then
         log "pre-commit-checks: diff does not touch .github/, skipping"
         return 0
     fi

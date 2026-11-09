@@ -12,6 +12,10 @@ interface RunOptions {
   /** Newline-separated list of files returned by `git diff --name-only`.
    *  Defaults to ".github/scripts/foo.ts" (touches .github/). */
   diffFiles?: string;
+  /** Path to a file whose contents the mock git prints for `diff --name-only`.
+   *  Takes precedence over diffFiles when set.  Use this for large diffs that
+   *  would exceed the ARG_MAX / E2BIG limit for environment variables. */
+  diffFilePath?: string;
   /** Exit code for `git diff --name-only`.  Defaults to 0 (success). */
   gitDiffExit?: number;
   /** Exit code for `npm ci`.  Defaults to 0 (success). */
@@ -57,8 +61,10 @@ function runChecks(options: RunOptions = {}) {
   const ghCommentExit = options.ghCommentExit ?? 0;
 
   // --- Mock git ---
-  // Handles: diff --name-only <before>..HEAD  →  prints MOCK_DIFF_FILES
-  //                                              (or exits MOCK_GIT_DIFF_EXIT if non-zero)
+  // Handles: diff --name-only <before>..HEAD  →  prints MOCK_DIFF_FILE (if
+  //                                              set) or MOCK_DIFF_FILES, or
+  //                                              exits MOCK_GIT_DIFF_EXIT when
+  //                                              non-zero
   //          rev-parse HEAD                   →  prints MOCK_HEAD_SHA
   writeFileSync(
     join(bin, "git"),
@@ -69,7 +75,11 @@ case "$1" in
       echo "fatal: bad object: not-a-sha" >&2
       exit "\${MOCK_GIT_DIFF_EXIT}"
     fi
-    printf '%s' "\${MOCK_DIFF_FILES:-}"
+    if [[ -n "\${MOCK_DIFF_FILE:-}" ]]; then
+      cat "\${MOCK_DIFF_FILE}"
+    else
+      printf '%s' "\${MOCK_DIFF_FILES:-}"
+    fi
     ;;
   rev-parse)
     printf '%s\\n' "\${MOCK_HEAD_SHA:-head-sha-abc}"
@@ -164,6 +174,7 @@ pre_commit_checks_run "$HEAD_BEFORE_SHA" "$PR_NUMBER"
         PR_NUMBER: options.prNumber ?? "42",
         // Mock env vars consumed by the mock scripts
         MOCK_DIFF_FILES: diffFiles,
+        MOCK_DIFF_FILE: options.diffFilePath ?? "",
         MOCK_GIT_DIFF_EXIT: String(gitDiffExit),
         MOCK_HEAD_SHA: headSha,
         MOCK_NPM_CI_EXIT: String(npmCiExit),
@@ -366,5 +377,35 @@ describe("pre-commit-checks backstop", () => {
     expect(output).toContain("output line 1\n");
     expect(output).toContain("output line 50\n");
     expect(output).toContain("output line 250");
+  });
+
+  it("matches .github/ path when diff list exceeds the pipe buffer size", () => {
+    // Regression for SIGPIPE: if `printf ... | grep -q` were used, grep exits
+    // as soon as it finds the first match and closes its stdin; for a large
+    // enough path list printf receives SIGPIPE (exit 141).  With `pipefail`
+    // the pipeline exits 141, and `if ! [141]` is true, causing the checks to
+    // be incorrectly skipped.  Using a here-string (<<<) avoids the pipeline
+    // entirely.
+    //
+    // We write the diff to a file (via diffFilePath) rather than passing it
+    // through MOCK_DIFF_FILES, because the ~84 KiB env-var value exceeds the
+    // kernel's ARG_MAX for child processes (spawnSync returns E2BIG).
+    // .github/scripts/foo.ts appears first so grep exits immediately on the
+    // match; with the old pipe, printf would then receive SIGPIPE as it tried
+    // to flush the remaining ~84 KiB.
+    const extraPaths = Array.from({ length: 5000 }, (_, i) => `src/file-${i}.ts`).join("\n");
+    const diffContent = `.github/scripts/foo.ts\n${extraPaths}`;
+    const largeDiffDir = mkdtempSync(join(tmpdir(), "pre-commit-checks-large-diff-"));
+    tempDirs.push(largeDiffDir);
+    const diffFilePath = join(largeDiffDir, "diff.txt");
+    writeFileSync(diffFilePath, diffContent);
+
+    const { output, commentBody } = runChecks({
+      diffFilePath,
+      npmCheckExit: 0,
+    });
+    // Checks must have run (not skipped) even though the path list is huge.
+    expect(output).toContain("pre-commit-checks: passed");
+    expect(commentBody).toBeNull();
   });
 });
