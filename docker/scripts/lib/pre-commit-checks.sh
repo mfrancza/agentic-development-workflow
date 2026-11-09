@@ -29,8 +29,14 @@ pre_commit_checks_run() {
 
     # Compute diff and check if any path touches .github/
     # (follows the same CWD=WORK_DIR convention as fix-checks-guard.sh)
-    local changed_paths
-    changed_paths="$(git diff --name-only "${head_before}..HEAD")"
+    # Fail-open: a malformed/unavailable SHA or any git error must not abort
+    # the caller — capture the exit status and return 0 instead.
+    local changed_paths git_diff_exit=0
+    changed_paths="$(git diff --name-only "${head_before}..HEAD")" || git_diff_exit=$?
+    if [[ $git_diff_exit -ne 0 ]]; then
+        log "pre-commit-checks: git diff failed (exit ${git_diff_exit}); skipping checks (fail-open)"
+        return 0
+    fi
 
     if ! printf '%s\n' "$changed_paths" | grep -q '^\.github/'; then
         log "pre-commit-checks: diff does not touch .github/, skipping"
@@ -81,11 +87,18 @@ pre_commit_checks_run() {
     # treat as command substitution.
     local fence
     fence='```'
+    # Conditionally include the GITHUB_RUN_ID so concurrent/repeated failures
+    # can be correlated to their specific agent run (Decision 7).
+    local run_id_line=""
+    if [[ -n "${GITHUB_RUN_ID:-}" ]]; then
+        run_id_line="
+Agent run: \`${GITHUB_RUN_ID}\`"
+    fi
     local comment_body
     comment_body="$(cat <<EOF
 ### Developer agent pre-commit checks failed
 
-\`npm run typecheck && npm test\` in \`.github/scripts/\` failed on commit \`${head_sha}\`.
+\`npm run typecheck && npm test\` in \`.github/scripts/\` failed on commit \`${head_sha}\`.${run_id_line}
 The branch was pushed anyway; CI will re-check. See the agent run logs for the full output.
 
 ${fence}

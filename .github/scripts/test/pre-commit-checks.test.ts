@@ -12,6 +12,8 @@ interface RunOptions {
   /** Newline-separated list of files returned by `git diff --name-only`.
    *  Defaults to ".github/scripts/foo.ts" (touches .github/). */
   diffFiles?: string;
+  /** Exit code for `git diff --name-only`.  Defaults to 0 (success). */
+  gitDiffExit?: number;
   /** Exit code for `npm ci`.  Defaults to 0 (success). */
   npmCiExit?: number;
   /** Number of output lines produced by each `npm run`/`npm test` invocation.
@@ -27,6 +29,9 @@ interface RunOptions {
   prNumber?: string;
   /** Value returned by `git rev-parse HEAD`.  Defaults to "head-sha-abc". */
   headSha?: string;
+  /** Value of GITHUB_RUN_ID injected into the environment.
+   *  Omit to leave GITHUB_RUN_ID unset (simulates a local run). */
+  githubRunId?: string;
 }
 
 function runChecks(options: RunOptions = {}) {
@@ -44,6 +49,7 @@ function runChecks(options: RunOptions = {}) {
   const commentBodyFile = join(bin, "comment-body.txt");
 
   const diffFiles = options.diffFiles ?? ".github/scripts/foo.ts";
+  const gitDiffExit = options.gitDiffExit ?? 0;
   const headSha = options.headSha ?? "head-sha-abc";
   const npmCiExit = options.npmCiExit ?? 0;
   const npmCheckLines = options.npmCheckLines ?? 5;
@@ -52,12 +58,17 @@ function runChecks(options: RunOptions = {}) {
 
   // --- Mock git ---
   // Handles: diff --name-only <before>..HEAD  →  prints MOCK_DIFF_FILES
+  //                                              (or exits MOCK_GIT_DIFF_EXIT if non-zero)
   //          rev-parse HEAD                   →  prints MOCK_HEAD_SHA
   writeFileSync(
     join(bin, "git"),
     `#!/bin/bash
 case "$1" in
   diff)
+    if [[ "\${MOCK_GIT_DIFF_EXIT:-0}" -ne 0 ]]; then
+      echo "fatal: bad object: not-a-sha" >&2
+      exit "\${MOCK_GIT_DIFF_EXIT}"
+    fi
     printf '%s' "\${MOCK_DIFF_FILES:-}"
     ;;
   rev-parse)
@@ -153,12 +164,17 @@ pre_commit_checks_run "$HEAD_BEFORE_SHA" "$PR_NUMBER"
         PR_NUMBER: options.prNumber ?? "42",
         // Mock env vars consumed by the mock scripts
         MOCK_DIFF_FILES: diffFiles,
+        MOCK_GIT_DIFF_EXIT: String(gitDiffExit),
         MOCK_HEAD_SHA: headSha,
         MOCK_NPM_CI_EXIT: String(npmCiExit),
         MOCK_NPM_CHECK_LINES: String(npmCheckLines),
         MOCK_NPM_CHECK_EXIT: String(npmCheckExit),
         MOCK_GH_COMMENT_BODY_FILE: commentBodyFile,
         MOCK_GH_COMMENT_EXIT: String(ghCommentExit),
+        // GITHUB_RUN_ID: set to the provided value, or explicitly undefined
+        // (which Node strips from the child env) so the variable is absent
+        // even when the outer CI environment has it set.
+        GITHUB_RUN_ID: options.githubRunId,
       },
     },
   );
@@ -295,5 +311,42 @@ describe("pre-commit-checks backstop", () => {
       npmCheckExit: 1,
     });
     expect(output).toContain("posting PR comment to PR #123");
+  });
+
+  it("logs warning and returns 0 when git diff fails (backstop fail-open)", () => {
+    // A malformed or unavailable head-before SHA causes git diff to exit
+    // non-zero.  The backstop must catch this, log a warning, and return 0
+    // so the caller's push is not aborted (runChecks asserts status === 0).
+    const { output, commentBody } = runChecks({
+      gitDiffExit: 128,
+    });
+    expect(output).toContain("pre-commit-checks: git diff failed");
+    expect(output).toContain("skipping checks (fail-open)");
+    // No comment should be posted when the diff itself could not be computed.
+    expect(commentBody).toBeNull();
+  });
+
+  it("includes GITHUB_RUN_ID in failure comment when available", () => {
+    const { commentBody } = runChecks({
+      npmCheckExit: 1,
+      githubRunId: "9876543210",
+    });
+    expect(commentBody).not.toBeNull();
+    // Run ID must appear so the comment can be correlated to the agent run
+    // (Decision 7: "references the container run via GITHUB_RUN_ID-style
+    // identifier if available").
+    expect(commentBody).toContain("9876543210");
+    expect(commentBody).toContain("Agent run:");
+  });
+
+  it("omits Agent run line when GITHUB_RUN_ID is not set", () => {
+    // When running outside GitHub Actions (or when the env var is absent),
+    // the comment must still be valid but must not contain a stale/empty ID.
+    const { commentBody } = runChecks({
+      npmCheckExit: 1,
+      // githubRunId intentionally omitted
+    });
+    expect(commentBody).not.toBeNull();
+    expect(commentBody).not.toContain("Agent run:");
   });
 });
