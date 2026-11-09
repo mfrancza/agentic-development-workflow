@@ -92,12 +92,39 @@ Alternatives considered:
   committing (cheap, fast, converges in one turn). Backstop closes the
   gap when the agent ignored the instruction (PR #767 shape). The two
   layers guard different failure modes.
+- **(d) Git pre-commit hook baked into the image.** A hook script
+  installed in `.git/hooks/pre-commit` (or configured via a
+  `.pre-commit-config.yaml` in the repo) fires at `git commit` time,
+  inside Claude's turn, before the agent exits. Because the system
+  prompt forbids `--no-verify`, the agent cannot silently bypass it.
+  The hook could be injected into the container at image build time and
+  selected per repo via a config file, satisfying the
+  "configurable per repo" property without hardcoding the commands in
+  the entrypoint. The agent sees the hook failure while it still has
+  turns remaining and can fix the code before retrying the commit —
+  which is strictly earlier detection than the entrypoint backstop.
+  Trade-off: if the hook blocks the commit and the agent has exhausted
+  its turn budget (or cannot fix the failure in the remaining turns),
+  no commits land on the branch — the agent's draft work is lost and
+  reviewers have nothing to inspect. The entrypoint backstop's
+  fail-open policy (Decision 3c) deliberately preserves the agent's
+  work: commits land, the diff is visible, and the reviewer receives a
+  PR comment alongside the diff. A blocking pre-commit hook trades
+  work-preservation for more aggressive enforcement. The two
+  mechanisms are not mutually exclusive — a hook fires inside Claude's
+  turn (early detection; Claude can react) while the backstop fires
+  after Claude exits (catches anything that slipped through). Adding a
+  hook as an additional enforcement layer is a natural follow-on once
+  the basic two-layer model is established.
 
 **Chosen: (c)** — both. The prompt is the first line of defence; the
 backstop is the enforcement layer. This mirrors the belt-and-braces
 pattern used in
 [`docs/design/respond-review-self-trigger-guard.md`](respond-review-self-trigger-guard.md)
-(caller `if:` plus activity-level check).
+(caller `if:` plus activity-level check). A pre-commit hook (d) is
+deferred as a future enhancement; it is compatible with this design
+and could replace or complement the prompt instruction once the
+entrypoint backstop proves out.
 
 ### Decision 2 — Exact commands: `npm ci && npm run typecheck && npm test` in `.github/scripts/`
 
