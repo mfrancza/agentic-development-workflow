@@ -19,9 +19,9 @@ import { classTable, modelToClass } from "../src/lib/model-classes.js";
  *      (DESIGN_DEFAULT_MODEL == '' → `|| vars.DEFAULT_MODEL` fires).
  *   5. REVIEWER_MODELS is empty so the reviewer resolver reaches the pairing
  *      tier, and REVIEW_MODEL_PAIRING uses an explicit map that pairs each
- *      Anthropic authoring model with its same-class OpenAI equivalent.
+ *      Anthropic and OpenAI authoring model with a cross-vendor reviewer.
  *   6. Anthropic models route to ANTHROPIC_API_KEY.
- *   7. OpenAI reviewer models route to OPENAI_API_KEY.
+ *   7. Reviewer models route to the appropriate provider API key.
  *   8. The default authoring model is never selected as its own reviewer.
  *
  * All tests are static (file reads + unit calls) so they run offline and are
@@ -249,10 +249,10 @@ describe("Model policy — (4) empty DESIGN_DEFAULT_MODEL falls back to DEFAULT_
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 5: reviewers are picked by explicit Anthropic → OpenAI pairing
+// Assertion 5: reviewers are picked by explicit cross-vendor pairing
 // ---------------------------------------------------------------------------
 
-describe("Model policy — (5) reviewers are paired Anthropic → OpenAI via explicit map", () => {
+describe("Model policy — (5) reviewers are paired across vendors via explicit map", () => {
   it("terraform.tfvars sets reviewer_models to [] so the pairing tier is reachable", () => {
     // A non-empty REVIEWER_MODELS list is Tier 2 in resolve-reviewer-set and
     // would bypass pairing entirely.
@@ -271,7 +271,7 @@ describe("Model policy — (5) reviewers are paired Anthropic → OpenAI via exp
     );
   });
 
-  it("explicit_map pairs every Anthropic tier alias and pinned 5.5 ID with an OpenAI model", () => {
+  it("explicit_map pairs the configured authors with cross-vendor reviewers", () => {
     expect(explicitMap).toEqual({
       haiku: "gpt-5.6-luna",
       sonnet: "gpt-5.6-terra",
@@ -279,6 +279,8 @@ describe("Model policy — (5) reviewers are paired Anthropic → OpenAI via exp
       "claude-haiku-5-5": "gpt-5.6-luna",
       "claude-sonnet-5-5": "gpt-5.6-terra",
       "claude-opus-5-5": "gpt-5.6-sol",
+      "gpt-6.1-sol": "claude-opus-5-5",
+      "gpt-6.1-terra": "claude-sonnet-5-5",
     });
   });
 
@@ -308,6 +310,8 @@ describe("Model policy — (5) reviewers are paired Anthropic → OpenAI via exp
     ["sonnet", "gpt-5.6-terra"],
     ["opus", "gpt-5.6-sol"],
     ["claude-haiku-5-5", "gpt-5.6-luna"],
+    ["gpt-6.1-sol", "claude-opus-5-5"],
+    ["gpt-6.1-terra", "claude-sonnet-5-5"],
   ])("pairing selects %s → %s as the primary pick", (author, reviewer) => {
     const result = selectReviewerModel(
       author,
@@ -341,19 +345,19 @@ describe("Model policy — (6) Anthropic models route to Anthropic", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Assertion 7: OpenAI reviewer models route to OPENAI_API_KEY
+// Assertion 7: reviewer models route to the appropriate provider
 // ---------------------------------------------------------------------------
 
-describe("Model policy — (7) OpenAI reviewer models route to OpenAI", () => {
+describe("Model policy — (7) reviewer models route to the appropriate provider", () => {
   it("run-agent action routes gpt-* to OPENAI_API_KEY", () => {
     expect(runAgentContent).toContain(
       "gpt-*|o[0-9]*)              _key_env=(-e OPENAI_API_KEY)",
     );
   });
 
-  it("every explicit_map reviewer is a gpt-* model", () => {
-    for (const reviewer of Object.values(explicitMap)) {
-      expect(reviewer).toMatch(/^gpt-/);
+  it("explicit_map reviewers use the opposite provider from their authors", () => {
+    for (const [author, reviewer] of Object.entries(explicitMap)) {
+      expect(reviewer).toMatch(author.startsWith("gpt-") ? /^claude-/ : /^gpt-/);
     }
   });
 });
