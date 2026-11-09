@@ -25,6 +25,15 @@ inputs:
     description: 'Author filter used to enumerate developer-agent PRs'
     required: false
     default: 'app/mfrancza-developer-agent'
+  all-authors:
+    description: >
+      When 'true', the GitHub search query drops the author:<developer-author>
+      qualifier so every open PR in the repository is enumerated. Cross-repository
+      (fork-headed) PRs are excluded from the results by calling
+      GET /repos/{owner}/{repo}/pulls/{number} and comparing head/base repo full
+      names. Defaults to 'false' to preserve the existing agent-only behavior.
+    required: false
+    default: 'false'
 
 outputs:
   conflicted_prs:
@@ -81,4 +90,5 @@ runs:
         INPUT_REPO: ${{ inputs.repo }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         INPUT_AUTHOR: ${{ inputs.author }}
+        INPUT_ALL_AUTHORS: ${{ inputs.all-authors }}
       run: npx --no-install tsx src/find-conflicted-prs.ts

@@ -143,3 +143,9 @@ variable "review_model_pairing" {
     fallback_chain    = ["default-model"]
   }
 }
+
+variable "resolve_conflicts_all_authors" {
+  description = "When true, the push-triggered resolve-conflicts enumeration sweeps every open PR in the repository rather than only developer-agent-authored PRs. Cross-repository (fork-headed) PRs are always excluded. Stored as the RESOLVE_CONFLICTS_ALL_AUTHORS Actions variable (values: 'true' / 'false'). Defaults to false to preserve the existing agent-only behavior."
+  type        = bool
+  default     = false
+}

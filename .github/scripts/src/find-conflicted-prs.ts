@@ -110,8 +110,59 @@ export async function listDeveloperAgentPrs(
 }
 
 /**
- * Enumerates all open developer-agent PRs and returns those that are
- * CONFLICTING after the mergeability poll settles.
+ * Lists all open PRs in the repository (up to 100), without author filter.
+ * Uses the GitHub search API without the `author:` qualifier so every open PR
+ * is returned, regardless of who authored it.
+ */
+export async function listAllOpenPrs(
+  octokit: OctokitType,
+  owner: string,
+  name: string
+): Promise<number[]> {
+  const response = await octokit.rest.search.issuesAndPullRequests({
+    q: `is:pr is:open repo:${owner}/${name}`,
+    per_page: 100,
+  });
+  return response.data.items.map((item) => item.number);
+}
+
+/**
+ * Checks whether a PR's head branch lives in the same repository as the base
+ * branch (i.e., is not a fork-headed PR). Calls the REST Pulls API to get the
+ * full PR payload and compares head.repo.full_name with base.repo.full_name.
+ *
+ * Returns false for PRs whose head fork was deleted (head.repo === null),
+ * treating them as out of scope, so a stale deleted-fork PR cannot crash the
+ * enumeration loop.
+ */
+export async function isSameRepoHead(
+  octokit: OctokitType,
+  owner: string,
+  name: string,
+  prNumber: number
+): Promise<boolean> {
+  const response = await octokit.rest.pulls.get({
+    owner,
+    repo: name,
+    pull_number: prNumber,
+  });
+  const pr = response.data;
+  // head.repo is null when the head fork was deleted after the PR was opened.
+  if (!pr.head.repo) return false;
+  return pr.head.repo.full_name === pr.base.repo.full_name;
+}
+
+/**
+ * Enumerates open PRs and returns those that are CONFLICTING after the
+ * mergeability poll settles.
+ *
+ * When allAuthors is false (the default), only developer-agent-authored PRs
+ * are enumerated using the GitHub search API with an `author:` qualifier.
+ *
+ * When allAuthors is true, all open PRs in the repository are enumerated
+ * (search query drops the `author:` qualifier). Each candidate is then checked
+ * via GET /repos/{owner}/{repo}/pulls/{number} to exclude cross-repository
+ * (fork-headed) PRs before the mergeability poll runs.
  */
 export async function findConflictedPrs(
   octokit: OctokitType,
@@ -119,16 +170,50 @@ export async function findConflictedPrs(
   name: string,
   author: string,
   delays: readonly number[],
-  sleep: (ms: number) => Promise<void>
+  sleep: (ms: number) => Promise<void>,
+  allAuthors = false
 ): Promise<number[]> {
-  const prNumbers = await listDeveloperAgentPrs(octokit, owner, name, author);
+  let prNumbers: number[];
+
+  if (allAuthors) {
+    const allPrs = await listAllOpenPrs(octokit, owner, name);
+
+    if (allPrs.length === 0) {
+      console.log("No open PRs found.");
+      return [];
+    }
+
+    console.log(
+      `Open PRs (all authors): ${allPrs.join(" ")} — filtering to same-repo heads`
+    );
+
+    // Exclude fork-headed PRs: the developer-agent App can only push to
+    // branches on the base repository, so including fork PRs would guarantee
+    // a runtime failure after a wasted token mint and container boot.
+    const sameRepoPrs: number[] = [];
+    for (const prNum of allPrs) {
+      const sameRepo = await isSameRepoHead(octokit, owner, name, prNum);
+      if (sameRepo) {
+        sameRepoPrs.push(prNum);
+      } else {
+        console.log(`PR #${prNum} is fork-headed — skipping`);
+      }
+    }
+    prNumbers = sameRepoPrs;
+  } else {
+    prNumbers = await listDeveloperAgentPrs(octokit, owner, name, author);
+  }
 
   if (prNumbers.length === 0) {
-    console.log("No open developer-agent PRs found.");
+    console.log(
+      allAuthors
+        ? "No same-repo open PRs found."
+        : "No open developer-agent PRs found."
+    );
     return [];
   }
 
-  console.log(`Open developer-agent PRs: ${prNumbers.join(" ")}`);
+  console.log(`Open PRs: ${prNumbers.join(" ")}`);
 
   const conflicted: number[] = [];
   for (const prNum of prNumbers) {
@@ -157,6 +242,7 @@ async function run(): Promise<void> {
   const prNumberInput = core.getInput("pr_number");
   const author =
     core.getInput("author") || "app/mfrancza-developer-agent";
+  const allAuthors = core.getInput("all_authors") === "true";
 
   const [owner, name] = repo.split("/");
   const octokit = getOctokit(token);
@@ -188,14 +274,15 @@ async function run(): Promise<void> {
     return;
   }
 
-  // Automatic path: enumerate developer-agent PRs and filter to CONFLICTING.
+  // Automatic path: enumerate PRs and filter to CONFLICTING.
   const conflicted = await findConflictedPrs(
     octokit,
     owner,
     name,
     author,
     DEFAULT_DELAYS,
-    defaultSleep
+    defaultSleep,
+    allAuthors
   );
   console.log(`Conflicted PRs: ${JSON.stringify(conflicted)}`);
   core.setOutput("conflicted_prs", JSON.stringify(conflicted));

@@ -31,6 +31,18 @@ on:
         type: string
         required: false
         default: 'app/mfrancza-developer-agent'
+      all-authors:
+        description: >
+          When 'true', the conflict-finder enumeration drops the
+          author:<developer-author> qualifier so every open PR in the repository
+          is considered. Cross-repository (fork-headed) PRs are excluded from
+          the results. Corresponds to the RESOLVE_CONFLICTS_ALL_AUTHORS
+          repository variable set by Terraform. Ignored when pr-number is set
+          (enumeration is skipped). Defaults to 'false' to preserve the
+          existing agent-only behavior.
+        type: string
+        required: false
+        default: 'false'
       escalation-assignee:
         description: >
           GitHub login to assign escalation issues to (e.g.
@@ -144,6 +156,7 @@ jobs:
           repo: ${{ github.repository }}
           pr-number: ${{ inputs.pr-number }}
           author: ${{ inputs.developer-author }}
+          all-authors: ${{ inputs.all-authors }}
 
   resolve:
     needs: find-conflicted-prs

@@ -170,3 +170,16 @@ resource "github_actions_variable" "review_model_pairing" {
   variable_name = "REVIEW_MODEL_PAIRING"
   value         = jsonencode(var.review_model_pairing)
 }
+
+# Expose the resolve-conflicts all-authors flag as a repository Actions variable
+# so agent-resolve-conflicts.yml can pass it to the reusable workflow and on to
+# the find-conflicted-prs action. When 'true', the finder drops the
+# author:<developer-author> qualifier from the GitHub search query and sweeps
+# every open PR, excluding fork-headed PRs. When 'false' (the default), only
+# developer-agent-authored PRs are enumerated — the existing behavior is fully
+# preserved.
+resource "github_actions_variable" "resolve_conflicts_all_authors" {
+  repository    = var.repository
+  variable_name = "RESOLVE_CONFLICTS_ALL_AUTHORS"
+  value         = tostring(var.resolve_conflicts_all_authors)
+}

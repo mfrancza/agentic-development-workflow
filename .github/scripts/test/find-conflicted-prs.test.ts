@@ -3,6 +3,8 @@ import {
   validatePrNumberInput,
   pollMergeability,
   listDeveloperAgentPrs,
+  listAllOpenPrs,
+  isSameRepoHead,
   findConflictedPrs,
   DEFAULT_DELAYS,
 } from "../src/find-conflicted-prs.js";
@@ -23,6 +25,19 @@ function makeSearchOctokit(search: ReturnType<typeof vi.fn>): OctokitType {
   } as unknown as OctokitType;
 }
 
+/** Build a mock Octokit with only a REST pulls.get method. */
+function makePullsGetOctokit(
+  pullsGet: ReturnType<typeof vi.fn>
+): OctokitType {
+  return {
+    graphql: vi.fn(),
+    rest: {
+      search: { issuesAndPullRequests: vi.fn() },
+      pulls: { get: pullsGet },
+    },
+  } as unknown as OctokitType;
+}
+
 /** Build a mock Octokit with both graphql and search. */
 function makeFullOctokit(
   graphql: ReturnType<typeof vi.fn>,
@@ -30,7 +45,25 @@ function makeFullOctokit(
 ): OctokitType {
   return {
     graphql,
-    rest: { search: { issuesAndPullRequests: search } },
+    rest: {
+      search: { issuesAndPullRequests: search },
+      pulls: { get: vi.fn() },
+    },
+  } as unknown as OctokitType;
+}
+
+/** Build a mock Octokit with graphql, search, and pulls.get. */
+function makeFullOctokitWithPulls(
+  graphql: ReturnType<typeof vi.fn>,
+  search: ReturnType<typeof vi.fn>,
+  pullsGet: ReturnType<typeof vi.fn>
+): OctokitType {
+  return {
+    graphql,
+    rest: {
+      search: { issuesAndPullRequests: search },
+      pulls: { get: pullsGet },
+    },
   } as unknown as OctokitType;
 }
 
@@ -280,7 +313,129 @@ describe("listDeveloperAgentPrs", () => {
 });
 
 // ---------------------------------------------------------------------------
-// findConflictedPrs
+// listAllOpenPrs
+// ---------------------------------------------------------------------------
+
+describe("listAllOpenPrs", () => {
+  it("returns PR numbers extracted from search results without author filter", async () => {
+    const search = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: { items: [{ number: 1 }, { number: 2 }, { number: 3 }] },
+      });
+
+    const result = await listAllOpenPrs(
+      makeSearchOctokit(search),
+      "owner",
+      "repo"
+    );
+
+    expect(result).toEqual([1, 2, 3]);
+  });
+
+  it("passes a search query without an author qualifier", async () => {
+    const search = vi.fn().mockResolvedValueOnce({ data: { items: [] } });
+
+    await listAllOpenPrs(makeSearchOctokit(search), "myorg", "myrepo");
+
+    expect(search).toHaveBeenCalledWith({
+      q: "is:pr is:open repo:myorg/myrepo",
+      per_page: 100,
+    });
+  });
+
+  it("returns an empty array when no open PRs exist", async () => {
+    const search = vi.fn().mockResolvedValueOnce({ data: { items: [] } });
+
+    const result = await listAllOpenPrs(
+      makeSearchOctokit(search),
+      "owner",
+      "repo"
+    );
+
+    expect(result).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isSameRepoHead
+// ---------------------------------------------------------------------------
+
+describe("isSameRepoHead", () => {
+  it("returns true when the PR head and base repos are the same", async () => {
+    const pullsGet = vi.fn().mockResolvedValueOnce({
+      data: {
+        head: { repo: { full_name: "owner/repo" } },
+        base: { repo: { full_name: "owner/repo" } },
+      },
+    });
+
+    const result = await isSameRepoHead(
+      makePullsGetOctokit(pullsGet),
+      "owner",
+      "repo",
+      42
+    );
+
+    expect(result).toBe(true);
+  });
+
+  it("returns false when the PR head is from a fork (different full_name)", async () => {
+    const pullsGet = vi.fn().mockResolvedValueOnce({
+      data: {
+        head: { repo: { full_name: "fork-owner/repo" } },
+        base: { repo: { full_name: "owner/repo" } },
+      },
+    });
+
+    const result = await isSameRepoHead(
+      makePullsGetOctokit(pullsGet),
+      "owner",
+      "repo",
+      7
+    );
+
+    expect(result).toBe(false);
+  });
+
+  it("returns false when head.repo is null (deleted fork)", async () => {
+    const pullsGet = vi.fn().mockResolvedValueOnce({
+      data: {
+        head: { repo: null },
+        base: { repo: { full_name: "owner/repo" } },
+      },
+    });
+
+    const result = await isSameRepoHead(
+      makePullsGetOctokit(pullsGet),
+      "owner",
+      "repo",
+      99
+    );
+
+    expect(result).toBe(false);
+  });
+
+  it("calls the REST Pulls API with the correct parameters", async () => {
+    const pullsGet = vi.fn().mockResolvedValueOnce({
+      data: {
+        head: { repo: { full_name: "myorg/myrepo" } },
+        base: { repo: { full_name: "myorg/myrepo" } },
+      },
+    });
+
+    await isSameRepoHead(makePullsGetOctokit(pullsGet), "myorg", "myrepo", 55);
+
+    expect(pullsGet).toHaveBeenCalledWith({
+      owner: "myorg",
+      repo: "myrepo",
+      pull_number: 55,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findConflictedPrs — default behavior (allAuthors = false)
 // ---------------------------------------------------------------------------
 
 describe("findConflictedPrs", () => {
@@ -361,5 +516,203 @@ describe("findConflictedPrs", () => {
     );
 
     expect(result).toEqual([5, 10, 15]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// findConflictedPrs — all-authors mode (allAuthors = true)
+// ---------------------------------------------------------------------------
+
+describe("findConflictedPrs (allAuthors = true)", () => {
+  it("enumerates all open PRs without an author qualifier", async () => {
+    const search = vi.fn().mockResolvedValueOnce({
+      data: { items: [{ number: 1 }] },
+    });
+    const pullsGet = vi.fn().mockResolvedValueOnce({
+      data: {
+        head: { repo: { full_name: "owner/repo" } },
+        base: { repo: { full_name: "owner/repo" } },
+      },
+    });
+    const graphql = vi
+      .fn()
+      .mockResolvedValue({ repository: { pullRequest: { mergeable: "CONFLICTING" } } });
+
+    await findConflictedPrs(
+      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      "owner",
+      "repo",
+      "app/mfrancza-developer-agent",
+      DEFAULT_DELAYS,
+      noopSleep,
+      true
+    );
+
+    // The search query must not include an author qualifier.
+    expect(search).toHaveBeenCalledWith({
+      q: "is:pr is:open repo:owner/repo",
+      per_page: 100,
+    });
+  });
+
+  it("returns CONFLICTING same-repo PRs and skips fork-headed PRs", async () => {
+    const search = vi.fn().mockResolvedValueOnce({
+      data: { items: [{ number: 10 }, { number: 20 }, { number: 30 }] },
+    });
+    // PR 10: same-repo, PR 20: fork, PR 30: same-repo
+    const pullsGet = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          head: { repo: { full_name: "owner/repo" } },
+          base: { repo: { full_name: "owner/repo" } },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          head: { repo: { full_name: "fork-owner/repo" } },
+          base: { repo: { full_name: "owner/repo" } },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          head: { repo: { full_name: "owner/repo" } },
+          base: { repo: { full_name: "owner/repo" } },
+        },
+      });
+    const graphql = vi
+      .fn()
+      .mockResolvedValue({ repository: { pullRequest: { mergeable: "CONFLICTING" } } });
+
+    const result = await findConflictedPrs(
+      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      "owner",
+      "repo",
+      "app/mfrancza-developer-agent",
+      DEFAULT_DELAYS,
+      noopSleep,
+      true
+    );
+
+    // Fork PR #20 is excluded; only same-repo PRs #10 and #30 are polled.
+    expect(result).toEqual([10, 30]);
+    // mergeability should only be polled for the two same-repo PRs
+    expect(graphql).toHaveBeenCalledTimes(2);
+  });
+
+  it("excludes PRs whose head.repo is null (deleted fork)", async () => {
+    const search = vi.fn().mockResolvedValueOnce({
+      data: { items: [{ number: 5 }, { number: 6 }] },
+    });
+    // PR 5: deleted fork (head.repo === null); PR 6: same-repo
+    const pullsGet = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: {
+          head: { repo: null },
+          base: { repo: { full_name: "owner/repo" } },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          head: { repo: { full_name: "owner/repo" } },
+          base: { repo: { full_name: "owner/repo" } },
+        },
+      });
+    const graphql = vi
+      .fn()
+      .mockResolvedValue({ repository: { pullRequest: { mergeable: "CONFLICTING" } } });
+
+    const result = await findConflictedPrs(
+      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      "owner",
+      "repo",
+      "app/mfrancza-developer-agent",
+      DEFAULT_DELAYS,
+      noopSleep,
+      true
+    );
+
+    // Only PR #6 passes the fork filter.
+    expect(result).toEqual([6]);
+  });
+
+  it("returns an empty array when all open PRs are fork-headed", async () => {
+    const search = vi.fn().mockResolvedValueOnce({
+      data: { items: [{ number: 1 }, { number: 2 }] },
+    });
+    const pullsGet = vi
+      .fn()
+      .mockResolvedValue({
+        data: {
+          head: { repo: { full_name: "fork-owner/repo" } },
+          base: { repo: { full_name: "owner/repo" } },
+        },
+      });
+    const graphql = vi.fn();
+
+    const result = await findConflictedPrs(
+      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      "owner",
+      "repo",
+      "app/mfrancza-developer-agent",
+      DEFAULT_DELAYS,
+      noopSleep,
+      true
+    );
+
+    expect(result).toEqual([]);
+    // No mergeability polling should occur when all PRs are excluded.
+    expect(graphql).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty array when there are no open PRs", async () => {
+    const search = vi.fn().mockResolvedValueOnce({ data: { items: [] } });
+    const pullsGet = vi.fn();
+    const graphql = vi.fn();
+
+    const result = await findConflictedPrs(
+      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      "owner",
+      "repo",
+      "app/mfrancza-developer-agent",
+      DEFAULT_DELAYS,
+      noopSleep,
+      true
+    );
+
+    expect(result).toEqual([]);
+    // Fork filter and mergeability polling should not be called when no PRs exist.
+    expect(pullsGet).not.toHaveBeenCalled();
+    expect(graphql).not.toHaveBeenCalled();
+  });
+
+  it("returns an empty array when all same-repo PRs are MERGEABLE", async () => {
+    const search = vi.fn().mockResolvedValueOnce({
+      data: { items: [{ number: 11 }, { number: 22 }] },
+    });
+    const pullsGet = vi
+      .fn()
+      .mockResolvedValue({
+        data: {
+          head: { repo: { full_name: "owner/repo" } },
+          base: { repo: { full_name: "owner/repo" } },
+        },
+      });
+    const graphql = vi
+      .fn()
+      .mockResolvedValue({ repository: { pullRequest: { mergeable: "MERGEABLE" } } });
+
+    const result = await findConflictedPrs(
+      makeFullOctokitWithPulls(graphql, search, pullsGet),
+      "owner",
+      "repo",
+      "app/mfrancza-developer-agent",
+      DEFAULT_DELAYS,
+      noopSleep,
+      true
+    );
+
+    expect(result).toEqual([]);
   });
 });
