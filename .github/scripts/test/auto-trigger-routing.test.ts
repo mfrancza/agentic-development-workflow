@@ -18,6 +18,11 @@ describe("agent-auto-trigger routing contract", () => {
     expect(caller).not.toContain("transition:");
   });
 
+  it("listens for ready_for_review and forwards pr-is-draft", () => {
+    expect(caller).toMatch(/types:\s*\[.*ready_for_review.*\]/s);
+    expect(caller).toContain("pr-is-draft: ${{ github.event.pull_request.draft || false }}");
+  });
+
   it("keeps every transition predicate and flag inside the reusable route", () => {
     expect(reusable).toContain("route:");
     for (const transition of [
@@ -41,6 +46,13 @@ describe("agent-auto-trigger routing contract", () => {
     expect(reusable).toContain("!contains(fromJSON(inputs.issue-labels), 'draft')");
     expect(reusable).toContain("inputs.pr-head-repository == github.repository");
     expect(reusable).toContain("inputs.pr-author-login == inputs.developer-bot-login");
+  });
+
+  it("auto-review route fires on ready_for_review and on opened when not draft", () => {
+    expect(reusable).toContain("inputs.event-action == 'ready_for_review'");
+    expect(reusable).toContain("!inputs.pr-is-draft");
+    // The pr-is-draft input must be declared in the reusable's workflow_call inputs
+    expect(reusable).toMatch(/pr-is-draft:\n(?:.*\n){0,10}\s+type:\s+boolean/);
   });
 
   it("preserves the auto-review allowlist exception and other transition authorization", () => {

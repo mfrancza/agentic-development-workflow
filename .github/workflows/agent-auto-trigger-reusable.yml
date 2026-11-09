@@ -47,6 +47,40 @@ on:
         type: number
         required: false
         default: 0
+      pr-is-draft:
+        description: >
+          Whether the pull request is a draft. Used to gate the auto-review
+          transition on pull_request.opened: draft openings are skipped so the
+          transition fires on pull_request.ready_for_review instead, after the
+          entrypoint has injected the authoritative authored-by-model marker.
+          Pass false for issue-related transitions.
+        type: boolean
+        required: false
+        default: false
+      pr-author-is-bot:
+        description: >
+          Whether the pull request author is a Bot user
+          (github.event.pull_request.user.type == 'Bot'). Used to gate the
+          auto-review transition on pull_request.opened: bot-authored openings
+          are skipped because the entrypoint may not have injected the
+          authored-by-model marker yet — the ready_for_review event fires after
+          the marker is written and the draft is promoted. Pass false for
+          issue-related transitions.
+        type: boolean
+        required: false
+        default: false
+      pr-body:
+        description: >
+          Body text of the pull request. Used to verify that the authoritative
+          authored-by-model marker is present before routing a
+          pull_request.ready_for_review event to auto-review. A bot can promote
+          a draft before the entrypoint writes the marker; this guard prevents
+          the reviewer from falling back to the default model and silently
+          mismapping the first review. Pass empty string for issue-related
+          transitions.
+        type: string
+        required: false
+        default: ''
       issue-label-name:
         description: Label named by the original issues labeled/unlabeled event.
         type: string
@@ -129,7 +163,10 @@ jobs:
         vars.AUTO_TRIGGER_AGENTS != '' &&
         fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true && 'auto-developer-undraft' ||
         inputs.event-name == 'pull_request' &&
-        inputs.event-action == 'opened' &&
+        ((inputs.event-action == 'ready_for_review' &&
+          contains(inputs.pr-body, '<!-- authored-by-model:')) ||
+         (inputs.event-action == 'opened' && !inputs.pr-is-draft &&
+          !inputs.pr-author-is-bot)) &&
         inputs.pr-head-repository == github.repository &&
         (startsWith(inputs.pr-head-ref, 'agent/') ||
          startsWith(inputs.pr-head-ref, 'design/') ||
@@ -535,7 +572,13 @@ jobs:
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "blocked"
 
   # ── Transition 5 ─────────────────────────────────────────────────────────────
-  # pull_request.opened on an agent/… or design/… branch → agent:review
+  # pull_request.ready_for_review on an agent/… or design/… branch → agent:review
+  # pull_request.opened (non-draft) on an agent/… or design/… branch → agent:review
+  #
+  # The ready_for_review path is the primary trigger for agent-authored PRs: the
+  # entrypoint opens PRs as draft, injects the authored-by-model marker, then
+  # flips the PR to ready-for-review. The opened path (gated on !pr-is-draft) is
+  # retained for human-opened non-draft PRs on agent/… or design/… branches.
   #
   # No checkout: actions/create-github-app-token is called directly to avoid
   # executing PR-authored local actions with secrets in scope. See
