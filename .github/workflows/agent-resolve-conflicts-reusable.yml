@@ -21,6 +21,11 @@ on:
         type: string
         required: false
         default: ''
+      sender-login:
+        description: 'Login requesting on-demand resolution; empty for trusted push and dispatch callers.'
+        type: string
+        required: false
+        default: ''
       developer-author:
         description: >
           GitHub App slug in `app/<slug>` form used to filter open PRs by the
@@ -84,15 +89,123 @@ on:
         required: false
       XAI_API_KEY:
         required: false
+      ALLOWLIST_RESOLVER_APP_ID: { required: false }
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: { required: false }
 
 permissions:
   contents: read
   pull-requests: read  # for PR enumeration and mergeability polling in find-conflicted-prs
 
 jobs:
+  state-gate:
+    runs-on: ubuntu-24.04
+    permissions:
+      pull-requests: read
+    outputs:
+      proceed: ${{ steps.state.outputs.proceed }}
+    steps:
+      - name: Check PR state for on-demand resolution
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
+          SENDER: ${{ inputs.sender-login }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$SENDER" ]]; then
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+            echo '::error::On-demand resolution requires a valid PR number.'
+            exit 1
+          fi
+          state="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.state')"
+          if [[ "$state" != open ]]; then
+            echo "::notice::PR #$PR_NUMBER is not open; skipping resolution."
+            echo 'proceed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'proceed=true' >> "$GITHUB_OUTPUT"
+          fi
+
+  authorize:
+    needs: state-gate
+    if: needs.state-gate.outputs.proceed == 'true'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Validate and resolve helpers-ref
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ -z "$HELPERS_REF" ]]; then
+            echo '::error::helpers-ref input is required and must not be empty.'
+            exit 1
+          fi
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/$HELPERS_REF" --jq '.sha')"
+          if [[ -z "$resolved" ]]; then
+            echo "::error::helpers-ref '$HELPERS_REF' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "sha=$(printf '%s' "$resolved" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "::error::Helper checkout HEAD ($actual_sha) does not match the resolved SHA ($EXPECTED_SHA)."
+            exit 1
+          fi
+      - name: Detect team references
+        id: detect
+        env:
+          ALLOWLIST: ${{ vars.AGENT_ALLOWLIST }}
+          SENDER: ${{ inputs.sender-login }}
+        run: |
+          set -euo pipefail
+          has=false
+          if [[ -n "$SENDER" && -n "$ALLOWLIST" ]] && jq -e 'any(.[]; type == "string" and contains("/"))' <<< "$ALLOWLIST" >/dev/null; then
+            has=true
+          fi
+          echo "needs_resolver=$has" >> "$GITHUB_OUTPUT"
+      - name: Mint installation token for allowlist resolver
+        id: allowlist-resolver
+        if: steps.detect.outputs.needs_resolver == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
+      - name: Check agent allowlist
+        uses: ./_agentic-workflow/.github/actions/check-agent-allowlist
+        with:
+          allowlist: ${{ vars.AGENT_ALLOWLIST }}
+          principal: ${{ inputs.sender-login }}
+          skip-gate: ${{ inputs.sender-login == '' }}
+          resolver-token: ${{ steps.allowlist-resolver.outputs.token }}
+
   find-conflicted-prs:
+    needs: [state-gate, authorize]
+    if: needs.state-gate.outputs.proceed == 'true' && needs.authorize.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       conflicted_prs: ${{ steps.find.outputs.conflicted_prs }}
 
@@ -163,6 +276,9 @@ jobs:
     if: needs.find-conflicted-prs.outputs.conflicted_prs != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      contents: read
+      pull-requests: read
     strategy:
       matrix:
         pr_number: ${{ fromJSON(needs.find-conflicted-prs.outputs.conflicted_prs) }}
@@ -224,6 +340,20 @@ jobs:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
+      - name: Clear prior conflict escalation
+        if: inputs.sender-login != ''
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ matrix.pr_number }}
+        run: |
+          set -euo pipefail
+          labels="$(gh api "repos/$REPO/issues/$PR_NUMBER/labels" --paginate --jq '.[].name')"
+          if printf '%s\n' "$labels" | grep -Fxq 'conflicts-escalated'; then
+            gh api --method DELETE "repos/$REPO/issues/$PR_NUMBER/labels/conflicts-escalated"
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body 'Operator re-attempted resolution via `agent:resolve-conflicts`; prior escalation marker removed.'
+          fi
+
       - name: Prepare agent log directory
         run: |
           set -euo pipefail
@@ -244,6 +374,16 @@ jobs:
           model: ${{ vars.DEFAULT_MODEL }}
           escalation-assignee: ${{ inputs.escalation-assignee }}
           logs-dir: ${{ runner.temp }}/agent-logs
+
+      - name: Remove on-demand trigger label
+        if: success() && inputs.sender-login != ''
+        env:
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ matrix.pr_number }}
+        run: |
+          set -euo pipefail
+          gh api --method DELETE "repos/$REPO/issues/$PR_NUMBER/labels/agent%3Aresolve-conflicts"
 
       - name: Upload agent logs
         if: always()

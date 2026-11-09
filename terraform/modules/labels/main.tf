@@ -71,6 +71,10 @@ locals {
       color       = "6f42c1"
       description = "Route this issue to the designer agent to write a design doc and create draft sub-issues."
     }
+    "agent:resolve-conflicts" = {
+      color       = "6f42c1"
+      description = "Run the merge-conflict resolver against this PR on demand."
+    }
 
     # Anthropic — top-level tier aliases (Claude Code CLI resolves each to the
     # latest snapshot of its series). These are the labels the grooming agent

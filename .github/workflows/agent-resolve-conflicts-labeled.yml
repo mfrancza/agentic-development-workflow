@@ -1,0 +1,31 @@
+name: agent-resolve-conflicts-labeled
+
+on:
+  pull_request_target:
+    types: [labeled]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  resolve-conflicts:
+    if: >
+      github.event.label.name == 'agent:resolve-conflicts' &&
+      github.event.sender.login != '' &&
+      github.event.pull_request.head.repo.full_name == github.event.pull_request.base.repo.full_name
+    uses: ./.github/workflows/agent-resolve-conflicts-reusable.yml
+    with:
+      pr-number: ${{ github.event.pull_request.number }}
+      sender-login: ${{ github.event.sender.login }}
+      escalation-assignee: ${{ github.repository_owner }}
+      image: ''
+      helpers-ref: ${{ github.sha }}
+    secrets:
+      DEVELOPER_APP_ID: ${{ secrets.DEVELOPER_APP_ID }}
+      DEVELOPER_APP_PRIVATE_KEY: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
+      ALLOWLIST_RESOLVER_APP_ID: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+      ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
