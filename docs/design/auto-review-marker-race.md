@@ -37,7 +37,7 @@ From the issue body ([#793](https://github.com/mfrancza/agentic-development-work
 
 3. **Defence in depth — normalize `claude-*` IDs to their tier class in the pairing resolver.** Even with the race closed, an unmapped Anthropic snapshot ID (future `claude-sonnet-5-0`, etc.) must still pair by class rather than silently falling through to `DEFAULT_MODEL`. The issue lists this as optional; this design treats it as required because (a) the implementation is small and (b) it closes the same observed pairing-miss in the one scenario the first two layers do not (a human-opened agent-branch PR that bypasses the draft contract, or a prompt-compliance failure).
 
-4. **Acceptance signals** (verbatim from the issue): (a) on a new agent PR, the review triggered by `pull_request.opened` logs the configured authoring model and the paired reviewer; (b) a unit test shows `claude-sonnet-4-6` resolving to the sonnet class.
+4. **Acceptance signals** (verbatim from the issue, updated for the draft contract): (a) on a new agent PR, the review triggered by `pull_request.ready_for_review` logs the configured authoring model and the paired reviewer; (b) a unit test shows `claude-sonnet-4-6` resolving to the sonnet class.
 
 ### Ambiguities resolved
 
@@ -70,7 +70,15 @@ The entrypoint knows the configured model at this point (the same value passed t
 
 **Rationale.** The draft/ready-for-review transition is a natural semantic signal: "draft" means "not yet reviewable," which precisely matches "marker not yet authoritative." GitHub emits a distinct `ready_for_review` event when the transition happens, so the auto-trigger can anchor on that event instead of the racy `opened`. The entrypoint's existing `inject_authored_by_marker` logic stays unchanged — the only new steps are a `--draft` flag and a `gh pr ready` call. No refactor to the model's PR-creation flow.
 
-**Fail-loud on non-draft PRs.** Prompt compliance is not guaranteed; a non-compliant model could still open a non-draft PR. With the bot-author gate on the `opened` path (Decision 2), a bot-authored non-draft PR no longer triggers `agent:review` immediately — the auto-trigger skips it because `is-bot-author` is true. The fail-loud check then surfaces the compliance failure without a mispaired review having been dispatched. The failure mode is: workflow run fails; operator reads the error, inspects the PR (no `agent:review` applied yet), re-runs the action after the entrypoint corrects the state (or manually invokes `inject_authored_by_marker` and `gh pr ready`), and auto-review proceeds normally via `pull_request.ready_for_review`. The fail-loud check thus acts as a backstop that prevents silent mispairing; the bot-author gate (Decision 2) prevents the review from being dispatched in the first place.
+**Fail-loud on non-draft PRs.** Prompt compliance is not guaranteed; a non-compliant model could still open a non-draft PR. With the bot-author gate on the `opened` path (Decision 2), a bot-authored non-draft PR no longer triggers `agent:review` immediately — the auto-trigger skips it because `is-bot-author` is true. The fail-loud check then surfaces the compliance failure without a mispaired review having been dispatched. The fail-loud check thus acts as a backstop that prevents silent mispairing; the bot-author gate (Decision 2) prevents the review from being dispatched in the first place.
+
+**Recovery transition for branch 3 (non-draft, marker absent or wrong).** Once a PR has been promoted to ready, `action_design`/`action_implement` returns early because the PR already exists, and calling `gh pr ready` on a non-draft PR is a no-op — no `ready_for_review` event is emitted. The operator therefore cannot recover by simply re-running the action. The required recovery steps are:
+
+1. The operator converts the PR back to draft: `gh pr draft <PR_NUMBER> --repo "$GITHUB_REPO"`.
+2. The operator re-runs the original action (e.g. via workflow dispatch or by re-triggering the failed run).
+3. The entrypoint now sees `isDraft == true` (branch 1), runs normally: injects the authoritative marker and calls `gh pr ready`, which emits `pull_request.ready_for_review` and triggers auto-review normally.
+
+The entrypoint's fail-loud error message must include this instruction explicitly so the operator does not attempt a bare re-run. Issue #817 must implement the error message accordingly.
 
 **Alternative considered — entrypoint takes over `gh pr create`.** Rejected. This eliminates the race unconditionally but splits the model's run into two phases (pre-PR title/body writing and post-PR label/reviewer actions) because the model does not yet know the PR number when it runs. The refactor touches `run_agent`'s contract, the `CODE_REVIEWERS` flow in `implement.md`, and the escalation flow in `implement.md` / `design.md` (both of which `gh pr edit` the newly-opened PR with `human-required`). A smaller fix achieves the same race elimination.
 
