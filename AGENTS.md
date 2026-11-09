@@ -156,6 +156,8 @@ cd .github/scripts && npm ci && npm run typecheck && npm test
 
 If the checks fail: fix the failures before committing. If a failure is clearly unrelated to your change, state why in your commit message or PR description before committing anyway.
 
+The entrypoint also runs these checks automatically as a fail-open backstop after each push (see **Pre-commit checks backstop** above). For this deployment, `PRE_COMMIT_CHECK_CMD` is configured as `npm ci && npm run typecheck && npm test` (run inside `PRE_COMMIT_SCRIPTS_DIR`, which defaults to `.github/scripts`).
+
 ## Labels
 
 Labels are defined in [`terraform/modules/labels/main.tf`](terraform/modules/labels/main.tf) (`automation_labels` local). Read that file before adding, removing, or reasoning about label behavior — do not rely on any label list reproduced elsewhere.
