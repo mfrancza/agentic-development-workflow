@@ -136,23 +136,31 @@ jobs:
     permissions:
       contents: read
     steps:
-      - name: Validate and resolve helpers-ref
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+
+      - name: Resolve helpers-ref to commit SHA
         id: resolve-ref
         env:
           HELPERS_REF: ${{ inputs.helpers-ref }}
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if [[ -z "$HELPERS_REF" ]]; then
-            echo '::error::helpers-ref input is required and must not be empty.'
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
             exit 1
           fi
-          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/$HELPERS_REF" --jq '.sha')"
-          if [[ -z "$resolved" ]]; then
-            echo "::error::helpers-ref '$HELPERS_REF' did not resolve to a commit SHA."
-            exit 1
-          fi
-          echo "sha=$(printf '%s' "$resolved" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
       - name: Check out upstream helper actions
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
@@ -346,12 +354,13 @@ jobs:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ matrix.pr_number }}
+          COMMENT_BODY: 'Operator re-attempted resolution via `agent:resolve-conflicts`; prior escalation marker removed.'
         run: |
           set -euo pipefail
           labels="$(gh api "repos/$REPO/issues/$PR_NUMBER/labels" --paginate --jq '.[].name')"
           if printf '%s\n' "$labels" | grep -Fxq 'conflicts-escalated'; then
             gh api --method DELETE "repos/$REPO/issues/$PR_NUMBER/labels/conflicts-escalated"
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body 'Operator re-attempted resolution via `agent:resolve-conflicts`; prior escalation marker removed.'
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$COMMENT_BODY"
           fi
 
       - name: Prepare agent log directory
