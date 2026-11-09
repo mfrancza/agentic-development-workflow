@@ -18,6 +18,7 @@ jobs:
     uses: ./.github/workflows/agent-resolve-conflicts-reusable.yml
     with:
       pr-number: ${{ inputs.pr_number || '' }}
+      author-allowlist: ${{ vars.RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST }}
       escalation-assignee: ${{ github.repository_owner }}
       image: ''
       helpers-ref: ${{ github.sha }}

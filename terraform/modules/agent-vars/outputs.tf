@@ -72,3 +72,8 @@ output "review_model_pairing_variable_name" {
   description = "Name of the REVIEW_MODEL_PAIRING Actions variable."
   value       = github_actions_variable.review_model_pairing.variable_name
 }
+
+output "resolve_conflicts_author_allowlist_variable_name" {
+  description = "Name of the RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST Actions variable."
+  value       = github_actions_variable.resolve_conflicts_author_allowlist.variable_name
+}

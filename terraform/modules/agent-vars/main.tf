@@ -170,3 +170,15 @@ resource "github_actions_variable" "review_model_pairing" {
   variable_name = "REVIEW_MODEL_PAIRING"
   value         = jsonencode(var.review_model_pairing)
 }
+
+# Expose the resolve-conflicts author allowlist as a JSON-encoded repository
+# Actions variable so agent-resolve-conflicts.yml can pass it to the reusable
+# workflow and on to the find-conflicted-prs action. An empty JSON array (the
+# default "[]") preserves the existing agent-only behavior. ["*"] sweeps every
+# author; an explicit list sweeps developer-agent plus those logins. Fork-headed
+# PRs are always excluded from the sweep.
+resource "github_actions_variable" "resolve_conflicts_author_allowlist" {
+  repository    = var.repository
+  variable_name = "RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST"
+  value         = jsonencode(var.resolve_conflicts_author_allowlist)
+}
