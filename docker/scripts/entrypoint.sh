@@ -26,6 +26,7 @@ source "${SCRIPTS_DIR}/lib/fix-checks-guard.sh"
 # errors.  Requires log() (defined below) and the standard env vars
 # (WORK_DIR, GITHUB_REPO, GH_TOKEN).
 source "${SCRIPTS_DIR}/lib/pre-commit-checks.sh"
+source "${SCRIPTS_DIR}/lib/branch-push.sh"
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -566,6 +567,20 @@ action_respond_review() {
     gh pr checkout "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO"
     BRANCH_NAME="$(git rev-parse --abbrev-ref HEAD)"
 
+    local checkout_sha remote_ref remote_sha
+    checkout_sha="$(git rev-parse --verify 'HEAD^{commit}')" || return 1
+    remote_ref="refs/remotes/origin/${BRANCH_NAME}"
+    if ! git fetch --no-tags origin "+refs/heads/${BRANCH_NAME}:${remote_ref}"; then
+        branch_push_review_failure "initial fetch failed; model not invoked" "$BRANCH_NAME" "$checkout_sha" "unavailable" "$checkout_sha" || return 1
+    fi
+    if ! remote_sha="$(git rev-parse --verify --end-of-options "${remote_ref}^{commit}" 2>/dev/null)"; then
+        branch_push_review_failure "cannot resolve initial remote commit; model not invoked" "$BRANCH_NAME" "$checkout_sha" "unavailable" "$checkout_sha" || return 1
+    fi
+    local -r REMOTE_AT_START="$remote_sha"
+    if [[ "$checkout_sha" != "$REMOTE_AT_START" ]]; then
+        branch_push_review_failure "checkout differs from initial remote; model not invoked" "$BRANCH_NAME" "$checkout_sha" "$REMOTE_AT_START" "$checkout_sha" || return 1
+    fi
+
     log "Resolving merge-base against the PR's base branch"
     BASE_REF="$(gh pr view "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --json baseRefName --jq '.baseRefName')"
     git fetch origin "$BASE_REF"
@@ -608,32 +623,9 @@ ${ISSUE_COMMENTS_JSON}"
     if [ "$HEAD_BEFORE_CLAUDE" = "$HEAD_AFTER_CLAUDE" ]; then
         log "HEAD unchanged; skipping push and re-review request"
     else
-        log "HEAD changed; determining push strategy"
-        # Fetch the latest remote tip before the ancestry check so that any
-        # concurrent pushes that landed during the Claude run are reflected;
-        # failure here is non-fatal — we'll still attempt the push.
-        git fetch origin "$BRANCH_NAME" 2>/dev/null || true
-        # Determine the correct push strategy by examining the ancestry relationship
-        # between the local HEAD and origin/$BRANCH_NAME:
-        #   1. origin is ancestor of HEAD (fast-forward) → plain push
-        #   2. HEAD is ancestor of origin (remote advanced beyond local) → fail;
-        #      force-with-lease would silently drop those remote commits, and
-        #      silently skipping would lose the agent's local commits — exit so
-        #      the action can be retried after rebasing
-        #   3. Neither is an ancestor of the other (diverged / history rewrite)
-        #      → --force-with-lease (safe because we own the branch and the lease
-        #      SHA matches exactly what we fetched above)
-        if git merge-base --is-ancestor "origin/${BRANCH_NAME}" HEAD 2>/dev/null; then
-            git push origin "$BRANCH_NAME"
-            request_rereview "$GITHUB_PR_NUMBER"
-        elif git merge-base --is-ancestor HEAD "origin/${BRANCH_NAME}" 2>/dev/null; then
-            log "ERROR: remote branch has advanced beyond local HEAD; cannot push without losing remote commits — rebase local changes onto the updated remote branch and retry"
-            exit 1
-        else
-            log "History rewrite detected; pushing with --force-with-lease"
-            git push --force-with-lease origin "$BRANCH_NAME"
-            request_rereview "$GITHUB_PR_NUMBER"
-        fi
+        log "HEAD changed; publishing branch"
+        branch_push_review "$BRANCH_NAME" "$REMOTE_AT_START" || return 1
+        request_rereview "$GITHUB_PR_NUMBER"
     fi
 
     inject_authored_by_marker "$GITHUB_PR_NUMBER"
