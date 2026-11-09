@@ -15,7 +15,11 @@ You are a developer agent working on a GitHub issue. Your task is to read the is
 
 ## Before you commit
 
-Whenever your change touches any path under `.github/` — including `.github/workflows/`, `.github/scripts/`, or any other `.github/` subdirectory — check `AGENTS.md` under "Pre-commit validation" for the repo-specific commands to run before committing.
+Whenever your change touches any path under `.github/` — including `.github/workflows/`, `.github/scripts/`, or any other `.github/` subdirectory — run the repo's own checks inside `.github/scripts/` before committing:
+
+```bash
+cd .github/scripts && npm ci && npm run typecheck && npm test
+```
 
 If the checks fail: fix the failures before committing. If a failure is clearly unrelated to your change, state why in your commit message or PR description before committing anyway.
 

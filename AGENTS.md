@@ -464,8 +464,6 @@ These are documented gotchas that have caused real incidents or are structurally
 3. Add a workflow in `.github/workflows/` that calls the [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composite action with the new `AGENT_ACTION` and the appropriate issue/PR/run identifiers.
 4. Document the new action (env vars, trigger, labels) here in AGENTS.md and — if it affects setup — in README.md.
 
-**Prompt content rule:** Prompt files in `docker/scripts/prompts/` must not contain repo-specific content — commands, paths, or tools that apply only to this repository. The prompts are generic agent instructions; repo-specific steps (such as which pre-commit checks to run) belong in `AGENTS.md` under the relevant section. When a prompt needs to reference repo-specific steps, it should direct the agent to consult `AGENTS.md`.
-
 ## Manual repository settings
 
 The following settings must be applied manually by a maintainer with admin
