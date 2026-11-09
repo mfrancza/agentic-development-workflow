@@ -2,14 +2,25 @@
 set -euo pipefail
 
 # Pre-commit checks backstop for the developer agent.
-# Runs npm ci && npm run typecheck && npm test in .github/scripts/ when the
-# diff HEAD_BEFORE..HEAD touches .github/. Posts a PR comment on failure.
+# Runs npm ci and the configured check command in the configured scripts
+# directory when the diff HEAD_BEFORE..HEAD touches .github/.
+# Posts a PR comment on failure.
 # Returns 0 whether checks pass, fail, or the diff gate skipped;
 # non-zero only on bad arguments. Fail-open on backstop errors.
 #
 # Callers must source this file inside entrypoint.sh where log() is defined.
 #
 # Required env: WORK_DIR, GITHUB_REPO, GH_TOKEN
+# Optional env:
+#   PRE_COMMIT_SCRIPTS_DIR  Path (relative to WORK_DIR) of the npm package
+#                           where `npm ci` and the check command are run.
+#                           Defaults to ".github/scripts".  Set to an empty
+#                           string to disable npm checks entirely — useful
+#                           when deploying the Docker image to a repo that
+#                           uses a different check mechanism or none at all.
+#   PRE_COMMIT_CHECK_CMD    Shell command executed after `npm ci` inside the
+#                           scripts directory.  Defaults to
+#                           "npm run typecheck && npm test".
 # Required args: 1=head-before-sha  2=pr-number
 
 # pre_commit_checks_run <head-before-sha> <pr-number>
@@ -25,7 +36,20 @@ pre_commit_checks_run() {
     : "${GITHUB_REPO:?pre_commit_checks_run: GITHUB_REPO is required}"
     : "${GH_TOKEN:?pre_commit_checks_run: GH_TOKEN is required}"
 
-    local scripts_dir="${WORK_DIR}/.github/scripts"
+    # Optional env: scripts directory and check command.
+    # Use single-dash expansion for PRE_COMMIT_SCRIPTS_DIR so an explicitly
+    # empty value ("") is preserved and treated as "disable", while an unset
+    # variable falls back to the repo-conventional default.
+    local scripts_rel="${PRE_COMMIT_SCRIPTS_DIR-.github/scripts}"
+    local check_cmd="${PRE_COMMIT_CHECK_CMD:-npm run typecheck && npm test}"
+
+    # An empty scripts dir disables npm checks for this deployment.
+    if [[ -z "${scripts_rel}" ]]; then
+        log "pre-commit-checks: PRE_COMMIT_SCRIPTS_DIR is empty; skipping npm checks"
+        return 0
+    fi
+
+    local scripts_dir="${WORK_DIR}/${scripts_rel}"
 
     # Compute diff and check if any path touches .github/
     # (follows the same CWD=WORK_DIR convention as fix-checks-guard.sh)
@@ -47,7 +71,7 @@ pre_commit_checks_run() {
         return 0
     fi
 
-    log "pre-commit-checks: running npm ci && npm run typecheck && npm test in .github/scripts"
+    log "pre-commit-checks: running npm ci && ${check_cmd} in ${scripts_rel}"
 
     # Step 1: npm ci — fail-open on setup error (network failure, lockfile mismatch, etc.)
     local npm_ci_err npm_ci_exit=0
@@ -57,10 +81,10 @@ pre_commit_checks_run() {
         return 0
     fi
 
-    # Step 2: npm run typecheck && npm test, capturing combined stdout+stderr
+    # Step 2: run the configured check command, capturing combined stdout+stderr
     local check_output_file check_exit=0
     check_output_file="$(mktemp)"
-    (cd "${scripts_dir}" && npm run typecheck && npm test) > "${check_output_file}" 2>&1 || check_exit=$?
+    (cd "${scripts_dir}" && bash -c "${check_cmd}") > "${check_output_file}" 2>&1 || check_exit=$?
 
     if [[ $check_exit -eq 0 ]]; then
         log "pre-commit-checks: passed"
@@ -107,7 +131,7 @@ Agent run: \`${GITHUB_RUN_ID}\`"
     comment_body="$(cat <<EOF
 ### Developer agent pre-commit checks failed
 
-\`npm run typecheck && npm test\` in \`.github/scripts/\` failed on commit \`${head_sha}\`.${run_id_line}
+\`${check_cmd}\` in \`${scripts_rel}/\` failed on commit \`${head_sha}\`.${run_id_line}
 The branch was pushed anyway; CI will re-check. See the agent run logs for the full output.
 
 ${fence}

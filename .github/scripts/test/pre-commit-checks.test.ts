@@ -36,6 +36,13 @@ interface RunOptions {
   /** Value of GITHUB_RUN_ID injected into the environment.
    *  Omit to leave GITHUB_RUN_ID unset (simulates a local run). */
   githubRunId?: string;
+  /** Value of PRE_COMMIT_SCRIPTS_DIR injected into the environment.
+   *  Omit to leave unset (helper defaults to ".github/scripts").
+   *  Set to empty string "" to disable npm checks. */
+  preCommitScriptsDir?: string;
+  /** Value of PRE_COMMIT_CHECK_CMD injected into the environment.
+   *  Omit to leave unset (helper defaults to "npm run typecheck && npm test"). */
+  preCommitCheckCmd?: string;
 }
 
 function runChecks(options: RunOptions = {}) {
@@ -45,9 +52,16 @@ function runChecks(options: RunOptions = {}) {
   const workDir = mkdtempSync(join(tmpdir(), "pre-commit-checks-work-"));
   tempDirs.push(workDir);
 
-  // Create the .github/scripts directory that the helper cd's into for npm.
-  const scriptsDir = join(workDir, ".github", "scripts");
-  mkdirSync(scriptsDir, { recursive: true });
+  // Create the scripts directory that the helper cd's into for npm.
+  // When PRE_COMMIT_SCRIPTS_DIR is explicitly empty, no directory is created
+  // (npm checks are disabled in that case).
+  const scriptsRelDir =
+    options.preCommitScriptsDir !== undefined
+      ? options.preCommitScriptsDir
+      : ".github/scripts";
+  if (scriptsRelDir) {
+    mkdirSync(join(workDir, scriptsRelDir), { recursive: true });
+  }
 
   // File where the mock gh writes the captured --body argument.
   const commentBodyFile = join(bin, "comment-body.txt");
@@ -186,6 +200,11 @@ pre_commit_checks_run "$HEAD_BEFORE_SHA" "$PR_NUMBER"
         // (which Node strips from the child env) so the variable is absent
         // even when the outer CI environment has it set.
         GITHUB_RUN_ID: options.githubRunId,
+        // PRE_COMMIT_SCRIPTS_DIR / PRE_COMMIT_CHECK_CMD: undefined strips
+        // the variable from the child env so the helper uses its built-in
+        // defaults; set to "" to test the "disable" path.
+        PRE_COMMIT_SCRIPTS_DIR: options.preCommitScriptsDir,
+        PRE_COMMIT_CHECK_CMD: options.preCommitCheckCmd,
       },
     },
   );
@@ -227,6 +246,7 @@ describe("pre-commit-checks backstop", () => {
     const { output, commentBody } = runChecks({
       npmCheckExit: 0,
     });
+    // Default check command and scripts dir appear in the log line
     expect(output).toContain(
       "pre-commit-checks: running npm ci && npm run typecheck && npm test in .github/scripts",
     );
@@ -377,6 +397,43 @@ describe("pre-commit-checks backstop", () => {
     expect(output).toContain("output line 1\n");
     expect(output).toContain("output line 50\n");
     expect(output).toContain("output line 250");
+  });
+
+  it("skips npm checks when PRE_COMMIT_SCRIPTS_DIR is explicitly empty", () => {
+    // An operator can disable npm checks for a repo that uses a different
+    // check mechanism by setting PRE_COMMIT_SCRIPTS_DIR to "".
+    const { output, commentBody } = runChecks({
+      preCommitScriptsDir: "",
+      diffFiles: ".github/foo.ts",
+    });
+    expect(output).toContain(
+      "pre-commit-checks: PRE_COMMIT_SCRIPTS_DIR is empty; skipping npm checks",
+    );
+    expect(commentBody).toBeNull();
+  });
+
+  it("runs checks in a custom scripts directory", () => {
+    // PRE_COMMIT_SCRIPTS_DIR can point at a repo-specific package location.
+    const { output, commentBody } = runChecks({
+      preCommitScriptsDir: "tools/scripts",
+      npmCheckExit: 0,
+    });
+    expect(output).toContain("in tools/scripts");
+    expect(output).toContain("pre-commit-checks: passed");
+    expect(commentBody).toBeNull();
+  });
+
+  it("uses a custom check command and includes it in the log and PR comment", () => {
+    // PRE_COMMIT_CHECK_CMD allows repos to substitute their own test runner.
+    const { output, commentBody } = runChecks({
+      preCommitCheckCmd: "npm run lint",
+      npmCheckExit: 1,
+    });
+    // Log line must reference the custom command
+    expect(output).toContain("npm run lint");
+    // PR comment must surface the custom command so the developer knows what failed
+    expect(commentBody).not.toBeNull();
+    expect(commentBody).toContain("npm run lint");
   });
 
   it("matches .github/ path when diff list exceeds the pipe buffer size", () => {
