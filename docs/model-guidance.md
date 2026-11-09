@@ -133,6 +133,21 @@ JSON, and stating which class `modelToClass` resolves it to and why. The Vitest 
 `.github/scripts/test/model-classes.test.ts` (check 3) enforces that dual-class models are named
 in this section.
 
+**Claude-family prefix normalization.** When the pairing resolver cannot find a Claude model ID in
+`modelToClass` or the forward class-table scan (e.g., a hallucinated future snapshot such as
+`claude-sonnet-4-6`), it applies a last-resort prefix lookup based on Claude's stable
+`claude-<family>-<version>` naming convention:
+
+- `claude-haiku-*` → `haiku` class
+- `claude-sonnet-*` → `sonnet` class
+- `claude-opus-*` → `opus` class
+
+Any `claude-*` ID whose family segment does not match one of the three tiers (e.g.,
+`claude-mystery-1-0`) remains unresolved, and the resolver falls through to `DEFAULT_MODEL` as
+before. The normalization only fires on a miss — explicit `modelToClass` entries always take
+precedence. See Decision 4 of [`docs/design/auto-review-marker-race.md`](design/auto-review-marker-race.md)
+for the full rationale.
+
 ## Cross-Vendor Cost Analysis
 
 ### Sources and assumptions
