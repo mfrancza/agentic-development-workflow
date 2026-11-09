@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # Pre-commit checks backstop for the developer agent.
-# Runs npm ci and the configured check command in the configured scripts
-# directory when the diff HEAD_BEFORE..HEAD touches .github/.
+# Runs the configured check command in the configured directory when the
+# diff HEAD_BEFORE..HEAD touches .github/.
 # Posts a PR comment on failure.
 # Returns 0 whether checks pass, fail, or the diff gate skipped;
 # non-zero only on bad arguments. Fail-open on backstop errors.
@@ -12,16 +12,16 @@ set -euo pipefail
 #
 # Required env: WORK_DIR, GITHUB_REPO, GH_TOKEN
 # Optional env:
-#   PRE_COMMIT_SCRIPTS_DIR  Path (relative to WORK_DIR) of the npm package
-#                           where `npm ci` and the check command are run.
+#   PRE_COMMIT_SCRIPTS_DIR  Path (relative to WORK_DIR) of the directory
+#                           where the check command is run.
 #                           Defaults to ".github/scripts".  Set to an empty
-#                           string to disable npm checks entirely — useful
-#                           when deploying the Docker image to a repo that
-#                           uses a different check mechanism or none at all.
-#   PRE_COMMIT_CHECK_CMD    Shell command executed after `npm ci` inside the
-#                           scripts directory.  When unset or empty, npm checks
-#                           are skipped — configure this per-deployment to avoid
-#                           baking repo-specific commands into the Docker image.
+#                           string to disable checks entirely.
+#   PRE_COMMIT_CHECK_CMD    Shell command executed inside the scripts directory.
+#                           When unset or empty, checks are skipped — configure
+#                           this per-deployment to avoid baking repo-specific
+#                           commands into the Docker image.  The command is
+#                           responsible for all setup (e.g. dependency
+#                           installation) as well as the actual checks.
 # Required args: 1=head-before-sha  2=pr-number
 
 # pre_commit_checks_run <head-before-sha> <pr-number>
@@ -44,13 +44,13 @@ pre_commit_checks_run() {
     local scripts_rel="${PRE_COMMIT_SCRIPTS_DIR-.github/scripts}"
     local check_cmd="${PRE_COMMIT_CHECK_CMD-}"
 
-    # An empty scripts dir or an unset/empty check command disables npm checks.
+    # An empty scripts dir or an unset/empty check command disables checks.
     if [[ -z "${scripts_rel}" ]]; then
-        log "pre-commit-checks: PRE_COMMIT_SCRIPTS_DIR is empty; skipping npm checks"
+        log "pre-commit-checks: PRE_COMMIT_SCRIPTS_DIR is empty; skipping checks"
         return 0
     fi
     if [[ -z "${check_cmd}" ]]; then
-        log "pre-commit-checks: PRE_COMMIT_CHECK_CMD is not set; skipping npm checks"
+        log "pre-commit-checks: PRE_COMMIT_CHECK_CMD is not set; skipping checks"
         return 0
     fi
 
@@ -76,17 +76,9 @@ pre_commit_checks_run() {
         return 0
     fi
 
-    log "pre-commit-checks: running npm ci && ${check_cmd} in ${scripts_rel}"
+    log "pre-commit-checks: running ${check_cmd} in ${scripts_rel}"
 
-    # Step 1: npm ci — fail-open on setup error (network failure, lockfile mismatch, etc.)
-    local npm_ci_err npm_ci_exit=0
-    npm_ci_err="$(cd "${scripts_dir}" && npm ci 2>&1)" || npm_ci_exit=$?
-    if [[ $npm_ci_exit -ne 0 ]]; then
-        log "pre-commit-checks: encountered error running checks (npm ci failed); skipping PR comment"
-        return 0
-    fi
-
-    # Step 2: run the configured check command, capturing combined stdout+stderr
+    # Run the configured check command, capturing combined stdout+stderr
     # Fail-open: a full or unavailable temp filesystem must not abort the caller
     # before its git push — capture mktemp's exit status and return 0 instead.
     local check_output_file mktemp_exit=0 check_exit=0

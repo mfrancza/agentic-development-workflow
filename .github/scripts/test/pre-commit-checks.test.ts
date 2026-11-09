@@ -18,8 +18,6 @@ interface RunOptions {
   diffFilePath?: string;
   /** Exit code for `git diff --name-only`.  Defaults to 0 (success). */
   gitDiffExit?: number;
-  /** Exit code for `npm ci`.  Defaults to 0 (success). */
-  npmCiExit?: number;
   /** Number of output lines produced by each `npm run`/`npm test` invocation.
    *  Defaults to 5. */
   npmCheckLines?: number;
@@ -41,10 +39,11 @@ interface RunOptions {
   githubRunId?: string;
   /** Value of PRE_COMMIT_SCRIPTS_DIR injected into the environment.
    *  Omit to leave unset (helper defaults to ".github/scripts").
-   *  Set to empty string "" to disable npm checks. */
+   *  Set to empty string "" to disable checks. */
   preCommitScriptsDir?: string;
   /** Value of PRE_COMMIT_CHECK_CMD injected into the environment.
-   *  Omit to use the test-helper default ("npm run typecheck && npm test").
+   *  Omit to use the test-helper default ("npm run typecheck && npm test"),
+   *  which serves as a convenient stand-in for any stack's check command.
    *  Pass `undefined` explicitly (i.e. include the key) to leave the variable
    *  unset in the child env, which triggers the helper's skip-if-no-command
    *  behaviour. */
@@ -61,9 +60,9 @@ function runChecks(options: RunOptions = {}) {
   const workDir = mkdtempSync(join(tmpdir(), "pre-commit-checks-work-"));
   tempDirs.push(workDir);
 
-  // Create the scripts directory that the helper cd's into for npm.
+  // Create the scripts directory that the helper cd's into for the check command.
   // When PRE_COMMIT_SCRIPTS_DIR is explicitly empty, no directory is created
-  // (npm checks are disabled in that case).
+  // (checks are disabled in that case).
   const scriptsRelDir =
     options.preCommitScriptsDir !== undefined
       ? options.preCommitScriptsDir
@@ -79,7 +78,6 @@ function runChecks(options: RunOptions = {}) {
   const gitDiffExit = options.gitDiffExit ?? 0;
   const gitRevParseExit = options.gitRevParseExit ?? 0;
   const headSha = options.headSha ?? "head-sha-abc";
-  const npmCiExit = options.npmCiExit ?? 0;
   const npmCheckLines = options.npmCheckLines ?? 5;
   const npmCheckExit = options.npmCheckExit ?? 0;
   const ghCommentExit = options.ghCommentExit ?? 0;
@@ -123,16 +121,12 @@ esac
   );
 
   // --- Mock npm ---
-  // Handles: ci          →  exits MOCK_NPM_CI_EXIT
-  //          run <sub>   →  prints N lines then exits MOCK_NPM_CHECK_EXIT
+  // Handles: run <sub>   →  prints N lines then exits MOCK_NPM_CHECK_EXIT
   //          test        →  prints N lines then exits MOCK_NPM_CHECK_EXIT
   writeFileSync(
     join(bin, "npm"),
     `#!/bin/bash
 case "$1" in
-  ci)
-    exit "\${MOCK_NPM_CI_EXIT:-0}"
-    ;;
   run|test)
     for i in $(seq 1 "\${MOCK_NPM_CHECK_LINES:-5}"); do
       printf 'output line %s\\n' "$i"
@@ -223,7 +217,6 @@ pre_commit_checks_run "$HEAD_BEFORE_SHA" "$PR_NUMBER"
         MOCK_GIT_DIFF_EXIT: String(gitDiffExit),
         MOCK_GIT_REV_PARSE_EXIT: String(gitRevParseExit),
         MOCK_HEAD_SHA: headSha,
-        MOCK_NPM_CI_EXIT: String(npmCiExit),
         MOCK_NPM_CHECK_LINES: String(npmCheckLines),
         MOCK_NPM_CHECK_EXIT: String(npmCheckExit),
         MOCK_GH_COMMENT_BODY_FILE: commentBodyFile,
@@ -237,10 +230,10 @@ pre_commit_checks_run "$HEAD_BEFORE_SHA" "$PR_NUMBER"
         // uses its built-in default (".github/scripts"); "" disables checks.
         PRE_COMMIT_SCRIPTS_DIR: options.preCommitScriptsDir,
         // PRE_COMMIT_CHECK_CMD: the helper has NO built-in default — an unset
-        // variable causes it to skip npm checks.  When the caller does not
-        // include "preCommitCheckCmd" in the options object at all, supply the
-        // repo-conventional command so that tests which exercise npm behaviour
-        // continue to work without each test having to specify it explicitly.
+        // variable causes it to skip checks.  When the caller does not include
+        // "preCommitCheckCmd" in the options object at all, supply a sample
+        // command so that tests which exercise check behaviour continue to work
+        // without each test having to specify it explicitly.
         // Pass `preCommitCheckCmd: undefined` (key present, value undefined)
         // to explicitly leave the variable out of the child env and test the
         // skip-if-no-command path.
@@ -291,7 +284,7 @@ describe("pre-commit-checks backstop", () => {
     });
     // Default check command and scripts dir appear in the log line
     expect(output).toContain(
-      "pre-commit-checks: running npm ci && npm run typecheck && npm test in .github/scripts",
+      "pre-commit-checks: running npm run typecheck && npm test in .github/scripts",
     );
     expect(output).toContain("pre-commit-checks: passed");
     expect(commentBody).toBeNull();
@@ -318,16 +311,6 @@ describe("pre-commit-checks backstop", () => {
   it("posts PR comment noting the branch was pushed anyway", () => {
     const { commentBody } = runChecks({ npmCheckExit: 1 });
     expect(commentBody).toContain("The branch was pushed anyway");
-  });
-
-  it("logs warning and skips PR comment when npm ci fails (backstop error)", () => {
-    const { output, commentBody } = runChecks({
-      npmCiExit: 1,
-    });
-    expect(output).toContain(
-      "pre-commit-checks: encountered error running checks (npm ci failed); skipping PR comment",
-    );
-    expect(commentBody).toBeNull();
   });
 
   it("logs warning and returns 0 when gh pr comment fails", () => {
@@ -442,20 +425,20 @@ describe("pre-commit-checks backstop", () => {
     expect(output).toContain("output line 250");
   });
 
-  it("skips npm checks when PRE_COMMIT_SCRIPTS_DIR is explicitly empty", () => {
-    // An operator can disable npm checks for a repo that uses a different
+  it("skips checks when PRE_COMMIT_SCRIPTS_DIR is explicitly empty", () => {
+    // An operator can disable checks for a repo that uses a different
     // check mechanism by setting PRE_COMMIT_SCRIPTS_DIR to "".
     const { output, commentBody } = runChecks({
       preCommitScriptsDir: "",
       diffFiles: ".github/foo.ts",
     });
     expect(output).toContain(
-      "pre-commit-checks: PRE_COMMIT_SCRIPTS_DIR is empty; skipping npm checks",
+      "pre-commit-checks: PRE_COMMIT_SCRIPTS_DIR is empty; skipping checks",
     );
     expect(commentBody).toBeNull();
   });
 
-  it("skips npm checks when PRE_COMMIT_CHECK_CMD is not set", () => {
+  it("skips checks when PRE_COMMIT_CHECK_CMD is not set", () => {
     // The helper has no built-in default for PRE_COMMIT_CHECK_CMD so that
     // repo-specific commands are not baked into the Docker image.  When the
     // variable is absent the checks must be silently skipped.
@@ -467,7 +450,7 @@ describe("pre-commit-checks backstop", () => {
       diffFiles: ".github/foo.ts",
     });
     expect(output).toContain(
-      "pre-commit-checks: PRE_COMMIT_CHECK_CMD is not set; skipping npm checks",
+      "pre-commit-checks: PRE_COMMIT_CHECK_CMD is not set; skipping checks",
     );
     expect(commentBody).toBeNull();
   });
