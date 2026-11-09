@@ -164,3 +164,9 @@ variable "resolve_conflicts_author_allowlist" {
     error_message = "resolve_conflicts_author_allowlist entries must be non-empty strings; wildcard \"*\" may only appear as the sole entry; entries must be unique (case-insensitive)."
   }
 }
+
+variable "pre_commit_check_cmd" {
+  description = "Shell command run by the pre-commit checks backstop inside PRE_COMMIT_SCRIPTS_DIR after a .github/ change. The command is fully responsible for both setup (e.g. dependency installation) and the actual checks. An empty string (the default) disables the backstop — configure per-deployment to avoid baking repo-specific commands into the Docker image. Stored as the PRE_COMMIT_CHECK_CMD Actions variable."
+  type        = string
+  default     = ""
+}

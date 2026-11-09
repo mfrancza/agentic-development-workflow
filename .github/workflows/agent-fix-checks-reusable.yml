@@ -286,6 +286,9 @@ jobs:
           GITHUB_HEAD_SHA_AT_TRIGGER: ${{ inputs.head-sha-at-trigger }}
           # Optional override for the 15-minute stale-replacement wait.
           FIX_CHECKS_WAIT_SECONDS: ${{ vars.FIX_CHECKS_WAIT_SECONDS }}
+          # Pre-commit checks backstop: set per-deployment so the Docker image
+          # stays stack-neutral.  When unset the backstop skips checks.
+          PRE_COMMIT_CHECK_CMD: ${{ vars.PRE_COMMIT_CHECK_CMD }}
         with:
           image: ${{ inputs.image }}
           gh-token: ${{ steps.setup.outputs.token }}

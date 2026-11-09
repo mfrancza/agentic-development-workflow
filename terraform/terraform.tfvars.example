@@ -116,3 +116,11 @@ auto_trigger_agents = {
 #   }
 #   fallback_chain    = ["different-vendor-same-class", "default-model"]
 # }
+
+#
+# Pre-commit checks backstop: set to the shell command you want the agent to run
+# in PRE_COMMIT_SCRIPTS_DIR after pushing a diff that touches .github/.
+# The command is responsible for both setup and the actual checks.
+# Leave unset (or set to "") to disable the backstop (the default).
+# Example for an npm-based repo:
+# pre_commit_check_cmd = "npm ci && npm run typecheck && npm test"

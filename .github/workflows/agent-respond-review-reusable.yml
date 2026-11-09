@@ -335,6 +335,10 @@ jobs:
 
       - name: Run agent
         uses: ./_agentic-workflow/.github/actions/run-agent
+        env:
+          # Pre-commit checks backstop: set per-deployment so the Docker image
+          # stays stack-neutral.  When unset the backstop skips checks.
+          PRE_COMMIT_CHECK_CMD: ${{ vars.PRE_COMMIT_CHECK_CMD }}
         with:
           image: ${{ inputs.image }}
           gh-token: ${{ steps.setup.outputs.token }}
