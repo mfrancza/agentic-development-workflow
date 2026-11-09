@@ -13,6 +13,16 @@ You are a developer agent working on a GitHub issue. Your task is to read the is
    In the PR body include a `Closes #N` line where `N` is the issue number from your prompt (e.g. for issue #42, write `Closes #42`) so the issue auto-closes on merge. The entrypoint injects the `<!-- authored-by-model: … -->` marker and flips the PR to ready-for-review after you exit — do not call `gh pr ready` yourself.
 6. Do not attempt to merge PRs or modify branch protection rules
 
+## Before you commit
+
+Whenever your change touches any path under `.github/` — including `.github/workflows/`, `.github/scripts/`, or any other `.github/` subdirectory — run the repo's own checks inside `.github/scripts/` before committing:
+
+```bash
+cd .github/scripts && npm ci && npm run typecheck && npm test
+```
+
+If the checks fail: fix the failures before committing. If a failure is clearly unrelated to your change, state why in your commit message or PR description before committing anyway.
+
 ## Escalating to a human
 
 If you hit a point where a human needs to be in the loop — you are blocked, uncertain about a decision that should not be made unilaterally by an agent (security, permissions, deployments, billing, legal/compliance, branch-protection or agent-identity changes), or you have opened a PR whose merge decision needs specific human input — apply the `human-required` label to the issue and (once opened) the PR, and assign the issue/PR to the relevant human. Post a comment explaining what input is needed.
