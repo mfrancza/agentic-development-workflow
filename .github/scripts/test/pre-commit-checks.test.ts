@@ -33,6 +33,9 @@ interface RunOptions {
   prNumber?: string;
   /** Value returned by `git rev-parse HEAD`.  Defaults to "head-sha-abc". */
   headSha?: string;
+  /** Exit code for `git rev-parse HEAD`.  Defaults to 0 (success).  Set to
+   *  non-zero to simulate a transient worktree/repository error. */
+  gitRevParseExit?: number;
   /** Value of GITHUB_RUN_ID injected into the environment.
    *  Omit to leave GITHUB_RUN_ID unset (simulates a local run). */
   githubRunId?: string;
@@ -74,6 +77,7 @@ function runChecks(options: RunOptions = {}) {
 
   const diffFiles = options.diffFiles ?? ".github/scripts/foo.ts";
   const gitDiffExit = options.gitDiffExit ?? 0;
+  const gitRevParseExit = options.gitRevParseExit ?? 0;
   const headSha = options.headSha ?? "head-sha-abc";
   const npmCiExit = options.npmCiExit ?? 0;
   const npmCheckLines = options.npmCheckLines ?? 5;
@@ -85,7 +89,9 @@ function runChecks(options: RunOptions = {}) {
   //                                              set) or MOCK_DIFF_FILES, or
   //                                              exits MOCK_GIT_DIFF_EXIT when
   //                                              non-zero
-  //          rev-parse HEAD                   →  prints MOCK_HEAD_SHA
+  //          rev-parse HEAD                   →  exits MOCK_GIT_REV_PARSE_EXIT
+  //                                              when non-zero; else prints
+  //                                              MOCK_HEAD_SHA
   writeFileSync(
     join(bin, "git"),
     `#!/bin/bash
@@ -102,6 +108,10 @@ case "$1" in
     fi
     ;;
   rev-parse)
+    if [[ "\${MOCK_GIT_REV_PARSE_EXIT:-0}" -ne 0 ]]; then
+      echo "fatal: not a git repository (or any of the parent directories): .git" >&2
+      exit "\${MOCK_GIT_REV_PARSE_EXIT}"
+    fi
     printf '%s\\n' "\${MOCK_HEAD_SHA:-head-sha-abc}"
     ;;
   *)
@@ -211,6 +221,7 @@ pre_commit_checks_run "$HEAD_BEFORE_SHA" "$PR_NUMBER"
         MOCK_DIFF_FILES: diffFiles,
         MOCK_DIFF_FILE: options.diffFilePath ?? "",
         MOCK_GIT_DIFF_EXIT: String(gitDiffExit),
+        MOCK_GIT_REV_PARSE_EXIT: String(gitRevParseExit),
         MOCK_HEAD_SHA: headSha,
         MOCK_NPM_CI_EXIT: String(npmCiExit),
         MOCK_NPM_CHECK_LINES: String(npmCheckLines),
@@ -495,6 +506,20 @@ describe("pre-commit-checks backstop", () => {
     expect(output).toContain("pre-commit-checks: mktemp failed");
     expect(output).toContain("skipping checks (fail-open)");
     // No comment should be posted when the temp file could not be created.
+    expect(commentBody).toBeNull();
+  });
+
+  it("logs warning and returns 0 when git rev-parse HEAD fails (backstop fail-open)", () => {
+    // A transient worktree or repository error after a failed check run must
+    // not abort the caller before its git push.  The helper must catch the
+    // non-zero exit, log a warning, and return 0 (runChecks asserts status === 0).
+    const { output, commentBody } = runChecks({
+      npmCheckExit: 1,
+      gitRevParseExit: 128,
+    });
+    expect(output).toContain("pre-commit-checks: git rev-parse HEAD failed");
+    expect(output).toContain("skipping PR comment (fail-open)");
+    // No comment should be posted when HEAD cannot be resolved.
     expect(commentBody).toBeNull();
   });
 

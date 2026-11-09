@@ -104,8 +104,15 @@ pre_commit_checks_run() {
     fi
 
     # Checks failed — prepare and post PR comment
-    local head_sha
-    head_sha="$(git rev-parse HEAD)"
+    # Fail-open: a transient repository/worktree error on rev-parse must not
+    # abort the caller before its git push — capture the exit status and return
+    # 0 instead, following the same pattern as git diff and mktemp.
+    local head_sha git_rev_parse_exit=0
+    head_sha="$(git rev-parse HEAD)" || git_rev_parse_exit=$?
+    if [[ $git_rev_parse_exit -ne 0 ]]; then
+        log "pre-commit-checks: git rev-parse HEAD failed (exit ${git_rev_parse_exit}); skipping PR comment (fail-open)"
+        return 0
+    fi
 
     log "pre-commit-checks: failed — posting PR comment to PR #${pr_number}"
 
