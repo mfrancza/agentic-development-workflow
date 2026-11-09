@@ -228,6 +228,51 @@ ${stripped_body}"
     log "authored-by-model marker written to PR #${pr_number} (model: ${AGENT_MODEL})"
 }
 
+# check_pr_readiness_and_promote <pr_number>
+#
+# Implements the three-state PR-readiness check (Decision 1 of
+# docs/design/auto-review-marker-race.md):
+#   1. isDraft == true  → inject the authored-by-model marker + flip the PR to
+#      ready-for-review (normal path).
+#   2. isDraft == false AND the authoritative marker ('<!-- authored-by-model: <AGENT_MODEL> -->')
+#      is already present in the PR body → partial-run recovery: a prior run completed
+#      inject + flip; skip both and log a recovery message.
+#   3. isDraft == false AND the marker is absent or does not match the configured model
+#      → compliance failure: the agent opened a non-draft PR or promoted it before the
+#      entrypoint ran; fail loudly (exit 1) with recovery instructions.
+check_pr_readiness_and_promote() {
+    local pr_number="$1"
+    local is_draft pr_body authoritative_marker
+
+    is_draft="$(gh pr view "$pr_number" --repo "$GITHUB_REPO" --json isDraft --jq '.isDraft')"
+    authoritative_marker="<!-- authored-by-model: ${AGENT_MODEL} -->"
+
+    if [ "$is_draft" = "true" ]; then
+        # Branch 1: normal path — inject the marker and flip to ready-for-review.
+        inject_authored_by_marker "$pr_number"
+        log "Flipping PR #${pr_number} to ready-for-review"
+        gh pr ready "$pr_number" --repo "$GITHUB_REPO"
+        log "PR #${pr_number} is now ready-for-review"
+    else
+        # PR is not a draft — check whether the authoritative marker is present.
+        pr_body="$(gh pr view "$pr_number" --repo "$GITHUB_REPO" --json body --jq '.body // ""')"
+        if printf '%s\n' "$pr_body" | grep -qF "$authoritative_marker"; then
+            # Branch 2: partial-run recovery — the authoritative marker is present and the
+            # PR is already ready-for-review. A prior run successfully completed inject + flip;
+            # only downstream steps may remain. Skip injection and flip.
+            log "PR #${pr_number} is already ready-for-review with the authoritative marker — partial-run recovery: skipping injection and flip"
+        else
+            # Branch 3: compliance failure — the agent opened a non-draft PR, called
+            # 'gh pr ready' before the entrypoint ran, or wrote its own authored-by-model
+            # marker. Fail loudly so the operator can recover.
+            log "ERROR: PR #${pr_number} is not a draft and does not contain the authoritative marker '${authoritative_marker}'"
+            log "ERROR: The agent may have opened a non-draft PR, promoted it to ready-for-review before the entrypoint ran, or written its own authored-by-model marker."
+            log "ERROR: Recovery: convert the PR back to draft with 'gh pr draft ${pr_number} --repo ${GITHUB_REPO}', then re-run the action."
+            exit 1
+        fi
+    fi
+}
+
 # agent_escalated_issue <since>
 #
 # Returns 0 when the agent escalated issue $GITHUB_ISSUE_NUMBER to a human
@@ -381,9 +426,29 @@ action_implement() {
         return 0
     fi
 
+    BRANCH_NAME="agent/issue-${GITHUB_ISSUE_NUMBER}"
+    # Query by branch name only (owner:branch is treated as a literal name by
+    # gh and never matches).  Use a jq filter on headRepositoryOwner to exclude
+    # PRs from forks with the same branch name.
+    OWNER="${GITHUB_REPO%%/*}"
+
+    # Pre-run check: if a draft open PR already exists for this branch (e.g. operator
+    # converted it back from ready-for-review for a partial-run recovery), skip the agent
+    # run and proceed directly to the three-state readiness check to avoid a redundant
+    # model session (Decision 1 of docs/design/auto-review-marker-race.md).
+    EXISTING_DRAFT_PR_URL="$(gh pr list --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --state open \
+        --json url,isDraft,headRepositoryOwner \
+        --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\" and .isDraft == true)][0].url // empty")"
+
     setup_repo
 
-    BRANCH_NAME="agent/issue-${GITHUB_ISSUE_NUMBER}"
+    if [ -n "$EXISTING_DRAFT_PR_URL" ]; then
+        log "Existing draft PR found for ${BRANCH_NAME}: ${EXISTING_DRAFT_PR_URL} — skipping agent run; proceeding to marker injection and PR promotion"
+        PR_NUMBER="${EXISTING_DRAFT_PR_URL##*/}"
+        check_pr_readiness_and_promote "$PR_NUMBER"
+        return 0
+    fi
+
     log "Creating branch ${BRANCH_NAME}"
     git checkout -b "$BRANCH_NAME"
 
@@ -401,10 +466,6 @@ ${ISSUE_BODY}
 CODE_REVIEWERS: ${CODE_REVIEWERS}"
 
     log "Verifying PR was opened for ${BRANCH_NAME}"
-    # Query by branch name only (owner:branch is treated as a literal name by
-    # gh and never matches).  Use a jq filter on headRepositoryOwner to exclude
-    # PRs from forks with the same branch name.
-    OWNER="${GITHUB_REPO%%/*}"
     PR_URL="$(gh pr list --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --state open \
         --json url,headRepositoryOwner \
         --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].url // empty")"
@@ -419,7 +480,7 @@ CODE_REVIEWERS: ${CODE_REVIEWERS}"
     log "Verified PR: ${PR_URL}"
 
     PR_NUMBER="${PR_URL##*/}"
-    inject_authored_by_marker "$PR_NUMBER"
+    check_pr_readiness_and_promote "$PR_NUMBER"
 }
 
 action_fix_checks() {
@@ -614,6 +675,7 @@ Diagnose and fix the deployment failure."
     FIX_PR_URL="$(gh pr create \
         --repo "$GITHUB_REPO" \
         --head "$FIX_BRANCH" \
+        --draft \
         --title "Fix deployment failure for issue #${GITHUB_ISSUE_NUMBER}" \
         --body "Automated fix for deployment failure.
 
@@ -622,6 +684,9 @@ Related issue: #${GITHUB_ISSUE_NUMBER}")"
     log "Created deployment fix PR: ${FIX_PR_URL}"
     FIX_PR_NUMBER="${FIX_PR_URL##*/}"
     inject_authored_by_marker "$FIX_PR_NUMBER"
+    log "Flipping fix-deployment PR #${FIX_PR_NUMBER} to ready-for-review"
+    gh pr ready "$FIX_PR_NUMBER" --repo "$GITHUB_REPO"
+    log "Fix-deployment PR #${FIX_PR_NUMBER} is now ready-for-review"
 }
 
 
@@ -630,14 +695,24 @@ action_design() {
 
     BRANCH_NAME="design/issue-${GITHUB_ISSUE_NUMBER}"
 
-    # Preflight: skip (return 0) if an open PR for this branch already exists.
+    # Preflight: check for an existing open PR on this branch and apply the three-state
+    # PR-readiness check (Decision 1 of docs/design/auto-review-marker-race.md).
+    # This replaces the previous simple early-return for any open PR.
     # Branch name is load-bearing — the un-draft job parses it — so never deviate.
     OWNER="${GITHUB_REPO%%/*}"
-    EXISTING_PR="$(gh pr list --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --state open \
-        --json url,headRepositoryOwner \
-        --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0].url // empty")"
-    if [ -n "$EXISTING_PR" ]; then
-        log "Open PR already exists for ${BRANCH_NAME}: ${EXISTING_PR} — skipping"
+    EXISTING_PR_JSON="$(gh pr list --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --state open \
+        --json url,isDraft,headRepositoryOwner \
+        --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0]")"
+    if [ -n "$EXISTING_PR_JSON" ]; then
+        EXISTING_PR_URL="$(echo "$EXISTING_PR_JSON" | jq -r '.url // empty')"
+        EXISTING_PR_IS_DRAFT="$(echo "$EXISTING_PR_JSON" | jq -r '.isDraft')"
+        EXISTING_PR_NUMBER="${EXISTING_PR_URL##*/}"
+        if [ "$EXISTING_PR_IS_DRAFT" = "false" ]; then
+            log "Non-draft PR #${EXISTING_PR_NUMBER} already exists for ${BRANCH_NAME}: ${EXISTING_PR_URL} — applying readiness check"
+        else
+            log "Draft PR #${EXISTING_PR_NUMBER} already exists for ${BRANCH_NAME}: ${EXISTING_PR_URL} — skipping agent run; proceeding to marker injection and PR promotion"
+        fi
+        check_pr_readiness_and_promote "$EXISTING_PR_NUMBER"
         return 0
     fi
 
@@ -696,7 +771,7 @@ ${ISSUE_COMMENTS:-none}"
     log "Verified ${SUB_ISSUE_COUNT} sub-issue(s) for issue #${GITHUB_ISSUE_NUMBER}"
 
     PR_NUMBER="${PR_URL##*/}"
-    inject_authored_by_marker "$PR_NUMBER"
+    check_pr_readiness_and_promote "$PR_NUMBER"
 }
 
 action_groom() {

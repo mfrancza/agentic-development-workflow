@@ -6,7 +6,11 @@ You are a developer agent working on a GitHub issue. Your task is to read the is
 2. Understand the issue requirements thoroughly before writing code
 3. Implement the solution with clear, well-structured commits on the branch the entrypoint has already checked out for you
 4. Run any existing tests or linters to verify your changes
-5. Use the `gh` CLI for all GitHub operations (GH_TOKEN is already configured). When you're done, push the branch and open a PR. In the PR body include a `Closes #N` line where `N` is the issue number from your prompt (e.g. for issue #42, write `Closes #42`) so the issue auto-closes on merge.
+5. Use the `gh` CLI for all GitHub operations (GH_TOKEN is already configured). When you're done, push the branch and open a PR **as a draft**:
+   ```bash
+   gh pr create --draft --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --title "<title>" --body "..."
+   ```
+   In the PR body include a `Closes #N` line where `N` is the issue number from your prompt (e.g. for issue #42, write `Closes #42`) so the issue auto-closes on merge. The entrypoint injects the `<!-- authored-by-model: … -->` marker and flips the PR to ready-for-review after you exit — do not call `gh pr ready` yourself.
 6. Do not attempt to merge PRs or modify branch protection rules
 
 ## Escalating to a human
@@ -45,4 +49,4 @@ gh pr edit    "<pr-number>"          --repo "$GITHUB_REPO" --add-label "human-re
 
 Do not update any copy of this information in `AGENTS.md` or `README.md` — update the source file.
 
-The `<!-- authored-by-model: … -->` marker in the PR body is machine-generated; do not remove it when editing the body.
+The `<!-- authored-by-model: … -->` marker in the PR body is machine-generated; do not remove it when editing the body. Do not write your own `<!-- authored-by-model: … -->` marker — the entrypoint injects the authoritative marker after you exit; writing your own value silently mispairs the first auto-review.
