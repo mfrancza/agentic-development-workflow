@@ -101,7 +101,7 @@ function runNormalAction(name: string, model: string, ref: string) {
     env: {
       ...environment, ACTION: body, ACTION_NAME: name, CHECKS: checks, WORK_DIR: agent,
       WRITER: writer, BRANCH_REF: ref, EVENTS: events, GITHUB_PR_NUMBER: "123",
-      GITHUB_ISSUE_NUMBER: "123", GITHUB_RUN_ID: "123", GITHUB_REPO: "example/repo",
+      GITHUB_ISSUE_NUMBER: "123", GITHUB_RUN_ID: "123", GITHUB_REPO: "example/repo", GH_TOKEN: "test-token",
       MODEL: model, PRE_COMMIT_SCRIPTS_DIR: ".", PRE_COMMIT_CHECK_CMD: "true",
       PATH: `${join(root, "bin")}:${environment.PATH}`, REAL_GIT: realGit,
       PUSH_CALLS: join(root, "push-calls"), RACE_PUSH: "1",
