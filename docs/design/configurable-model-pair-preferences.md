@@ -185,6 +185,8 @@ The reviewer workflow parses the marker with the same "read the PR body" API cal
 
 **Marker-preservation guidance in the prompts.** Update the prompt files (`docker/scripts/prompts/implement.md`, `design.md`, `respond-to-review.md`, `respond-to-checks.md`, `fix-deployment.md`) with a one-line note: "the `<!-- authored-by-model: … -->` marker in the PR body is machine-generated; do not remove it when editing the body." This is belt-and-braces — the entrypoint re-injects the marker on every run anyway.
 
+**Draft + ready-for-review contract** (see [`docs/design/auto-review-marker-race.md`](auto-review-marker-race.md) Decision 1). Agent PRs (`action_implement`, `action_design`, `action_fix_deployment`) open as draft; the entrypoint injects the authoritative `<!-- authored-by-model: … -->` marker after the agent exits, then flips the PR to ready-for-review. The auto-trigger listens for `pull_request.ready_for_review` and gates marker presence before applying `agent:review`, so the pairing resolver always reads an authoritative marker — never a stale or model-hallucinated one. The marker is authoritative at pair-tier read time precisely because the draft→ready transition is the last step the entrypoint takes after writing it.
+
 ### Decision 5 — Fallback chain and degradation semantics
 
 **Decision.** The pairing resolver evaluates the primary policy first, then walks `review_model_pairing.fallback_chain` in order. Supported chain entries:

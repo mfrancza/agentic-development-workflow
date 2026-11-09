@@ -27,4 +27,4 @@ gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required
 
 Do not update any copy of this information in `AGENTS.md` or `README.md` — update the source file.
 
-The `<!-- authored-by-model: … -->` marker in the PR body is machine-generated; do not remove it when editing the body.
+The `<!-- authored-by-model: … -->` marker in the PR body is machine-generated; do not remove it when editing the body. Do not write your own `<!-- authored-by-model: … -->` marker — the entrypoint injects the authoritative marker; writing your own value silently mispairs the auto-review.

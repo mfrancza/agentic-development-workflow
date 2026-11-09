@@ -78,9 +78,10 @@ After the design document is complete and all sub-issues are created:
    ```bash
    git push origin "$BRANCH_NAME"
    ```
-3. Open the PR:
+3. Open the PR **as a draft** (the entrypoint injects the `<!-- authored-by-model: … -->` marker and flips it to ready-for-review after you exit — do not call `gh pr ready` yourself):
    ```bash
    gh pr create \
+     --draft \
      --repo "$GITHUB_REPO" \
      --head "$BRANCH_NAME" \
      --title "Design: <issue title>" \
@@ -122,4 +123,4 @@ Before proposing a change to a workflow file or a workflow expression that has a
 
 Do not update any copy of this information in `AGENTS.md` or `README.md` — update the source file.
 
-The `<!-- authored-by-model: … -->` marker in the PR body is machine-generated; do not remove it when editing the body.
+The `<!-- authored-by-model: … -->` marker in the PR body is machine-generated; do not remove it when editing the body. Do not write your own `<!-- authored-by-model: … -->` marker — the entrypoint injects the authoritative marker after you exit; writing your own value silently mispairs the first auto-review.
