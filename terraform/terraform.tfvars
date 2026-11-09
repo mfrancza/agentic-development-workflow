@@ -11,11 +11,13 @@ agent_allowlist = [
   "mfrancza-developer-agent[bot]",
 ]
 
-default_model        = "sonnet"
-design_default_model = "opus"
-# Haiku is cheap for the bounded grooming pass; same Anthropic vendor as
-# default_model / design_default_model satisfies the vendor-anchor policy.
-groom_default_model = "haiku"
+default_model        = "gpt-6.1-terra"
+design_default_model = "gpt-6.1-sol"
+# Haiku is cheap for the bounded grooming pass. The groomer runs on Anthropic
+# Haiku, but the vendor anchors (GROOM_IMPL_ANCHOR_MODEL = DEFAULT_MODEL,
+# GROOM_DESIGN_ANCHOR_MODEL = DESIGN_DEFAULT_MODEL) are now OpenAI; the groomer
+# emits OpenAI model labels for tasks whose class differs from the anchor.
+groom_default_model = "claude-haiku-5-5"
 
 # Humans to assign to issues and PRs when the agent applies the human-required
 # label (e.g. escalations requiring security, billing, or permission decisions).
