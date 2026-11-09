@@ -65,6 +65,8 @@ review_model_pairing = {
     "claude-haiku-5-5"  = "gpt-5.6-luna"
     "claude-sonnet-5-5" = "gpt-5.6-terra"
     "claude-opus-5-5"   = "gpt-5.6-sol"
+    "gpt-6.1-sol"       = "claude-opus-5-5"
+    "gpt-6.1-terra"     = "claude-sonnet-5-5"
   }
   fallback_chain = ["different-vendor-same-class", "same-vendor-different-model", "default-model"]
 }
