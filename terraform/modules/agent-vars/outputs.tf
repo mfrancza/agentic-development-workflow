@@ -77,3 +77,8 @@ output "resolve_conflicts_author_allowlist_variable_name" {
   description = "Name of the RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST Actions variable."
   value       = github_actions_variable.resolve_conflicts_author_allowlist.variable_name
 }
+
+output "pre_commit_check_cmd_variable_name" {
+  description = "Name of the PRE_COMMIT_CHECK_CMD Actions variable, or null when pre_commit_check_cmd is empty and the variable is not created."
+  value       = length(github_actions_variable.pre_commit_check_cmd) > 0 ? github_actions_variable.pre_commit_check_cmd[0].variable_name : null
+}

@@ -458,6 +458,7 @@ action_implement() {
     log "Creating branch ${BRANCH_NAME}"
     git checkout -b "$BRANCH_NAME"
 
+    HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
     AGENT_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     log "Running Claude to implement solution"
     run_agent "implement.md" \
@@ -486,6 +487,7 @@ CODE_REVIEWERS: ${CODE_REVIEWERS}"
     log "Verified PR: ${PR_URL}"
 
     PR_NUMBER="${PR_URL##*/}"
+    pre_commit_checks_run "$HEAD_BEFORE_CLAUDE" "$PR_NUMBER"
     check_pr_readiness_and_promote "$PR_NUMBER"
 }
 
@@ -671,6 +673,7 @@ action_fix_deployment() {
     log "Creating fix branch ${FIX_BRANCH}"
     git checkout -b "$FIX_BRANCH"
 
+    HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
     log "Running Claude to fix deployment"
     run_agent "fix-deployment.md" \
         "Deployment failed on main for issue #${GITHUB_ISSUE_NUMBER}.
@@ -695,6 +698,7 @@ Related issue: #${GITHUB_ISSUE_NUMBER}")"
 
     log "Created deployment fix PR: ${FIX_PR_URL}"
     FIX_PR_NUMBER="${FIX_PR_URL##*/}"
+    pre_commit_checks_run "$HEAD_BEFORE_CLAUDE" "$FIX_PR_NUMBER"
     inject_authored_by_marker "$FIX_PR_NUMBER"
     log "Flipping fix-deployment PR #${FIX_PR_NUMBER} to ready-for-review"
     gh pr ready "$FIX_PR_NUMBER" --repo "$GITHUB_REPO"
