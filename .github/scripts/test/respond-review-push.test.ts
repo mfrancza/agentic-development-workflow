@@ -35,7 +35,16 @@ function remoteTip(): string {
   return git(remote, "rev-parse", branchRef);
 }
 
-function runAction(model: string, options: { checkout?: string; check?: string } = {}) {
+function evidence(scenario: string, status: number | null, concurrent: string, local: string, ref = branchRef) {
+  if (!process.env.PUBLICATION_EVIDENCE) return;
+  const final = spawnSync(realGit, ["-C", remote, "rev-parse", "--verify", ref], { encoding: "utf8" });
+  const tip = final.status === 0 ? final.stdout.trim() : "missing";
+  const reachable = concurrent === "none" || tip === "missing" ? "n/a" :
+    String(spawnSync(realGit, ["-C", remote, "merge-base", "--is-ancestor", concurrent, tip]).status === 0);
+  console.log(`EVIDENCE ${scenario} status=${status} original=${baseline} writer=${concurrent} local=${local} final=${tip} writer-reachable=${reachable}`);
+}
+
+function runAction(model: string, options: { checkout?: string; check?: string; race?: boolean } = {}) {
   const events = join(root, "events");
   const result = spawnSync("bash", ["-euo", "pipefail", "-c", `
     log() { printf '%s\n' "$*"; }
@@ -62,6 +71,40 @@ function runAction(model: string, options: { checkout?: string; check?: string }
       GITHUB_REPO: "example/repo", GH_TOKEN: "test-token", CHECKOUT: options.checkout ?? ":", MODEL: model,
       PRE_COMMIT_SCRIPTS_DIR: ".", PRE_COMMIT_CHECK_CMD: options.check ?? "true",
       PATH: `${join(root, "bin")}:${environment.PATH}`, REAL_GIT: realGit, PUSH_CALLS: join(root, "push-calls"),
+      RACE_PUSH: options.race ? "1" : "0",
+    },
+  });
+  return { ...result, events: readFileSync(events, "utf8") };
+}
+
+function runNormalAction(name: string, model: string, ref: string) {
+  const body = entrypoint.match(new RegExp(`^action_${name}\\(\\) \\{\\n[\\s\\S]*?^\\}`, "m"))?.[0];
+  expect(body).toBeDefined();
+  const events = join(root, "events");
+  const result = spawnSync("bash", ["-euo", "pipefail", "-c", `
+    log() { printf '%s\n' "$*"; }
+    source "$CHECKS"
+    setup_repo() { cd "$WORK_DIR"; }
+    fix_checks_should_run() { return 0; }
+    gh() {
+      printf 'gh %s\n' "$*" >> "$EVENTS"
+      if [[ "$*" == *'--json labels'* ]]; then printf '{"labels":[]}\n';
+      elif [[ "$*" == *'--json title,body,baseRefName'* ]]; then printf '{"title":"test","body":"","baseRefName":"main"}\n'; fi
+    }
+    run_agent() { printf 'model\n' >> "$EVENTS"; eval "$MODEL"; }
+    inject_authored_by_marker() { printf 'marker\n' >> "$EVENTS"; }
+    eval "$ACTION"
+    "action_$ACTION_NAME"
+  `], {
+    cwd: agent,
+    encoding: "utf8",
+    env: {
+      ...environment, ACTION: body, ACTION_NAME: name, CHECKS: checks, WORK_DIR: agent,
+      WRITER: writer, BRANCH_REF: ref, EVENTS: events, GITHUB_PR_NUMBER: "123",
+      GITHUB_ISSUE_NUMBER: "123", GITHUB_RUN_ID: "123", GITHUB_REPO: "example/repo",
+      MODEL: model, PRE_COMMIT_SCRIPTS_DIR: ".", PRE_COMMIT_CHECK_CMD: "true",
+      PATH: `${join(root, "bin")}:${environment.PATH}`, REAL_GIT: realGit,
+      PUSH_CALLS: join(root, "push-calls"), RACE_PUSH: "1",
     },
   });
   return { ...result, events: readFileSync(events, "utf8") };
@@ -83,6 +126,9 @@ beforeEach(() => {
   mkdirSync(join(root, "bin"));
   writeFileSync(join(root, "bin", "git"), `#!/usr/bin/env bash
 if [[ "$1" == push ]]; then printf '%s\n' "$*" >> "$PUSH_CALLS"; fi
+if [[ "$1" == push && "\${RACE_PUSH:-0}" == 1 ]]; then
+  "$REAL_GIT" -C "$WRITER" push origin "HEAD:$BRANCH_REF" || exit $?
+fi
 exec "$REAL_GIT" "$@"
 `);
   chmodSync(join(root, "bin", "git"), 0o755);
@@ -113,6 +159,7 @@ describe("respond-review publication wiring", () => {
     expect(result.events).not.toMatch(/model|gh pr view|gh api|rereview|marker/);
     expect(remoteTip()).toBe(concurrent);
     expect(git(agent, "rev-parse", "HEAD")).toBe(baseline);
+    evidence("checkout mismatch", result.status, concurrent, baseline);
   });
 
   it.each(["missing-branch", "fetch-failure"])("stops before the model on initial %s", (failure) => {
@@ -123,6 +170,7 @@ describe("respond-review publication wiring", () => {
     expect(result.status).not.toBe(0);
     expect(result.stdout).toContain("initial fetch failed");
     expect(result.events).not.toMatch(/model|gh pr view|gh api|rereview|marker/);
+    evidence(`initial ${failure}`, result.status, "none", baseline);
   });
 
   it("skips publication and re-review when HEAD is unchanged", () => {
@@ -134,6 +182,7 @@ describe("respond-review publication wiring", () => {
     expect(result.events).toContain("marker\n");
     expect(remoteTip()).toBe(baseline);
     expect(existsSync(join(root, "push-calls"))).toBe(false);
+    evidence("unchanged HEAD", result.status, "none", baseline);
   });
 
   it("publishes an uncontended rewrite and requests re-review", () => {
@@ -142,17 +191,38 @@ describe("respond-review publication wiring", () => {
     expect(remoteTip()).toBe(git(agent, "rev-parse", "HEAD"));
     expect(remoteTip()).not.toBe(baseline);
     expect(git(agent, "rev-parse", "HEAD^")).toBe(parent);
+    expect(spawnSync(realGit, ["-C", agent, "merge-base", "--is-ancestor", baseline, "HEAD"]).status).toBe(1);
     expect(readFileSync(join(root, "push-calls"), "utf8"))
       .toContain(`--force-with-lease=${branchRef}:${baseline}`);
     expect(result.events).toMatch(/rereview\nmarker\n/);
+    evidence("uncontended rewrite", result.status, "none", git(agent, "rev-parse", "HEAD"));
   });
 
   it("normally publishes a fast-forward", () => {
     const result = runAction('printf local > .github/local.txt; git add .github; git commit -m local');
     expect(result.status, result.stderr).toBe(0);
     expect(remoteTip()).toBe(git(agent, "rev-parse", "HEAD"));
+    expect(spawnSync(realGit, ["-C", agent, "merge-base", "--is-ancestor", baseline, "HEAD"]).status).toBe(0);
     expect(readFileSync(join(root, "push-calls"), "utf8")).toBe(`push origin HEAD:${branchRef}\n`);
     expect(result.events).toMatch(/rereview\nmarker\n/);
+    evidence("uncontended normal", result.status, "none", git(agent, "rev-parse", "HEAD"));
+  });
+
+  it.each(["normal", "force"])("rejects a %s push raced after the helper's final fetch", (kind) => {
+    const concurrent = commit(writer, "concurrent");
+    const model = kind === "force" ? amend : 'printf local > .github/local.txt; git add .github; git commit -m local';
+    const result = runAction(model, { race: true, check: 'git fetch origin' });
+    const local = git(agent, "rev-parse", "HEAD");
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain(kind === "force" ? "explicit-lease push rejected" : "normal push rejected");
+    expect(result.stdout).toContain("pre-commit-checks: passed");
+    expect(result.stderr).toContain("[rejected]");
+    expect(remoteTip()).toBe(concurrent);
+    expect(spawnSync(realGit, ["-C", remote, "merge-base", "--is-ancestor", concurrent, remoteTip()]).status).toBe(0);
+    expect(result.events).not.toMatch(/rereview|marker/);
+    const push = readFileSync(join(root, "push-calls"), "utf8");
+    if (kind === "force") expect(push).toContain(`--force-with-lease=${branchRef}:${baseline}`);
+    evidence(`respond-review post-fetch ${kind}`, result.status, concurrent, local);
   });
 
   it.each([
@@ -169,6 +239,22 @@ describe("respond-review publication wiring", () => {
     expect(remoteTip()).toBe(concurrent);
     expect(result.events).not.toMatch(/rereview|marker/);
     if (phase === "pre-commit") expect(result.events).toContain("gh pr comment");
+    expect(spawnSync(realGit, ["-C", remote, "merge-base", "--is-ancestor", concurrent, remoteTip()]).status).toBe(0);
+    evidence(`${phase} ${change} extra fetch`, result.status, concurrent, git(agent, "rev-parse", "HEAD"));
+  });
+
+  it.each(["missing-branch", "fetch-failure"])("fails safely on publication %s", (failure) => {
+    const disruption = failure === "missing-branch"
+      ? 'git -C "$WRITER" push origin ":$BRANCH_REF"'
+      : 'git remote set-url origin "$WORK_DIR/missing.git"';
+    const result = runAction(`${amend}; ${disruption}`);
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("fetch failed");
+    expect(result.events).not.toMatch(/rereview|marker/);
+    if (failure === "fetch-failure") expect(remoteTip()).toBe(baseline);
+    else expect(spawnSync(realGit, ["-C", remote, "show-ref", "--verify", "--quiet", branchRef]).status).toBe(1);
+    expect(existsSync(join(root, "push-calls"))).toBe(false);
+    evidence(`publication ${failure}`, result.status, "none", git(agent, "rev-parse", "HEAD"));
   });
 
   it("rejects a remote-ahead branch without re-review or marker mutation", () => {
@@ -185,5 +271,47 @@ describe("respond-review publication wiring", () => {
     expect(result.events).toContain("gh pr comment");
     expect(result.events).toMatch(/rereview\nmarker\n/);
     expect(remoteTip()).toBe(git(agent, "rev-parse", "HEAD"));
+  });
+});
+
+describe("normal-only entrypoint publication against concurrent writers", () => {
+  it.each(["fix_checks", "resolve_clean", "resolve_conflicted", "fix_deployment"])("preserves a competing tip in %s", (scenario) => {
+    const isResolve = scenario.startsWith("resolve_");
+    const conflicted = scenario === "resolve_conflicted";
+    const ref = scenario === "fix_deployment" ? "refs/heads/agent/fix-deploy-issue-123" : branchRef;
+    if (isResolve) {
+      git(writer, "checkout", "-B", "main", parent);
+      writeFileSync(join(writer, conflicted ? "conflict.txt" : "main.txt"), "main\n");
+      git(writer, "add", ".");
+      git(writer, "commit", "-m", "main change");
+      git(writer, "push", "origin", "HEAD:refs/heads/main");
+      git(writer, "checkout", branch);
+      if (conflicted) {
+        writeFileSync(join(agent, "conflict.txt"), "branch\n");
+        git(agent, "add", ".");
+        git(agent, "commit", "-m", "branch change");
+        git(agent, "push", "origin", `HEAD:${branchRef}`);
+        baseline = git(agent, "rev-parse", "HEAD");
+        git(writer, "fetch", "origin", branch);
+        git(writer, "reset", "--hard", baseline);
+      }
+    }
+    if (scenario === "fix_deployment") git(agent, "push", "origin", `HEAD:${ref}`);
+    const concurrent = commit(writer, "concurrent");
+    const model = conflicted ? 'printf "resolved\\n" > conflict.txt; git add conflict.txt' :
+      'printf local > .github/local.txt; git add .github; git commit -m local';
+    const actionName = isResolve ? "resolve_conflicts" : scenario;
+    const result = runNormalAction(actionName, model, ref);
+    const local = git(agent, "rev-parse", "HEAD");
+    expect(result.status, result.stderr).not.toBe(0);
+    expect(result.stderr).toContain("[rejected]");
+    expect(git(remote, "rev-parse", ref)).toBe(concurrent);
+    expect(spawnSync(realGit, ["-C", remote, "merge-base", "--is-ancestor", concurrent, ref]).status).toBe(0);
+    git(agent, "fetch", "origin", ref);
+    expect(spawnSync(realGit, ["-C", agent, "merge-base", "--is-ancestor", concurrent, local]).status).toBe(1);
+    expect(result.events).not.toMatch(/marker|gh pr create|gh pr comment/);
+    expect(readFileSync(join(root, "push-calls"), "utf8")).not.toMatch(/--force|\s-f\b|\+HEAD/);
+    if (isResolve) expect(result.stdout).toContain(conflicted ? "Verification passed — committing merge" : "Clean merge — pushing");
+    evidence(scenario, result.status, concurrent, local, ref);
   });
 });
