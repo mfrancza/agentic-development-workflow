@@ -40,11 +40,7 @@ For longer bodies, write to a file and use `--body-file` (or `-F body=@file` for
 
 ## Before you commit
 
-Whenever your change touches any path under `.github/` — including `.github/workflows/`, `.github/scripts/`, or any other `.github/` subdirectory — run the repo's own checks inside `.github/scripts/` before committing:
-
-```bash
-cd .github/scripts && npm ci && npm run typecheck && npm test
-```
+Whenever your change touches any path under `.github/` — including `.github/workflows/`, `.github/scripts/`, or any other `.github/` subdirectory — check `AGENTS.md` under "Pre-commit validation" for the repo-specific commands to run before committing.
 
 If the checks fail: fix the failures before committing. If a failure is clearly unrelated to your change, state why in your reply to the reviewer before committing anyway.
 

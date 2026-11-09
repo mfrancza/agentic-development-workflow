@@ -146,6 +146,16 @@ Optional: `AGENT_MODEL` (default `sonnet`), `AGENT_MAX_TURNS` (default `100`), `
 
 The **reviewer image** at [`docker/reviewer/`](docker/reviewer/) does not use `AGENT_ACTION` — it performs exactly one action (review a PR) and dispatches nothing else. Required env: the provider API key for the resolved model (`ANTHROPIC_API_KEY` for Anthropic models, `OPENAI_API_KEY` for OpenAI models, `XAI_API_KEY` for xAI Grok models — same conditional key validation as the developer image), `GH_TOKEN`, `GITHUB_REPO`, `GITHUB_PR_NUMBER`; optional `AGENT_MODEL` / `AGENT_MAX_TURNS` (same defaults as the developer image so `model:*` labels behave identically) and `RESOLVE_THREADS_FILE` (path where the container records GraphQL IDs of review threads whose findings are addressed — the `resolveReviewThread` mutation requires Contents: write, which the reviewer App deliberately lacks, so `agent-review.yml` mounts this file and resolves the recorded threads with the workflow `GITHUB_TOKEN` after the container exits). The reviewer image deliberately ships no `git-askpass.sh` and has no `git commit` / `git push` code paths — the no-write guarantee is structural (image) as well as token-scoped (Contents: read on the reviewer App); see [`docs/design/reviewer-container.md`](docs/design/reviewer-container.md) decision 3. The agent posts the review via `gh api` and the entrypoint verifies afterwards that a review by the reviewer app exists on the PR head SHA — exiting non-zero otherwise (decision 1).
 
+## Pre-commit validation
+
+Whenever a developer-agent change touches any path under `.github/` — including `.github/workflows/`, `.github/scripts/`, or any other `.github/` subdirectory — run this repository's checks inside `.github/scripts/` before committing:
+
+```bash
+cd .github/scripts && npm ci && npm run typecheck && npm test
+```
+
+If the checks fail: fix the failures before committing. If a failure is clearly unrelated to your change, state why in your commit message or PR description before committing anyway.
+
 ## Labels
 
 Labels are defined in [`terraform/modules/labels/main.tf`](terraform/modules/labels/main.tf) (`automation_labels` local). Read that file before adding, removing, or reasoning about label behavior — do not rely on any label list reproduced elsewhere.
@@ -451,6 +461,8 @@ These are documented gotchas that have caused real incidents or are structurally
 2. Add an `action_<name>()` function in `docker/scripts/entrypoint.sh` and a matching case in the dispatcher.
 3. Add a workflow in `.github/workflows/` that calls the [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composite action with the new `AGENT_ACTION` and the appropriate issue/PR/run identifiers.
 4. Document the new action (env vars, trigger, labels) here in AGENTS.md and — if it affects setup — in README.md.
+
+**Prompt content rule:** Prompt files in `docker/scripts/prompts/` must not contain repo-specific content — commands, paths, or tools that apply only to this repository. The prompts are generic agent instructions; repo-specific steps (such as which pre-commit checks to run) belong in `AGENTS.md` under the relevant section. When a prompt needs to reference repo-specific steps, it should direct the agent to consult `AGENTS.md`.
 
 ## Manual repository settings
 
