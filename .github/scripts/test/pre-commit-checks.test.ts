@@ -46,6 +46,9 @@ interface RunOptions {
    *  unset in the child env, which triggers the helper's skip-if-no-command
    *  behaviour. */
   preCommitCheckCmd?: string;
+  /** Exit code for `mktemp`. Defaults to 0 (success).  Set to non-zero to
+   *  simulate a full or unavailable temp filesystem. */
+  mktempExit?: number;
 }
 
 function runChecks(options: RunOptions = {}) {
@@ -163,7 +166,22 @@ exit 1
 `,
   );
 
-  for (const cmd of ["git", "npm", "gh"]) {
+  // --- Mock mktemp ---
+  // Fails with MOCK_MKTEMP_EXIT when non-zero (simulating a full/unavailable
+  // temp filesystem); otherwise delegates to the real binary so the helper
+  // can create its capture file normally.
+  writeFileSync(
+    join(bin, "mktemp"),
+    `#!/bin/bash
+if [[ "\${MOCK_MKTEMP_EXIT:-0}" -ne 0 ]]; then
+    echo "mktemp: failed to create temp file: No space left on device" >&2
+    exit "\${MOCK_MKTEMP_EXIT}"
+fi
+exec /usr/bin/mktemp "$@"
+`,
+  );
+
+  for (const cmd of ["git", "npm", "gh", "mktemp"]) {
     chmodSync(join(bin, cmd), 0o755);
   }
 
@@ -199,6 +217,7 @@ pre_commit_checks_run "$HEAD_BEFORE_SHA" "$PR_NUMBER"
         MOCK_NPM_CHECK_EXIT: String(npmCheckExit),
         MOCK_GH_COMMENT_BODY_FILE: commentBodyFile,
         MOCK_GH_COMMENT_EXIT: String(ghCommentExit),
+        MOCK_MKTEMP_EXIT: String(options.mktempExit ?? 0),
         // GITHUB_RUN_ID: set to the provided value, or explicitly undefined
         // (which Node strips from the child env) so the variable is absent
         // even when the outer CI environment has it set.
@@ -464,6 +483,19 @@ describe("pre-commit-checks backstop", () => {
     // PR comment must surface the custom command so the developer knows what failed
     expect(commentBody).not.toBeNull();
     expect(commentBody).toContain("npm run lint");
+  });
+
+  it("logs warning and returns 0 when mktemp fails (backstop fail-open)", () => {
+    // A full or unavailable temp filesystem causes mktemp to exit non-zero.
+    // The backstop must catch this, log a warning, and return 0 so that the
+    // caller's git push is not aborted (runChecks asserts status === 0).
+    const { output, commentBody } = runChecks({
+      mktempExit: 1,
+    });
+    expect(output).toContain("pre-commit-checks: mktemp failed");
+    expect(output).toContain("skipping checks (fail-open)");
+    // No comment should be posted when the temp file could not be created.
+    expect(commentBody).toBeNull();
   });
 
   it("matches .github/ path when diff list exceeds the pipe buffer size", () => {

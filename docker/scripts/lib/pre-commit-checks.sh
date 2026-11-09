@@ -87,8 +87,14 @@ pre_commit_checks_run() {
     fi
 
     # Step 2: run the configured check command, capturing combined stdout+stderr
-    local check_output_file check_exit=0
-    check_output_file="$(mktemp)"
+    # Fail-open: a full or unavailable temp filesystem must not abort the caller
+    # before its git push — capture mktemp's exit status and return 0 instead.
+    local check_output_file mktemp_exit=0 check_exit=0
+    check_output_file="$(mktemp)" || mktemp_exit=$?
+    if [[ $mktemp_exit -ne 0 ]]; then
+        log "pre-commit-checks: mktemp failed (exit ${mktemp_exit}); skipping checks (fail-open)"
+        return 0
+    fi
     (cd "${scripts_dir}" && bash -c "${check_cmd}") > "${check_output_file}" 2>&1 || check_exit=$?
 
     if [[ $check_exit -eq 0 ]]; then
