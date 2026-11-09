@@ -205,6 +205,21 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #                          multi-reviewer feature; stored as the JSON-encoded
 #                          REVIEWER_MODELS Actions variable; omit or set to [] to
 #                          disable multi-reviewer (the default)
+#   pre_commit_check_cmd — (optional) shell command run by the pre-commit checks
+#                          backstop after any agent push that touches .github/.
+#                          The command runs inside pre_commit_scripts_dir and is
+#                          fully responsible for setup (e.g. dependency install)
+#                          as well as the actual checks. Stored as the
+#                          PRE_COMMIT_CHECK_CMD Actions variable. Omit or set to
+#                          "" to disable the backstop (the default) — configure
+#                          per-deployment so the Docker image does not assume any
+#                          particular repo stack.
+#                          Example: "npm ci && npm run typecheck && npm test"
+#   pre_commit_scripts_dir — (optional) path relative to the checkout root where
+#                          pre_commit_check_cmd runs. Stored as the
+#                          PRE_COMMIT_SCRIPTS_DIR Actions variable when non-empty.
+#                          Omit or set to "" to use the built-in default of
+#                          .github/scripts without creating an Actions variable.
 ```
 
 ```bash
