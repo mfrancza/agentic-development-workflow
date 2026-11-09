@@ -104,7 +104,7 @@ Deployment configuration (see [`docker/scripts/lib/pre-commit-checks.sh`](docker
 - `PRE_COMMIT_SCRIPTS_DIR` *(default: `.github/scripts`)* — path relative to `WORK_DIR` of the directory where the check command runs. Set to an empty string to disable checks entirely.
 - `PRE_COMMIT_CHECK_CMD` *(no default; unset or empty = checks skipped)* — shell command run inside that directory, responsible for both setup (e.g. dependency installation) and the actual checks. Configure this per deployment so the Docker image does not assume any particular repo stack.
 
-The developer-agent prompts in [`docker/scripts/prompts/`](docker/scripts/prompts/) carry the corresponding agent-side instruction to self-check before committing when the diff touches `.github/`. See [`docs/design/developer-agent-pre-commit-checks.md`](docs/design/developer-agent-pre-commit-checks.md) for the full design rationale.
+See [`docs/design/developer-agent-pre-commit-checks.md`](docs/design/developer-agent-pre-commit-checks.md) for the full design rationale.
 
 7. Deployment failures trigger `AGENT_ACTION=fix-deployment` via the `deployment_status` event (regardless of merge state — the workflow skips unless it can map the failing deployment SHA to a PR containing `Closes #N`), which opens a fix-up PR.
 

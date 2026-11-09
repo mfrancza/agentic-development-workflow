@@ -26,6 +26,7 @@ owner's organization.
 | `REVIEWER_MODELS` | JSON array | Ordered list of model identifiers for the multi-reviewer feature. Empty array (`[]`) disables multi-reviewer. Workflow guards use `vars.REVIEWER_MODELS != ''` before `fromJSON`. |
 | `REVIEW_MODEL_PAIRING` | JSON object | Reviewer model-pair preferences. When `enabled` is `true`, the agent-review workflow uses the configured `policy`, `preferred_vendors`, `explicit_map`, and `fallback_chain` to pick a reviewer model based on the authoring model recorded in the PR body. Explicit `model:review:*` / `model:*` labels on the PR take precedence. Defaults to `enabled = false` (fail-safe opt-in). Workflow guards use `vars.REVIEW_MODEL_PAIRING != ''` before `fromJSON`. See `docs/design/configurable-model-pair-preferences.md` for resolver semantics. |
 | `PRE_COMMIT_CHECK_CMD` | string | Shell command run by the pre-commit checks backstop inside `PRE_COMMIT_SCRIPTS_DIR` (default `.github/scripts`) after a `.github/` change. The command is fully responsible for both setup (e.g. dependency installation) and the actual checks. Absent (the default, `count = 0`) disables the backstop — configure per-deployment to avoid baking repo-specific commands into the Docker image. Applies to `implement`, `fix-checks`, `respond-review`, and `fix-deployment`. |
+| `PRE_COMMIT_SCRIPTS_DIR` | string | Directory path (relative to `WORK_DIR`) where the pre-commit check command runs. Absent (the default, `count = 0`) means the helper uses its built-in default of `.github/scripts`. Set to a non-empty path to override the default for repos whose scripts live elsewhere. Applies to the same four actions as `PRE_COMMIT_CHECK_CMD`. |
 
 ## Usage
 
@@ -62,6 +63,7 @@ module "agent_vars" {
   #   fallback_chain    = ["default-model"]
   # }
   # pre_commit_check_cmd = "npm ci && npm run typecheck && npm test"  # omit or leave "" to disable the pre-commit checks backstop; command is fully responsible for setup + checks
+  # pre_commit_scripts_dir = "tools/scripts"  # omit or leave "" to use the built-in default of .github/scripts
 }
 ```
 
@@ -98,6 +100,7 @@ module "agent_vars" {
   #   fallback_chain    = ["default-model"]
   # }
   # pre_commit_check_cmd = "npm ci && npm run typecheck && npm test"  # omit or leave "" to disable the pre-commit checks backstop; command is fully responsible for setup + checks
+  # pre_commit_scripts_dir = "tools/scripts"  # omit or leave "" to use the built-in default of .github/scripts
 }
 ```
 
@@ -140,6 +143,7 @@ provider "github" {
 | `reviewer_models` | `list(string)` | no | `[]` | Ordered list of model identifiers for the multi-reviewer feature. Empty disables multi-reviewer. |
 | `review_model_pairing` | `object({enabled,policy,preferred_vendors,explicit_map,fallback_chain})` | no | `enabled=false` | Reviewer model-pair preferences. See `docs/design/configurable-model-pair-preferences.md`. |
 | `pre_commit_check_cmd` | `string` | no | `""` | Shell command for the pre-commit checks backstop. When non-empty, creates the `PRE_COMMIT_CHECK_CMD` Actions variable; empty (the default, `count = 0`) does not create the variable and the backstop skips checks for that deployment. |
+| `pre_commit_scripts_dir` | `string` | no | `""` | Custom scripts directory for the pre-commit backstop. When non-empty, creates the `PRE_COMMIT_SCRIPTS_DIR` Actions variable overriding the helper's built-in default of `.github/scripts`; empty (the default, `count = 0`) does not create the variable and the helper uses its built-in default. |
 
 ## Outputs
 
@@ -161,6 +165,7 @@ provider "github" {
 | `reviewer_models_variable_name` | `string` | Name of the `REVIEWER_MODELS` Actions variable (`"REVIEWER_MODELS"`). |
 | `review_model_pairing_variable_name` | `string` | Name of the `REVIEW_MODEL_PAIRING` Actions variable (`"REVIEW_MODEL_PAIRING"`). |
 | `pre_commit_check_cmd_variable_name` | `string \| null` | Name of the `PRE_COMMIT_CHECK_CMD` Actions variable (`"PRE_COMMIT_CHECK_CMD"`), or `null` when `pre_commit_check_cmd` is empty and the variable is not created. |
+| `pre_commit_scripts_dir_variable_name` | `string \| null` | Name of the `PRE_COMMIT_SCRIPTS_DIR` Actions variable (`"PRE_COMMIT_SCRIPTS_DIR"`), or `null` when `pre_commit_scripts_dir` is empty and the variable is not created (the helper's built-in default of `.github/scripts` applies). |
 
 ## Notes
 
@@ -176,3 +181,4 @@ provider "github" {
 - The protected-approval variables preserve existing behavior because `ENABLE_PROTECTED_APPROVAL_GATE` defaults to `"false"`. `PROTECTED_PR_AUTHOR_LOGINS` must be non-empty with unique, non-empty logins; both the approval count and reconciliation interval must be positive integers.
 - `REVIEW_MODEL_PAIRING` defaults to `{"enabled":false,...}`. The `enabled = false` default is a fail-safe: a fresh repo behaves exactly as it did before the variable existed (pairing tier is dormant). Set `enabled = true` and choose a `policy` to opt in. Workflows must guard with `vars.REVIEW_MODEL_PAIRING != ''` before calling `fromJSON` — an absent variable evaluates to `''` and `fromJSON('')` would throw a runtime error. `fromJSON(vars.REVIEW_MODEL_PAIRING).enabled` is the primary gate that the agent-review workflow checks before entering the pairing tier.
 - `PRE_COMMIT_CHECK_CMD` defaults to `""` (empty string), which means `count = 0` — the Actions variable is not created and the backstop is disabled for that deployment. When non-empty, the pre-commit checks helper runs the specified command inside `PRE_COMMIT_SCRIPTS_DIR` (default `.github/scripts`) whenever a `.github/` path is touched by one of the four branch-writing actions (`implement`, `fix-checks`, `respond-review`, `fix-deployment`). The command is fully responsible for all setup (e.g. dependency installation) and the actual checks. The push always proceeds regardless of the outcome (fail-open). Set this to the repo-specific command (e.g. `"npm ci && npm run typecheck && npm test"`) in `terraform.tfvars`; leave unset for repos that use a different or no check mechanism.
+- `PRE_COMMIT_SCRIPTS_DIR` defaults to `""` (empty string), which means `count = 0` — the Actions variable is not created and the helper uses its built-in default of `.github/scripts`. Set this only when your scripts live in a different directory (e.g. `"tools/scripts"`). An absent `PRE_COMMIT_SCRIPTS_DIR` Actions variable is equivalent to `.github/scripts`; to disable checks entirely, leave `PRE_COMMIT_CHECK_CMD` unset instead.

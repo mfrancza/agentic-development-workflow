@@ -86,6 +86,7 @@ module "agent_vars" {
   review_model_pairing                             = var.review_model_pairing
   resolve_conflicts_author_allowlist               = var.resolve_conflicts_author_allowlist
   pre_commit_check_cmd                             = var.pre_commit_check_cmd
+  pre_commit_scripts_dir                           = var.pre_commit_scripts_dir
 }
 
 module "branch_protection" {

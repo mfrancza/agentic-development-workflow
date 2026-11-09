@@ -196,3 +196,15 @@ resource "github_actions_variable" "pre_commit_check_cmd" {
   variable_name = "PRE_COMMIT_CHECK_CMD"
   value         = var.pre_commit_check_cmd
 }
+
+# Expose the custom scripts directory as a repository Actions variable so
+# operators can override the helper's built-in default (.github/scripts) without
+# modifying the Docker image.  An empty value (the default) omits the resource
+# and the helper falls back to its built-in default — consistent with the
+# count = 0 pattern used by PRE_COMMIT_CHECK_CMD above.
+resource "github_actions_variable" "pre_commit_scripts_dir" {
+  count         = var.pre_commit_scripts_dir == "" ? 0 : 1
+  repository    = var.repository
+  variable_name = "PRE_COMMIT_SCRIPTS_DIR"
+  value         = var.pre_commit_scripts_dir
+}

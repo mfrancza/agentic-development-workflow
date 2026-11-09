@@ -82,3 +82,8 @@ output "pre_commit_check_cmd_variable_name" {
   description = "Name of the PRE_COMMIT_CHECK_CMD Actions variable, or null when pre_commit_check_cmd is empty and the variable is not created."
   value       = length(github_actions_variable.pre_commit_check_cmd) > 0 ? github_actions_variable.pre_commit_check_cmd[0].variable_name : null
 }
+
+output "pre_commit_scripts_dir_variable_name" {
+  description = "Name of the PRE_COMMIT_SCRIPTS_DIR Actions variable, or null when pre_commit_scripts_dir is empty and the variable is not created (the helper's built-in default of .github/scripts is used instead)."
+  value       = length(github_actions_variable.pre_commit_scripts_dir) > 0 ? github_actions_variable.pre_commit_scripts_dir[0].variable_name : null
+}

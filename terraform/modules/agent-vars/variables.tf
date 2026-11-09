@@ -170,3 +170,9 @@ variable "pre_commit_check_cmd" {
   type        = string
   default     = ""
 }
+
+variable "pre_commit_scripts_dir" {
+  description = "Path (relative to WORK_DIR) of the directory where the pre-commit check command is run. When non-empty, stored as the PRE_COMMIT_SCRIPTS_DIR Actions variable and forwarded into the agent container, overriding the helper's built-in default of .github/scripts. Leave empty (the default, count = 0) to use the built-in default without creating an Actions variable."
+  type        = string
+  default     = ""
+}
