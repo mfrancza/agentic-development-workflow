@@ -392,7 +392,18 @@ jobs:
           PR_NUMBER: ${{ matrix.pr_number }}
         run: |
           set -euo pipefail
-          gh api --method DELETE "repos/$REPO/issues/$PR_NUMBER/labels/agent%3Aresolve-conflicts"
+          if ! result="$(gh api --method DELETE "repos/$REPO/issues/$PR_NUMBER/labels/agent%3Aresolve-conflicts" 2>&1)"; then
+            printf '%s\n' "$result" >&2
+            if [[ "$result" != *'(HTTP 404)'* ]]; then
+              exit 1
+            fi
+            labels="$(gh api "repos/$REPO/issues/$PR_NUMBER/labels" --paginate --jq '.[].name')"
+            if printf '%s\n' "$labels" | grep -Fxq 'agent:resolve-conflicts'; then
+              echo '::error::Trigger label is still present after the failed removal.'
+              exit 1
+            fi
+            echo '::notice::Trigger label was already removed.'
+          fi
 
       - name: Upload agent logs
         if: always()
