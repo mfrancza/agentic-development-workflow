@@ -34,10 +34,10 @@ capability across vendors. This supersedes the Anthropic-only scope of
    itself runs on. The groomer infers the anchor's vendor using
    the `resolve_provider()` routing rules in `docker/scripts/entrypoint.sh` — Anthropic accepts a
    tier alias or any `claude-*` prefix; OpenAI uses an explicit allowlist (`gpt-6-astra`,
-   `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`), not a `gpt-*` prefix rule; xAI uses an
+   `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`, `gpt-6.1-sol`, `gpt-6.1-terra`, `gpt-6-luna`), not a `gpt-*` prefix rule; xAI uses an
    explicit allowlist of `grok-*` model IDs (`grok-4.20-0309-non-reasoning`,
    `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-4.3`, `grok-4.5`, `grok-4.6`,
-   `grok-build-0.1`) — and selects
+   `grok-build-0.1`, `grok-4.7`) — and selects
    from that vendor's Task-Class Matrix column. The groomer emits **no** `model:*` label when the
    task's capability class matches the anchor model's class under the Cross-Vendor Class Table —
    the downstream workflow then falls through to the configured default, honoring `DEFAULT_MODEL`
@@ -74,6 +74,8 @@ The [current Anthropic overview][anthropic-models] also describes models outside
 tiers, including Fable 5.1. It now recommends starting with Opus 5 for most workloads.
 **Sonnet is this repository's cost-conscious policy, not Anthropic's current default recommendation.**
 Do not extend grooming to additional families just because the vendor offers them.
+`model:claude-fable-5-1` is provisioned for manual selection (operators may apply it to override the
+default) but is not a grooming-agent choice — the groomer selects only tier aliases for Anthropic.
 
 ### OpenAI models (grooming and manual selection)
 
@@ -87,6 +89,9 @@ Use [OpenAI's current model guidance][openai-models] and task-specific evaluatio
 - `model:gpt-5.6-sol`: a candidate for demanding coding and cross-component reasoning.
 - `model:gpt-6-astra`: an escalation candidate for the hardest end-to-end implementation,
   architectural design, or review when a cheaper model fails your quality bar.
+- `model:gpt-6-luna`: OpenAI's most efficient model for focused, high-volume tasks; haiku-class alternative to gpt-5.6-luna.
+- `model:gpt-6.1-terra`: a fast, efficient candidate for routine implementation and standard review; sonnet-class alternative to gpt-5.6-terra.
+- `model:gpt-6.1-sol`: near-Astra performance at lower cost; opus-class alternative to gpt-5.6-sol for demanding work.
 
 These are workload analogies, **not demonstrated equivalence** to Anthropic tiers.
 Astra costs 2.5× Sol for the normalized token budget below; evaluate whether fewer retries or
@@ -108,6 +113,8 @@ The CLI default and the vendor's recommended model are not necessarily the same.
 - `model:grok-4.5`: an alternative when its lower cached-input rate matters for a stable prefix.
 - `model:grok-4.6`: the vendor-recommended starting point for an xAI coding evaluation,
   including complex work; its standard input/output rates equal Grok 4.5's.
+- `model:grok-4.7`: xAI's most capable model; a premium escalation candidate for the most
+  demanding long-horizon implementation, system design, or review tasks.
 
 ## Cross-Vendor Class Table
 
@@ -123,9 +130,9 @@ resolver treats as equivalent for pairing purposes).
 
 | Class | Anthropic | OpenAI | xAI |
 |---|---|---|---|
-| `haiku` | `haiku`, `claude-haiku-4-5`, `claude-haiku-5-5` | `gpt-5.6-luna` | `grok-build-0.1` |
-| `sonnet` | `sonnet`, `claude-sonnet-4-5`, `claude-sonnet-5-5` | `gpt-5.6-terra` | `grok-4.3`, `grok-4.20-0309-non-reasoning`, `grok-4.5` |
-| `opus` | `opus`, `claude-opus-5-5` | `gpt-5.6-sol`, `gpt-6-astra` | `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-4.6` |
+| `haiku` | `haiku`, `claude-haiku-4-5`, `claude-haiku-5-5` | `gpt-5.6-luna`, `gpt-6-luna` | `grok-build-0.1` |
+| `sonnet` | `sonnet`, `claude-sonnet-4-5`, `claude-sonnet-5-5` | `gpt-5.6-terra`, `gpt-6.1-terra` | `grok-4.3`, `grok-4.20-0309-non-reasoning`, `grok-4.5` |
+| `opus` | `opus`, `claude-opus-5-5`, `claude-fable-5-1` | `gpt-5.6-sol`, `gpt-6-astra`, `gpt-6.1-sol` | `grok-4.20-0309-reasoning`, `grok-4.20-multi-agent-0309`, `grok-4.6`, `grok-4.7` |
 
 No model currently appears under more than one class. If a future edit places a model in multiple
 classes, add a short paragraph here naming the model, listing every class it appears under in the
@@ -185,11 +192,15 @@ The cached-input column is informational and is **not** used in the uncached cos
 | `model:grok-4.20-0309-reasoning` | $1.25 | $0.20 | $2.50 | $0.0375 |
 | `model:grok-4.20-multi-agent-0309` | $1.25 | $0.20 | $2.50 | $0.0375 |
 | `model:haiku` | $0.10 | $0.01 | $0.50 | $0.0045 |
+| `model:gpt-6-luna` | $0.10 | $0.01 | $0.50 | $0.0045 |
 | `model:grok-4.5` | $2.00 | $0.30 | $6.00 | $0.0700 |
 | `model:grok-4.6` | $2.00 | $0.50 | $6.00 | $0.0700 |
+| `model:grok-4.7` | $2.00 | $0.50 | $6.00 | $0.0700 |
+| `model:gpt-6.1-terra` | $1.00 | $0.05 | $5.00 | $0.0450 |
 | `model:sonnet` | $2.00 | $0.20 | $10.00 | $0.0900 |
 | `model:gpt-5.6-terra` | $2.00 | $0.20 | $12.00 | $0.1000 |
 | `model:gpt-5.6-sol` | $4.00 | $0.40 | $20.00 | $0.1800 |
+| `model:gpt-6.1-sol` | $2.00 | $0.10 | $10.00 | $0.0900 |
 | `model:opus` | $4.00 | $0.20 | $20.00 | $0.1800 |
 | `model:gpt-6-astra` | $10.00 | $1.00 | $50.00 | $0.4500 |
 
@@ -238,19 +249,19 @@ change are not automatically mechanical work.
 
 | Task class | Anthropic | OpenAI | xAI (Grok) | Selection boundary |
 |---|---|---|---|---|
-| `do` — mechanical; typo, single value, small doc correction | `model:haiku` ($0.0045) | `model:gpt-5.6-luna` | `model:grok-build-0.1` | No research, ambiguity, or design decisions; otherwise use a scoped-work model. |
-| `bug` — scoped diagnosis and fix | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra` | `model:grok-4.3` | A small diff alone does not make diagnosis trivial. |
-| `enhancement` / `do` — typical scoped implementation | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra` | `model:grok-4.6`, `model:grok-4.20-0309-non-reasoning` | Clear requirements and a bounded implementation path. |
-| `dependency upgrade` | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra` | `model:grok-4.5` | Escalate breaking migrations with architectural trade-offs to a design-capable model. |
-| Documentation audit, pricing research, bounded validation without `plan` | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra` | `model:grok-4.6` | Research is non-mechanical even if only Markdown changes; ambiguous scope needs a design-capable model. |
-| `plan` — design, architecture, or validation planning | `model:opus` ($0.1800) | `model:gpt-5.6-sol` | `model:grok-4.20-0309-reasoning` | Use a design-capable model within the chosen provider; a human may deliberately choose a cheaper model for a procedural plan. |
-| Cross-cutting refactor or under-specified bug / enhancement | `model:opus` ($0.1800) | `model:gpt-5.6-sol` | `model:grok-4.6` | Multiple interacting components or unresolved trade-offs. |
-| New agent type or decomposition-heavy design | `model:opus` ($0.1800) | `model:gpt-5.6-sol` | `model:grok-4.20-multi-agent-0309` | Model selection does not change workflow topology or permissions. |
-| Hardest long-horizon implementation or system design | `model:opus` ($0.1800) | `model:gpt-6-astra`, `model:gpt-5.6-sol` | `model:grok-4.6` | Evaluate Astra as a premium escalation, not an automatic default. |
-| Code review — targeted mechanical check | `model:haiku` ($0.0045) | `model:gpt-5.6-luna` | `model:grok-build-0.1` | Small, isolated change with no security or cross-component implications. |
-| Code review — standard multi-file PR | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra` | `model:grok-4.6` | Correctness, tests, and repository conventions. |
-| Code review — architectural / security-sensitive | `model:opus` ($0.1800) | `model:gpt-5.6-sol`, `model:gpt-6-astra` | `model:grok-4.6` | Human review remains necessary where required; model capability is not authorization. |
-| Design — bounded feature specification without `plan` | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra` | `model:grok-4.6` | If classified `plan`, use the `plan` row instead. |
+| `do` — mechanical; typo, single value, small doc correction | `model:haiku` ($0.0045) | `model:gpt-5.6-luna`, `model:gpt-6-luna` | `model:grok-build-0.1` | No research, ambiguity, or design decisions; otherwise use a scoped-work model. |
+| `bug` — scoped diagnosis and fix | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra`, `model:gpt-6.1-terra` | `model:grok-4.3` | A small diff alone does not make diagnosis trivial. |
+| `enhancement` / `do` — typical scoped implementation | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra`, `model:gpt-6.1-terra` | `model:grok-4.6`, `model:grok-4.20-0309-non-reasoning` | Clear requirements and a bounded implementation path. |
+| `dependency upgrade` | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra`, `model:gpt-6.1-terra` | `model:grok-4.5` | Escalate breaking migrations with architectural trade-offs to a design-capable model. |
+| Documentation audit, pricing research, bounded validation without `plan` | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra`, `model:gpt-6.1-terra` | `model:grok-4.6`, `model:grok-4.7` | Research is non-mechanical even if only Markdown changes; ambiguous scope needs a design-capable model. |
+| `plan` — design, architecture, or validation planning | `model:opus` ($0.1800) | `model:gpt-5.6-sol`, `model:gpt-6.1-sol` | `model:grok-4.20-0309-reasoning`, `model:grok-4.7` | Use a design-capable model within the chosen provider; a human may deliberately choose a cheaper model for a procedural plan. |
+| Cross-cutting refactor or under-specified bug / enhancement | `model:opus` ($0.1800) | `model:gpt-5.6-sol`, `model:gpt-6.1-sol` | `model:grok-4.6`, `model:grok-4.7` | Multiple interacting components or unresolved trade-offs. |
+| New agent type or decomposition-heavy design | `model:opus` ($0.1800) | `model:gpt-5.6-sol`, `model:gpt-6.1-sol` | `model:grok-4.20-multi-agent-0309` | Model selection does not change workflow topology or permissions. |
+| Hardest long-horizon implementation or system design | `model:opus` ($0.1800) | `model:gpt-6-astra`, `model:gpt-5.6-sol`, `model:gpt-6.1-sol` | `model:grok-4.6`, `model:grok-4.7` | Evaluate Astra as a premium escalation, not an automatic default. |
+| Code review — targeted mechanical check | `model:haiku` ($0.0045) | `model:gpt-5.6-luna`, `model:gpt-6-luna` | `model:grok-build-0.1` | Small, isolated change with no security or cross-component implications. |
+| Code review — standard multi-file PR | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra`, `model:gpt-6.1-terra` | `model:grok-4.6`, `model:grok-4.7` | Correctness, tests, and repository conventions. |
+| Code review — architectural / security-sensitive | `model:opus` ($0.1800) | `model:gpt-5.6-sol`, `model:gpt-6-astra`, `model:gpt-6.1-sol` | `model:grok-4.6`, `model:grok-4.7` | Human review remains necessary where required; model capability is not authorization. |
+| Design — bounded feature specification without `plan` | `model:sonnet` ($0.0900) | `model:gpt-5.6-terra`, `model:gpt-6.1-terra` | `model:grok-4.6`, `model:grok-4.7` | If classified `plan`, use the `plan` row instead. |
 
 ## Evidence
 
@@ -360,6 +371,13 @@ on the PR too: an issue's review override alone is not read by the reviewer work
 
 Entries below record changes at their original dates; historical model lists and prices are not
 current selection guidance.
+
+- **2026-11-09 (rev 13)** — Added newly available models (Issue #833): `claude-fable-5-1`
+  (Anthropic; opus class; provisioned for manual selection, not a grooming-agent tier), `gpt-6.1-sol`
+  (OpenAI; opus class; near-Astra performance at lower cost), `gpt-6.1-terra` (OpenAI; sonnet class;
+  fast, efficient for routine work), `gpt-6-luna` (OpenAI; haiku class; most efficient for
+  focused tasks), `grok-4.7` (xAI; opus class; most capable xAI model). Updated Cross-Vendor Class
+  Table, Task-Class Matrix, pricing reference, provider allowlists, and grooming criteria accordingly.
 
 - **2026-11-02 (rev 12)** — Split the grooming vendor anchor (Issue #794): the groomer now anchors
   on `GROOM_IMPL_ANCHOR_MODEL` (`DEFAULT_MODEL`) for implementation tasks and

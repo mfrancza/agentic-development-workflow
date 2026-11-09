@@ -104,6 +104,10 @@ locals {
       color       = "1d76db"
       description = "Run agents pinned to Claude Haiku 5.5 (overrides DEFAULT_MODEL)."
     }
+    "model:claude-fable-5-1" = {
+      color       = "1d76db"
+      description = "Run agents pinned to Claude Fable 5.1 (overrides DEFAULT_MODEL)."
+    }
 
     # OpenAI models — flat allowlist kept in one-to-one sync with the openai)
     # case-arm in resolve_provider() in both entrypoints per
@@ -126,6 +130,18 @@ locals {
     "model:gpt-5.6-luna" = {
       color       = "1d76db"
       description = "Run agents on this issue with OpenAI gpt-5.6-luna (overrides DEFAULT_MODEL)."
+    }
+    "model:gpt-6.1-sol" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with OpenAI gpt-6.1-sol (overrides DEFAULT_MODEL)."
+    }
+    "model:gpt-6.1-terra" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with OpenAI gpt-6.1-terra (overrides DEFAULT_MODEL)."
+    }
+    "model:gpt-6-luna" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with OpenAI gpt-6-luna (overrides DEFAULT_MODEL)."
     }
 
     # xAI Grok models — sourced from `grok models` at Grok Build CLI v1.0.13
@@ -160,6 +176,10 @@ locals {
     "model:grok-build-0.1" = {
       color       = "1d76db"
       description = "Run agents on this issue with xAI grok-build-0.1 via Grok Build CLI (overrides DEFAULT_MODEL)."
+    }
+    "model:grok-4.7" = {
+      color       = "1d76db"
+      description = "Run agents on this issue with xAI grok-4.7 via Grok Build CLI (overrides DEFAULT_MODEL)."
     }
 
     # Per-agent model overrides. Each label targets a single agent type and
