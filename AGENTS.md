@@ -128,6 +128,16 @@ The [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composit
   - `protected-approval-gate-reconcile.yml` — scheduled (`*/5 * * * *`) caller of `protected-approval-gate-sweep-reusable.yml`; the periodic safety net that upper-bounds staleness when inline departed-SHA cleanup is dropped by pending-run replacement.
   - `protected-approval-gate-sweep-reusable.yml` — reusable workflow called by backfill and reconcile; fans out across open PRs and triggers publisher reruns.
 
+## Pre-commit validation
+
+When a change touches any path under `.github/`, run this repository's checks before committing:
+
+```bash
+cd .github/scripts && npm ci && npm run typecheck && npm test
+```
+
+Fix failures before committing, or explain why a failure is unrelated. See [Pre-commit checks backstop](#pre-commit-checks-backstop) for the separately configured, fail-open entrypoint checks.
+
 ## Agent Actions
 
 The developer container is a single image dispatched by `AGENT_ACTION`. The complete list of action names, their required environment variables, and the `action_*()` function preambles that validate them are defined in [`docker/scripts/entrypoint.sh`](docker/scripts/entrypoint.sh) — read that file before adding, removing, or reasoning about action behavior. Do not rely on any action list reproduced elsewhere.
@@ -451,6 +461,8 @@ These are documented gotchas that have caused real incidents or are structurally
 2. Add an `action_<name>()` function in `docker/scripts/entrypoint.sh` and a matching case in the dispatcher.
 3. Add a workflow in `.github/workflows/` that calls the [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composite action with the new `AGENT_ACTION` and the appropriate issue/PR/run identifiers.
 4. Document the new action (env vars, trigger, labels) here in AGENTS.md and — if it affects setup — in README.md.
+
+**Prompt content rule:** Prompt files under `docker/scripts/prompts/` and `docker/reviewer/prompts/` must not contain repo-specific content. Put repo-specific instructions in `AGENTS.md` instead.
 
 ## Manual repository settings
 

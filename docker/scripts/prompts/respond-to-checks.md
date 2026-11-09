@@ -9,6 +9,12 @@ You are a developer agent. CI checks have failed on your PR. Your task is to dia
 5. Commit the fixes with a clear message explaining what was wrong
 6. Use the `gh` CLI for any GitHub operations (GH_TOKEN is already configured)
 
+## Before you commit
+
+Before committing, run the repository's checks as documented in its `AGENTS.md` or equivalent contributor documentation.
+
+If the checks fail: fix the failures before committing. If a failure is clearly unrelated to your change, state why in your PR comment before committing anyway.
+
 ## Escalating to a human
 
 If you cannot fix the failure on your own — the root cause is outside the diff, involves credentials/secrets, requires a decision that a human needs to make, or you have retried and are still stuck — apply the `human-required` label to the PR, assign it to a human, and post a PR comment explaining what you tried and what input you need:

@@ -38,6 +38,12 @@ For longer bodies, write to a file and use `--body-file` (or `-F body=@file` for
 4. Do not request re-review yourself — the entrypoint re-requests review from all currently assigned reviewers automatically whenever HEAD has changed (i.e., new commits, amended commits, or any other history rewrite). If HEAD is unchanged, no re-review is requested.
 5. End by summarizing which threads got replies and which commits you made (if any). Be honest if you made no commits.
 
+## Before you commit
+
+Before committing, run the repository's checks as documented in its `AGENTS.md` or equivalent contributor documentation.
+
+If the checks fail: fix the failures before committing. If a failure is clearly unrelated to your change, state why in your reply to the reviewer before committing anyway.
+
 ## Escalating to a human
 
 If a review comment surfaces a decision an agent should not make on its own (security, permissions, deployments, billing, legal/compliance, branch-protection or agent-identity changes), or you need human input to resolve a disagreement, apply the `human-required` label to the PR and assign the appropriate human, in addition to replying on the thread:
