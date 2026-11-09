@@ -32,6 +32,8 @@ The complete flow from issue to deployment is:
 
 See [AGENTS.md](AGENTS.md) for the full list of `AGENT_ACTION` values and their required env vars.
 
+If respond-review cannot safely publish, rerun from the current remote or manually recover unpublished local commits if they remain available; do not retry with a newly fetched lease just to force publication. The [shared concurrency lock](docs/design/shared-branch-concurrency-group.md) does not cover humans or other outside writers. See the [publication safety design](docs/design/entrypoint-force-with-lease.md) for details.
+
 ## How it works
 
 Day-to-day operation is driven entirely by GitHub labels and events. See [`AGENTS.md § Labels`](AGENTS.md#labels) for the full label reference — all `agent:*`, `model:*`, grooming, and lifecycle labels with their descriptions and workflow behavior.
