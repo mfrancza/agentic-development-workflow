@@ -96,6 +96,16 @@ See [`docs/design-philosophy.md`](docs/design-philosophy.md) for the reasoning b
   - `resolve-conflicts`: the next push to `main` (or a manual `workflow_dispatch` with `pr_number`) re-enumerates open agent PRs and picks up the still-conflicted PR.
 - The enforcing static test is `.github/scripts/test/branch-concurrency-group.test.ts`, which asserts that all three reusables contain exactly one line matching the `agent-branch-pr-` prefix and that none contains any of the retired per-action prefixes.
 
+### Entrypoint publication safety
+
+- The [shared concurrency design](docs/design/shared-branch-concurrency-group.md) serializes participating jobs, but its lock does not cover humans or other outside writers.
+- The [respond-review publication design](docs/design/entrypoint-force-with-lease.md) pins the lease to the checkout commit after verifying that it matches the remote before the model runs; never replace that baseline with a later fetch.
+- Publish a fast-forward normally; reject a remote-ahead branch or concurrent divergence, and allow a history rewrite only with an explicit lease for the full destination ref and original checkout SHA.
+- Remote-state errors, unsafe concurrent divergence, and rejected pushes fail visibly with the branch and available original, remote, and local SHAs; do not request re-review or inject the marker after a publication failure.
+- Rerun from the current remote or manually recover unpublished local commits if available; the run's ephemeral clone may not survive. Never retry with a newly fetched lease merely to force publication.
+- The entrypoint uses normal pushes for `fix-checks`, both `resolve-conflicts` paths, and `fix-deployment`; `implement` and `design` delegate publication to the model rather than having an equivalent entrypoint force path.
+- `.github/scripts/test/entrypoint-push-audit.test.ts` checks the audited normal-only entrypoint push commands for force flags and forced refspecs; it neither proves Git's lease behavior nor polices arbitrary model commands. In-session publication is a separate boundary owned by issue #771.
+
 ### Pre-commit checks backstop
 
 For actions that touch `.github/` (`implement`, `fix-checks`, `respond-review`, `fix-deployment`), the entrypoint calls `pre_commit_checks_run` from [`docker/scripts/lib/pre-commit-checks.sh`](docker/scripts/lib/pre-commit-checks.sh) after the agent exits. When the diff `HEAD_BEFORE_CLAUDE..HEAD` touches `.github/`, the helper runs the configured check command in the configured directory and posts a PR comment on failure. The push always proceeds regardless of the outcome (fail-open; CI is the enforcement layer). For `fix-checks` and `respond-review`, the check runs before the entrypoint's explicit push; for `implement` and `fix-deployment`, it runs after the push (the agent pushes internally for `implement`; `fix-deployment` needs the PR to be created before posting a comment, so the check runs after `git push` and `gh pr create`).
