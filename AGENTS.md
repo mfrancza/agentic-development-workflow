@@ -304,6 +304,10 @@ A `run:` block moves to a TypeScript activity when it contains **any** of: API-r
 
 The [`.github/workflows/ci.yml`](.github/workflows/ci.yml) workflow (name: `CI`) runs on every pull request and executes `npm ci`, `tsc --noEmit`, and `vitest run` inside `.github/scripts`. `CI` is explicitly subscribed in `agent-fix-checks.yml`'s `workflow_run.workflows` list so same-repository Actions failures are delivered; delivery alone does not authorize a run. `FIX_CHECKS_ALLOW` must contain the exact raw Checks API `check_runs[].name`, and `[]` disables the feedback loop entirely.
 
+### Pre-commit checks
+
+Developer-agent prompts (`docker/scripts/prompts/*.md`) require running the repo's checks inside `.github/scripts/` before committing whenever the change touches `.github/`; see those files for the exact commands. The entrypoint backstop (`docker/scripts/lib/pre-commit-checks.sh`) enforces the same policy independently after Claude exits. On backstop failure the push still proceeds — CI is the gate, not the backstop — and a PR comment is posted with the failing output so the failure is visible alongside the diff.
+
 ### Reusable workflows: self-checkout for helper actions
 
 Reusable workflows (`*-reusable.yml`) that reference local composite actions must **not** rely on the caller's workspace to resolve those actions. When an external consumer invokes `mfrancza/agentic-development-workflow/.github/workflows/<name>-reusable.yml@<ref>`, the runner populates `$GITHUB_WORKSPACE` with the **caller's** repository — not this repo — so workspace-relative paths like `uses: ./.github/actions/<name>` will not resolve.
