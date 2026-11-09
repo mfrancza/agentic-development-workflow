@@ -76,6 +76,24 @@
     "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
     "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
   },
+  "model:gpt-6.1-sol": {
+    "description": "Use OpenAI gpt-6.1-sol as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when OpenAI is the chosen provider under docs/model-guidance.md. Plan issues, demanding coding, architectural design, security-sensitive work, cross-cutting refactors, and ambiguous scope at near-Astra quality. Prefer this over gpt-6-astra unless the premium escalation is justified.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:gpt-6.1-terra": {
+    "description": "Use OpenAI gpt-6.1-terra as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when OpenAI is the chosen provider under docs/model-guidance.md. Scoped implementation, bug diagnosis, dependency upgrades, documentation research, and standard review. Use gpt-6.1-sol for plan issues, ambiguous scope, or cross-cutting design.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:gpt-6-luna": {
+    "description": "Use OpenAI gpt-6-luna as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when OpenAI is the chosen provider under docs/model-guidance.md. Mechanical changes and targeted checks with no research, ambiguity, or design decisions. If uncertain, prefer gpt-6.1-terra.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
   "model:grok-build-0.1": {
     "description": "Use xAI grok-build-0.1 as the issue-wide model; per-agent overrides may coexist.",
     "criteria": "Select only when xAI is the chosen provider under docs/model-guidance.md. Mechanical changes, targeted checks, and bounded build-focused coding experiments. Do not use for research, ambiguous scope, or architectural plans.",
@@ -115,6 +133,12 @@
   "model:grok-4.6": {
     "description": "Use xAI grok-4.6 as the issue-wide model; per-agent overrides may coexist.",
     "criteria": "Select only when xAI is the chosen provider under docs/model-guidance.md. General coding, scoped implementation, research, standard review, complex cross-component work, or architectural plans. A starting candidate when xAI is requested without a narrower model preference.",
+    "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
+    "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
+  },
+  "model:grok-4.7": {
+    "description": "Use xAI grok-4.7 as the issue-wide model; per-agent overrides may coexist.",
+    "criteria": "Select only when xAI is the chosen provider under docs/model-guidance.md. The most capable xAI Grok model: use for the most demanding long-horizon implementation, system design, or review tasks requiring maximum xAI capability. A premium choice over grok-4.6 when the highest xAI performance is warranted.",
     "action": "Select exactly one generic model:* label across all providers, before non-model classification. If any generic model:* label (no second colon) already exists, do not add or change it. Preserve per-agent overrides unchanged. Explain the provider, task class, and reason in the grooming comment.",
     "guidance": "docs/model-guidance.md — see '### Provider selection during grooming', '## Tier Summary', and '## Task-Class Matrix'."
   }

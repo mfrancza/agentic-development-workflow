@@ -49,18 +49,18 @@ resolve_provider() {
         sonnet|opus|haiku|claude-*)
             echo "anthropic"
             ;;
-        gpt-6-astra|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna)
+        gpt-6-astra|gpt-5.6-sol|gpt-5.6-terra|gpt-5.6-luna|gpt-6.1-sol|gpt-6.1-terra|gpt-6-luna)
             echo "openai"
             ;;
         # xAI Grok models — ground truth is the `model:grok-*` label set in
         # terraform/main.tf (Decision 5 of docs/design/grok-build-cli.md).
         # Keep this list identical to the xai arm in docker/reviewer/entrypoint.sh
         # and to the Terraform label set; add new models to all three in the same PR.
-        grok-4.20-0309-non-reasoning|grok-4.20-0309-reasoning|grok-4.20-multi-agent-0309|grok-4.3|grok-4.5|grok-4.6|grok-build-0.1)
+        grok-4.20-0309-non-reasoning|grok-4.20-0309-reasoning|grok-4.20-multi-agent-0309|grok-4.3|grok-4.5|grok-4.6|grok-build-0.1|grok-4.7)
             echo "xai"
             ;;
         *)
-            log "ERROR: Unknown model '${model}'. Anthropic models must be one of the aliases 'sonnet', 'opus', 'haiku', or a model ID beginning with 'claude-' (e.g. 'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5'). Other supported values: gpt-6-astra, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, grok-4.20-0309-non-reasoning, grok-4.20-0309-reasoning, grok-4.20-multi-agent-0309, grok-4.3, grok-4.5, grok-4.6, grok-build-0.1" >&2
+            log "ERROR: Unknown model '${model}'. Anthropic models must be one of the aliases 'sonnet', 'opus', 'haiku', or a model ID beginning with 'claude-' (e.g. 'claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-opus-5-5', 'claude-fable-5-1'). Other supported values: gpt-6-astra, gpt-5.6-sol, gpt-5.6-terra, gpt-5.6-luna, gpt-6.1-sol, gpt-6.1-terra, gpt-6-luna, grok-4.20-0309-non-reasoning, grok-4.20-0309-reasoning, grok-4.20-multi-agent-0309, grok-4.3, grok-4.5, grok-4.6, grok-build-0.1, grok-4.7" >&2
             exit 1
             ;;
     esac
