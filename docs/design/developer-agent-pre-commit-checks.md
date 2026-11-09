@@ -157,6 +157,13 @@ Rationale:
 - The commands match what [`.github/workflows/ci-reusable.yml`](../../.github/workflows/ci-reusable.yml)
   runs on CI, so a local pass is strong evidence of a CI pass.
 
+**Implementation note (adopted during PR review):** The hardcoded `npm ci && npm run typecheck && npm test` command was replaced with two deployment-facing env-var overrides so the published Docker image is stack-neutral:
+
+- `PRE_COMMIT_SCRIPTS_DIR` *(default: `.github/scripts`)* — the directory where the command runs (relative to `WORK_DIR`). Set to an empty string to disable checks.
+- `PRE_COMMIT_CHECK_CMD` *(no default; unset or empty = checks skipped)* — the full shell command, responsible for both setup (e.g. `npm ci`) and the actual checks. This repo's deployment sets `PRE_COMMIT_CHECK_CMD=npm ci && npm run typecheck && npm test`; a different-stack repo sets its own command or leaves the variable unset.
+
+The hardcoded `npm ci` step was removed from `pre-commit-checks.sh`; the command string passed in `PRE_COMMIT_CHECK_CMD` is fully responsible for dependency installation.
+
 ### Decision 3 — Backstop failure policy: push anyway, post PR comment; do not block, do not retry Claude
 
 Alternatives considered:
@@ -302,12 +309,19 @@ pre_commit_checks_run <head-before-sha> <pr-number>
 Log lines emitted (ASCII-friendly, prefixed with `[agent]` by the
 existing `log()` helper so they end up in `container.log`):
 
+- `pre-commit-checks: PRE_COMMIT_SCRIPTS_DIR is empty; skipping checks`
+- `pre-commit-checks: PRE_COMMIT_CHECK_CMD is not set; skipping checks`
 - `pre-commit-checks: diff does not touch .github/, skipping`
-- `pre-commit-checks: running npm ci && npm run typecheck && npm test in .github/scripts`
+- `pre-commit-checks: git diff failed (exit <n>); skipping checks (fail-open)`
+- `pre-commit-checks: running <check_cmd> in <scripts_rel>`
 - `pre-commit-checks: passed`
+- `pre-commit-checks: mktemp failed (exit <n>); skipping checks (fail-open)`
 - `pre-commit-checks: failed — posting PR comment to PR #<n>`
-- `pre-commit-checks: encountered error running checks (<err>); skipping PR comment`
+- `pre-commit-checks: git rev-parse HEAD failed (exit <n>); skipping PR comment (fail-open)`
+- `pre-commit-checks: full check output (<n> lines):` *(followed by full output on stdout when truncated)*
 - `pre-commit-checks: failed to post PR comment (<err>); push proceeding`
+
+*(The original design listed `encountered error running checks` as a log line; that was replaced in the implementation by distinct per-failure-mode fail-open messages — `git diff failed`, `mktemp failed`, and `git rev-parse HEAD failed` — each of which captures its exit status and returns 0.)*
 
 ### Decision 7 — PR-comment format: machine-grep-able header plus a fenced output block
 
@@ -336,13 +350,16 @@ Example body:
 ```
 ### Developer agent pre-commit checks failed
 
-`npm run typecheck && npm test` in `.github/scripts/` failed on commit `<sha>`.
+`<PRE_COMMIT_CHECK_CMD>` in `<PRE_COMMIT_SCRIPTS_DIR>/` failed on commit `<sha>`.
+Agent run: `<GITHUB_RUN_ID>`
 The branch was pushed anyway; CI will re-check. See the agent run logs for the full output.
 
 ```
 <last 200 lines>
 ```
 ```
+
+*(The `Agent run:` line is omitted when `GITHUB_RUN_ID` is unavailable. `<PRE_COMMIT_CHECK_CMD>` and `<PRE_COMMIT_SCRIPTS_DIR>` expand to the configured values so the comment is unambiguous regardless of which commands ran.)*
 
 ### Decision 8 — AGENTS.md update: add a short "Pre-commit checks" note; do not duplicate the exact commands
 

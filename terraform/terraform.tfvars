@@ -66,3 +66,8 @@ review_model_pairing = {
   }
   fallback_chain = ["different-vendor-same-class", "same-vendor-different-model", "default-model"]
 }
+
+# Pre-commit checks backstop: shell command run inside PRE_COMMIT_SCRIPTS_DIR
+# (.github/scripts by default) when the agent pushes a diff that touches
+# .github/.  Responsible for both setup and the actual checks.
+pre_commit_check_cmd = "npm ci && npm run typecheck && npm test"

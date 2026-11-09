@@ -212,6 +212,11 @@ runs:
         [[ -n "${FIX_CHECKS_WAIT_SECONDS:-}" ]] && _opt_env+=(-e FIX_CHECKS_WAIT_SECONDS="${FIX_CHECKS_WAIT_SECONDS}")
         [[ -n "${GROOM_IMPL_ANCHOR_MODEL:-}" ]] && _opt_env+=(-e GROOM_IMPL_ANCHOR_MODEL="${GROOM_IMPL_ANCHOR_MODEL}")
         [[ -n "${GROOM_DESIGN_ANCHOR_MODEL:-}" ]] && _opt_env+=(-e GROOM_DESIGN_ANCHOR_MODEL="${GROOM_DESIGN_ANCHOR_MODEL}")
+        # Pre-commit checks backstop: forward the per-deployment check command
+        # and optional scripts directory when set.  Keeping them out of the
+        # image default preserves stack neutrality for all deployers.
+        [[ -n "${PRE_COMMIT_CHECK_CMD:-}" ]] && _opt_env+=(-e PRE_COMMIT_CHECK_CMD="${PRE_COMMIT_CHECK_CMD}")
+        [[ -n "${PRE_COMMIT_SCRIPTS_DIR:-}" ]] && _opt_env+=(-e PRE_COMMIT_SCRIPTS_DIR="${PRE_COMMIT_SCRIPTS_DIR}")
 
         # Create and prepare the host output directory if requested; build the
         # volume mount flag. chmod 777 is required because the container's

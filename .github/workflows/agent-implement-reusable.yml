@@ -292,6 +292,12 @@ jobs:
         uses: ./_agentic-workflow/.github/actions/run-agent
         env:
           CODE_REVIEWERS: ${{ inputs.code-reviewers }}
+          # Pre-commit checks backstop: set per-deployment so the Docker image
+          # stays stack-neutral.  When unset the backstop skips checks.
+          PRE_COMMIT_CHECK_CMD: ${{ vars.PRE_COMMIT_CHECK_CMD }}
+          # PRE_COMMIT_SCRIPTS_DIR overrides the helper's built-in default of
+          # .github/scripts; omit (leave the Actions variable absent) to use the default.
+          PRE_COMMIT_SCRIPTS_DIR: ${{ vars.PRE_COMMIT_SCRIPTS_DIR }}
         with:
           image: ${{ inputs.image }}
           gh-token: ${{ steps.setup.outputs.token }}

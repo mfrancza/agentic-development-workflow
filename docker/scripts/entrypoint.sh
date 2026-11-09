@@ -21,6 +21,12 @@ WORK_DIR="/home/agent/work"
 # is sourced so its API/state-machine behaviour is directly testable.
 source "${SCRIPTS_DIR}/lib/fix-checks-guard.sh"
 
+# Pre-commit checks backstop: runs the configured check command when a push
+# would touch .github/.  Fail-open — does not abort the caller on backstop
+# errors.  Requires log() (defined below) and the standard env vars
+# (WORK_DIR, GITHUB_REPO, GH_TOKEN).
+source "${SCRIPTS_DIR}/lib/pre-commit-checks.sh"
+
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
@@ -452,6 +458,7 @@ action_implement() {
     log "Creating branch ${BRANCH_NAME}"
     git checkout -b "$BRANCH_NAME"
 
+    HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
     AGENT_STARTED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     log "Running Claude to implement solution"
     run_agent "implement.md" \
@@ -480,6 +487,7 @@ CODE_REVIEWERS: ${CODE_REVIEWERS}"
     log "Verified PR: ${PR_URL}"
 
     PR_NUMBER="${PR_URL##*/}"
+    pre_commit_checks_run "$HEAD_BEFORE_CLAUDE" "$PR_NUMBER"
     check_pr_readiness_and_promote "$PR_NUMBER"
 }
 
@@ -499,6 +507,8 @@ action_fix_checks() {
     log "Fetching check failure details"
     FAILURE_DETAILS="$(gh pr checks "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" 2>/dev/null || echo "No details available")"
 
+    HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
+
     log "Running Claude to fix check failures"
     run_agent "respond-to-checks.md" \
         "The following CI checks failed on PR #${GITHUB_PR_NUMBER}:
@@ -506,6 +516,8 @@ action_fix_checks() {
 ${FAILURE_DETAILS}
 
 Fix the issues and commit the changes."
+
+    pre_commit_checks_run "$HEAD_BEFORE_CLAUDE" "$GITHUB_PR_NUMBER"
 
     log "Pushing fixes"
     git push origin "$BRANCH_NAME"
@@ -557,6 +569,8 @@ ${INLINE_COMMENTS_JSON}
 
 PR conversation comments:
 ${ISSUE_COMMENTS_JSON}"
+
+    pre_commit_checks_run "$HEAD_BEFORE_CLAUDE" "$GITHUB_PR_NUMBER"
 
     HEAD_AFTER_CLAUDE="$(git rev-parse HEAD)"
     if [ "$HEAD_BEFORE_CLAUDE" = "$HEAD_AFTER_CLAUDE" ]; then
@@ -659,6 +673,7 @@ action_fix_deployment() {
     log "Creating fix branch ${FIX_BRANCH}"
     git checkout -b "$FIX_BRANCH"
 
+    HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
     log "Running Claude to fix deployment"
     run_agent "fix-deployment.md" \
         "Deployment failed on main for issue #${GITHUB_ISSUE_NUMBER}.
@@ -683,6 +698,7 @@ Related issue: #${GITHUB_ISSUE_NUMBER}")"
 
     log "Created deployment fix PR: ${FIX_PR_URL}"
     FIX_PR_NUMBER="${FIX_PR_URL##*/}"
+    pre_commit_checks_run "$HEAD_BEFORE_CLAUDE" "$FIX_PR_NUMBER"
     inject_authored_by_marker "$FIX_PR_NUMBER"
     log "Flipping fix-deployment PR #${FIX_PR_NUMBER} to ready-for-review"
     gh pr ready "$FIX_PR_NUMBER" --repo "$GITHUB_REPO"

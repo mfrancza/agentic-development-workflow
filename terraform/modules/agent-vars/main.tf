@@ -182,3 +182,29 @@ resource "github_actions_variable" "resolve_conflicts_author_allowlist" {
   variable_name = "RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST"
   value         = jsonencode(var.resolve_conflicts_author_allowlist)
 }
+
+# Expose the pre-commit check command as a repository Actions variable so the
+# developer-agent workflows can pass it to the container without hardcoding
+# a repo-specific command in the Docker image.  An empty value (the default)
+# disables the backstop — configure per-deployment.
+# count = 0 when empty: GitHub rejects Actions variables with empty values
+# (422), and an absent variable causes the helper to skip checks (the same
+# safe-default as an empty value), so we simply don't create the resource.
+resource "github_actions_variable" "pre_commit_check_cmd" {
+  count         = var.pre_commit_check_cmd == "" ? 0 : 1
+  repository    = var.repository
+  variable_name = "PRE_COMMIT_CHECK_CMD"
+  value         = var.pre_commit_check_cmd
+}
+
+# Expose the custom scripts directory as a repository Actions variable so
+# operators can override the helper's built-in default (.github/scripts) without
+# modifying the Docker image.  An empty value (the default) omits the resource
+# and the helper falls back to its built-in default — consistent with the
+# count = 0 pattern used by PRE_COMMIT_CHECK_CMD above.
+resource "github_actions_variable" "pre_commit_scripts_dir" {
+  count         = var.pre_commit_scripts_dir == "" ? 0 : 1
+  repository    = var.repository
+  variable_name = "PRE_COMMIT_SCRIPTS_DIR"
+  value         = var.pre_commit_scripts_dir
+}
