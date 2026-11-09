@@ -702,7 +702,7 @@ action_design() {
     OWNER="${GITHUB_REPO%%/*}"
     EXISTING_PR_JSON="$(gh pr list --repo "$GITHUB_REPO" --head "$BRANCH_NAME" --state open \
         --json url,isDraft,headRepositoryOwner \
-        --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0]")"
+        --jq "[.[] | select(.headRepositoryOwner.login == \"$OWNER\")][0] // empty")"
     if [ -n "$EXISTING_PR_JSON" ]; then
         EXISTING_PR_URL="$(echo "$EXISTING_PR_JSON" | jq -r '.url // empty')"
         EXISTING_PR_IS_DRAFT="$(echo "$EXISTING_PR_JSON" | jq -r '.isDraft')"
