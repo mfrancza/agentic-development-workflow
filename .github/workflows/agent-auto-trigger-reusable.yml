@@ -57,6 +57,30 @@ on:
         type: boolean
         required: false
         default: false
+      pr-author-is-bot:
+        description: >
+          Whether the pull request author is a Bot user
+          (github.event.pull_request.user.type == 'Bot'). Used to gate the
+          auto-review transition on pull_request.opened: bot-authored openings
+          are skipped because the entrypoint may not have injected the
+          authored-by-model marker yet — the ready_for_review event fires after
+          the marker is written and the draft is promoted. Pass false for
+          issue-related transitions.
+        type: boolean
+        required: false
+        default: false
+      pr-body:
+        description: >
+          Body text of the pull request. Used to verify that the authoritative
+          authored-by-model marker is present before routing a
+          pull_request.ready_for_review event to auto-review. A bot can promote
+          a draft before the entrypoint writes the marker; this guard prevents
+          the reviewer from falling back to the default model and silently
+          mismapping the first review. Pass empty string for issue-related
+          transitions.
+        type: string
+        required: false
+        default: ''
       issue-label-name:
         description: Label named by the original issues labeled/unlabeled event.
         type: string
@@ -139,8 +163,10 @@ jobs:
         vars.AUTO_TRIGGER_AGENTS != '' &&
         fromJSON(vars.AUTO_TRIGGER_AGENTS).developer == true && 'auto-developer-undraft' ||
         inputs.event-name == 'pull_request' &&
-        (inputs.event-action == 'ready_for_review' ||
-         (inputs.event-action == 'opened' && !inputs.pr-is-draft)) &&
+        ((inputs.event-action == 'ready_for_review' &&
+          contains(inputs.pr-body, '<!-- authored-by-model:')) ||
+         (inputs.event-action == 'opened' && !inputs.pr-is-draft &&
+          !inputs.pr-author-is-bot)) &&
         inputs.pr-head-repository == github.repository &&
         (startsWith(inputs.pr-head-ref, 'agent/') ||
          startsWith(inputs.pr-head-ref, 'design/') ||
