@@ -417,6 +417,18 @@ log "Model: ${AGENT_MODEL} (provider: ${AGENT_PROVIDER}, max turns: ${AGENT_MAX_
 # Actions
 # -----------------------------------------------------------------------------
 
+# action_implement
+#
+# Fetches GITHUB_ISSUE_NUMBER, creates the agent/issue-N branch, runs Claude on
+# the implement.md prompt to write and push a solution, then verifies the agent
+# opened a draft PR, runs the pre-commit-checks backstop, and calls
+# check_pr_readiness_and_promote to inject the authored-by-model marker and flip
+# the PR to ready-for-review.
+#
+# Pre-commit checks backstop: pre_commit_checks_run is called after PR_NUMBER is
+# resolved from the PR URL (Claude pushes the branch and creates the PR
+# internally, so the check runs after the push — the diff window
+# HEAD_BEFORE_CLAUDE..HEAD still covers Claude's commits).
 action_implement() {
     : "${GITHUB_ISSUE_NUMBER:?GITHUB_ISSUE_NUMBER is required for implement}"
 
@@ -491,6 +503,15 @@ CODE_REVIEWERS: ${CODE_REVIEWERS}"
     check_pr_readiness_and_promote "$PR_NUMBER"
 }
 
+# action_fix_checks
+#
+# Checks out GITHUB_PR_NUMBER, runs the fix_checks_should_run staleness guard,
+# fetches CI failure details, and runs Claude on the respond-to-checks.md prompt
+# to address the failures.  Pushes the updated branch after Claude exits.
+#
+# Pre-commit checks backstop: pre_commit_checks_run is called after Claude exits
+# and before git push, using the existing GITHUB_PR_NUMBER.  The push proceeds
+# regardless of backstop outcome (fail-open per Decision 3).
 action_fix_checks() {
     : "${GITHUB_PR_NUMBER:?GITHUB_PR_NUMBER is required for fix-checks}"
 
@@ -525,6 +546,17 @@ Fix the issues and commit the changes."
     inject_authored_by_marker "$GITHUB_PR_NUMBER"
 }
 
+# action_respond_review
+#
+# Checks out GITHUB_PR_NUMBER, gathers reviews and inline/issue comments, and
+# runs Claude on the respond-to-review.md prompt to address outstanding feedback.
+# After Claude exits, pushes the updated branch (fast-forward or
+# --force-with-lease) when HEAD changed, and requests re-review from all
+# previously assigned reviewers.
+#
+# Pre-commit checks backstop: pre_commit_checks_run is called after Claude exits
+# and before the push decision, using the existing GITHUB_PR_NUMBER.  The push
+# proceeds regardless of backstop outcome (fail-open per Decision 3).
 action_respond_review() {
     : "${GITHUB_PR_NUMBER:?GITHUB_PR_NUMBER is required for respond-review}"
 
@@ -660,6 +692,17 @@ request_rereview() {
     fi
 }
 
+# action_fix_deployment
+#
+# Creates an agent/fix-deploy-issue-N branch, runs Claude on the
+# fix-deployment.md prompt to diagnose and fix the deployment failure, pushes
+# the branch, opens a draft PR via gh pr create, and flips it to
+# ready-for-review.
+#
+# Pre-commit checks backstop: pre_commit_checks_run is called after gh pr create
+# resolves FIX_PR_NUMBER (so the failure comment targets a real PR) and before
+# inject_authored_by_marker.  The push always proceeds regardless of backstop
+# outcome (fail-open per Decision 3).
 action_fix_deployment() {
     : "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required for fix-deployment}"
     : "${GITHUB_ISSUE_NUMBER:?GITHUB_ISSUE_NUMBER is required for fix-deployment}"
