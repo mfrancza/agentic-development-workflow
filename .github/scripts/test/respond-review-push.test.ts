@@ -59,7 +59,7 @@ function runAction(model: string, options: { checkout?: string; check?: string }
     env: {
       ...environment, ACTION: action, HELPER: helper, CHECKS: checks, WORK_DIR: agent,
       WRITER: writer, BRANCH_REF: branchRef, EVENTS: events, GITHUB_PR_NUMBER: "123",
-      GITHUB_REPO: "example/repo", CHECKOUT: options.checkout ?? ":", MODEL: model,
+      GITHUB_REPO: "example/repo", GH_TOKEN: "test-token", CHECKOUT: options.checkout ?? ":", MODEL: model,
       PRE_COMMIT_SCRIPTS_DIR: ".", PRE_COMMIT_CHECK_CMD: options.check ?? "true",
       PATH: `${join(root, "bin")}:${environment.PATH}`, REAL_GIT: realGit, PUSH_CALLS: join(root, "push-calls"),
     },
