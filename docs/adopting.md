@@ -1430,7 +1430,6 @@ jobs:
       issue-labels: ${{ toJSON(github.event.issue.labels.*.name || fromJSON('[]')) }}
       pr-number: ${{ github.event.pull_request.number || 0 }}
       pr-head-repository: ${{ github.event.pull_request.head.repo.full_name || '' }}
-      pr-head-ref: ${{ github.event.pull_request.head.ref || '' }}
       pr-author-login: ${{ github.event.pull_request.user.login || '' }}
       # Set this to your installation-specific developer App bot login.
       developer-bot-login: <developer-agent-slug>[bot]

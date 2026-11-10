@@ -74,7 +74,8 @@ describe("scheduled workflow contract", () => {
     expect(implementReusable).toContain("allowlist: ${{ vars.AGENT_ALLOWLIST }}");
     expect(implementReusable).toContain("needs.authorize.result == 'success'");
     expect(autoTrigger).toContain("allowlist: ${{ vars.AGENT_ALLOWLIST }}");
-    expect(autoTrigger).toContain("inputs.pr-author-login == inputs.developer-bot-login");
+    expect(autoTrigger).toContain("contains(fromJSON(vars.AUTO_REVIEW_AUTHORS || '[]'), inputs.pr-author-login)");
+    expect(autoTrigger).toContain("inputs.pr-author-login != inputs.developer-bot-login");
     expect(autoTrigger).toContain("<!-- authored-by-model:");
   });
 });
