@@ -82,7 +82,7 @@ If a review comment surfaces a decision an agent should not make on its own (sec
 gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "<github-username>"
 ```
 
-For conflicting maintainer decisions, select an involved maintainer verified from the original objects above. If the combined label-and-assignment command fails, ensure the `human-required` label is applied separately; report any assignment failure in the PR reply and follow the existing appropriate-human convention to find another assignee. Do not silently claim assignment succeeded. For an incomplete history, explain which reads failed and assign an appropriate human without guessing who made a decision. Do not update linked issues automatically.
+For conflicting maintainer decisions, select an involved maintainer verified from the original objects above. If the combined label-and-assignment command fails, ensure the `human-required` label is applied separately; report any assignment failure in the PR reply and follow the existing appropriate-human convention to find another assignee. Do not silently claim assignment succeeded. For an incomplete history, explain which reads failed and assign an appropriate human without guessing who made a decision. In these escalation cases, do not update linked issues automatically.
 
 ## Volatile facts live at their sources
 
