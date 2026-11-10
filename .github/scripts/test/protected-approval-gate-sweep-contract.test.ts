@@ -26,6 +26,28 @@ const mappingMatch = discoveryCondition.match(/fromJSON\('([^']+)'\)/);
 if (!mappingMatch) throw new Error("Missing literal cron mapping");
 const mapping = JSON.parse(mappingMatch[1]) as Record<string, string>;
 
+function readRepoFile(path: string): string {
+  return readFileSync(new URL(`../../../${path}`, import.meta.url), "utf8");
+}
+
+function documentedCaller(name: string): string {
+  const docs = readRepoFile("docs/adopting.md");
+  const marker = `name: protected-approval-gate-${name}\n`;
+  const start = docs.indexOf(marker);
+  if (start < 0) throw new Error(`Missing documented ${name} caller`);
+  const end = docs.indexOf("\n```", start);
+  if (end < 0) throw new Error(`Missing end of ${name} caller`);
+  return docs.slice(start, end);
+}
+
+function terraformCadences(path: string): number[] {
+  const file = readRepoFile(path);
+  const variable = file.match(/variable "enable_protected_approval_gate_reconcile_minutes" \{([\s\S]*?)\n\}/);
+  const values = variable?.[1].match(/contains\(\[([^\]]+)\],\s*var\.enable_protected_approval_gate_reconcile_minutes\)/);
+  if (!values) throw new Error(`Missing cadence validation in ${path}`);
+  return values[1].split(",").map((value) => Number(value.trim()));
+}
+
 function admitted(eventName: string, gate: string, schedule: string, interval: string): boolean {
   const expression = discoveryCondition.replaceAll("inputs.interval-minutes", "inputs.intervalMinutes");
   const evaluate = new Function("github", "vars", "inputs", "fromJSON", `return (${expression});`);
@@ -60,6 +82,32 @@ describe("protected approval gate sweep contract", () => {
       "30": "*/30 * * * *",
       "60": "0 * * * *",
     });
+  });
+
+  it("keeps the documented caller and both Terraform cadence sets in sync", () => {
+    const caller = documentedCaller("reconcile");
+    const scheduleBlock = caller.match(/^  schedule:\n((?:    - cron: '[^']+'\n)+)/m);
+    if (!scheduleBlock) throw new Error("Missing documented schedule block");
+    const schedules = [...scheduleBlock[1].matchAll(/^    - cron: '([^']+)'$/gm)].map((match) => match[1]);
+    expect(schedules).toEqual(Object.values(mapping));
+    for (const path of ["terraform/variables.tf", "terraform/modules/agent-vars/variables.tf"]) {
+      expect(terraformCadences(path)).toEqual(Object.keys(mapping).map(Number));
+    }
+    expect(caller).toMatch(/^  workflow_dispatch:$/m);
+    expect(caller).toContain("interval-minutes: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES }}");
+    expect(caller).toContain("group: protected-approval-gate-reconcile-${{ github.event.schedule || 'manual' }}");
+    expect(caller).toMatch(/^  cancel-in-progress: false$/m);
+    expect(caller).not.toMatch(/^\s+if:/m);
+    expect(new Set([...schedules, "manual"]).size).toBe(schedules.length + 1);
+  });
+
+  it("preserves manual backfill without an interval input", () => {
+    for (const caller of [documentedCaller("backfill"), readRepoFile(".github/workflows/protected-approval-gate-backfill.yml")]) {
+      expect(caller).toMatch(/^  workflow_dispatch:$/m);
+      expect(caller).not.toMatch(/^  schedule:|interval-minutes:/m);
+      expect(caller).toContain("protected-approval-gate-sweep-reusable.yml");
+      expect(caller).toContain("repo: ${{ github.repository }}");
+    }
   });
 
   it("admits only the selected cron when the gate is enabled", () => {
