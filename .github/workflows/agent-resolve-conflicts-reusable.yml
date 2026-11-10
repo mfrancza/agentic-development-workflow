@@ -100,34 +100,69 @@ jobs:
   state-gate:
     runs-on: ubuntu-24.04
     permissions:
+      contents: read
       pull-requests: read
     outputs:
       proceed: ${{ steps.state.outputs.proceed }}
     steps:
+      - name: Validate helpers-ref input
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref input is required and must not be empty."
+            exit 1
+          fi
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: ${{ inputs.helpers-ref }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "$actual_sha" != "$EXPECTED_SHA" ]]; then
+            echo "::error::Helper checkout HEAD ($actual_sha) does not match the resolved SHA ($EXPECTED_SHA)."
+            exit 1
+          fi
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: _agentic-workflow/.github/scripts/package-lock.json
+      - name: Install helper dependencies
+        working-directory: _agentic-workflow/.github/scripts
+        run: npm ci
       - name: Check PR state for on-demand resolution
         id: state
+        working-directory: _agentic-workflow/.github/scripts
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ inputs.pr-number }}
           SENDER: ${{ inputs.sender-login }}
-        run: |
-          set -euo pipefail
-          if [[ -z "$SENDER" ]]; then
-            echo 'proceed=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if [[ ! "$PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
-            echo '::error::On-demand resolution requires a valid PR number.'
-            exit 1
-          fi
-          state="$(gh api "repos/$REPO/pulls/$PR_NUMBER" --jq '.state')"
-          if [[ "$state" != open ]]; then
-            echo "::notice::PR #$PR_NUMBER is not open; skipping resolution."
-            echo 'proceed=false' >> "$GITHUB_OUTPUT"
-          else
-            echo 'proceed=true' >> "$GITHUB_OUTPUT"
-          fi
+        run: npx --no-install tsx src/check-conflict-resolution-state.ts
 
   authorize:
     needs: state-gate

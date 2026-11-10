@@ -58,10 +58,13 @@ describe("on-demand conflict resolution workflow contract", () => {
     const state = job("state-gate");
     const authorize = job("authorize");
     const find = job("find-conflicted-prs");
-    expect(state).toContain('if [[ -z "$SENDER" ]]');
-    expect(state).toContain('gh api "repos/$REPO/pulls/$PR_NUMBER"');
-    expect(state).toContain('if [[ "$state" != open ]]');
-    expect(state).toContain("echo 'proceed=false'");
+    expect(state).toContain("contents: read");
+    expect(state).toContain("pull-requests: read");
+    expect(state).toContain("ref: ${{ steps.resolve-ref.outputs.sha }}");
+    expect(state).toContain("name: Verify helper checkout HEAD matches resolved SHA");
+    expect(state).toContain("run: npx --no-install tsx src/check-conflict-resolution-state.ts");
+    expect(state).toContain("SENDER: ${{ inputs.sender-login }}");
+    expect(state).toContain("PR_NUMBER: ${{ inputs.pr-number }}");
     expect(authorize).toContain("needs: state-gate");
     expect(authorize).toContain("needs.state-gate.outputs.proceed == 'true'");
     expect(find).toContain("needs: [state-gate, authorize]");
