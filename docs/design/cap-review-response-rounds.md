@@ -49,6 +49,8 @@ The epoch starts at PR creation, or at the latest GitHub `unlabeled` issue event
 
 Only reviews submitted strictly after that reset timestamp count. Equal timestamps are on the old side of the boundary; document this conservative one-second resolution rule. Also skip an actionable triggering review submitted at or before the boundary, including workflow reruns of old human reviews. A current `human-required` label always pauses `respond-review`, even when the numeric limit is 0. This deliberately gives the label pause semantics for this action; it does not change the conflict resolver's distinct `conflicts-escalated` gate.
 
+**Impact on other escalations:** This pause also applies when an agent or human added `human-required` for an unrelated reason, such as a merge decision needing human input. Today an authorized maintainer review can trigger a response on such a PR while the label remains; after this change it cannot, even below the round limit or in unlimited mode. The human must first address the original escalation, remove the label, and obtain a fresh authorized review; removing the label also resets the round budget. A pre-existing label below the threshold produces a clear skip log, not a round-limit comment. At or above the threshold the existing notification-repair rule still applies; the presence of the label alone does not prove which escalation caused it.
+
 The reset is limited to accounting: it neither triggers a workflow nor runs an old review. The operator reviews the escalation, removes `human-required`, and obtains a new review, either by removing/reapplying `agent:review` through the existing authorized labeled path, or by pushing a deliberate update while `agent:review` remains present. A new authorized human review can also trigger a response under the new budget. Other escalation labels must be handled according to their own runbooks; removing this label is not a universal remediation.
 
 **Alternatives:** Reset on every push defeats the cap. Reset on any human review makes ordinary feedback an implicit spending authorization. A mutable comment baseline needs additional recovery logic. Native label-removal history provides a manual, auditable reset without another workflow or persistent counter.
@@ -78,7 +80,7 @@ The comment includes the reviewed-commit count and limit, the epoch/reset bounda
 
 Use a versioned marker such as `<!-- review-round-limit:v1 epoch=initial -->`, or the native reset event ID in place of `initial`, solely to deduplicate the notification. Only recognize comments whose API author matches the live bot PR author; the caller already restricts this path to developer-authored PRs. Paginate comment lookup. Matching text from other authors cannot suppress or modify notification. Never edit the PR body or its model marker.
 
-Apply the label first, then attempt assignments and upsert the comment. Label/comment write failures fail the activity visibly and never allow the container. Retrying an already-paused PR at or above its limit repairs a missing comment and retries assignments; a paused PR below threshold simply skips without manufacturing a round-limit notification. A comment created successfully but a later failure must be updated, not duplicated. Every paused-path log explains whether the pause is numerical or pre-existing. A new epoch may get a new notification; old comments remain an audit trail.
+Apply the label first, then attempt assignments and upsert the comment. Label/comment write failures fail the activity visibly and never allow the container. Retrying an already-paused PR at or above its limit repairs a missing comment and retries assignments; a paused PR below threshold simply skips without manufacturing a round-limit notification. A comment created successfully but a later failure must be updated, not duplicated. Every paused-path log states whether the label was already present and whether the numerical threshold is reached or disabled, without guessing why an existing label was applied. It explains that a human must resolve the original escalation, remove the label, and obtain a fresh authorized review. A new epoch may get a new notification; old comments remain an audit trail.
 
 Expose optional reusable `escalation-assignee` and JSON `admin-assignees` inputs. The repository caller passes `vars.ADMIN_ASSIGNEES`; an adopter may also pass an existing `ESCALATION_ASSIGNEE` value using `escalation-assignee`. There is no new Terraform-managed `ESCALATION_ASSIGNEE` variable. Combine the explicit login and admin entries, expand same-organization teams with the existing `expandTeamRefs` helper and optional resolver credential, and deduplicate logins case-insensitively. Mint a resolver token in the work job only when team expansion is needed; the authorize job's token does not survive that job.
 
@@ -90,7 +92,7 @@ Assign valid available candidates without replacing existing assignees, respecti
 
 Add `max_review_rounds` (number, default 8, integer and non-negative validation) to both the root Terraform inputs and `terraform/modules/agent-vars/variables.tf`; pass it through `terraform/main.tf`, and publish `MAX_REVIEW_ROUNDS` with `tostring` in the module's `main.tf`. Mirror the runtime safe-integer bound in Terraform validation. Include 8 and unlimited examples in the module README and `terraform/terraform.tfvars.example`.
 
-Update `AGENTS.md` and `README.md` alongside implementation to explain the metric, the Nth-review boundary, fallback behavior before Terraform is applied, the new respond-review pause semantics, assignment configuration, and the explicit resume procedure. Extend existing entries instead of copying label/action/trigger enumerations. Reference the authoritative workflow and Terraform sources. Record that this gate does not stop a reviewer run on an external push, a queued reviewer matrix leg, or another independently enabled branch-writing action.
+Update `AGENTS.md` and `README.md` alongside implementation to explain the metric, the Nth-review boundary, fallback behavior before Terraform is applied, and assignment configuration. For label/action/trigger behavior, including the pause for unrelated escalations and human-led resume, reference the authoritative sources rather than copying that information. Update `docker/scripts/prompts/respond-to-review.md` to make the pause and human-led resume clear to the responding agent. Record that this gate does not stop a reviewer run on an external push, a queued reviewer matrix leg, or another independently enabled branch-writing action.
 
 ## Failure policy and verification
 
@@ -100,6 +102,8 @@ Update `AGENTS.md` and `README.md` alongside implementation to explain the metri
 | Limit 1; first actionable bot-reviewed SHA | Label/comment/assignment attempts; no container |
 | Limit 0; no pause label | No numerical stop; existing authorization/feedback/replay guards still apply |
 | Existing `human-required`, including limit 0 | Skip; repair threshold notification if applicable; never clear label automatically |
+| Label from an unrelated escalation, actionable human review, below threshold or limit 0 | Skip with explicit pre-existing-label reason and resume guidance; no round-limit comment or container |
+| Unrelated label resolved and removed, then fresh authorized review | New epoch; normal feedback and budget gates apply |
 | Clean approval/comment at any count | Existing clean-feedback skip; no new escalation |
 | Duplicate reviews, multiple models, dismissed reviews, pagination | One round per eligible SHA in epoch; dismissed submissions retained; all pages included |
 | Human review, developer reply, unknown bot, pending review | Does not increase accounting; does not gain authorization or bypass a pause |
@@ -115,7 +119,7 @@ Implementation PRs touching `.github/` run `npm ci && npm run typecheck && npm t
 
 ## Out of scope
 
-- Changing review prompts, model selection, findings, thread-resolution policy, or approval/merge requirements.
+- Changing reviewer prompts, model selection, findings, thread-resolution policy, or approval/merge requirements.
 - A lifetime hard cap on all paid invocations, retries of an unchanged SHA, wall-clock duration, or actual completed responder executions.
 - Pausing all agent actions or changing `agent-review` triggers; already-running/queued reviewer work may finish, and external pushes can still request reviews.
 - A new scheduler, automatically resuming after a timeout, implicit human-review bypass, historical comment backfill, or automated limit tuning.
@@ -128,7 +132,7 @@ Implementation PRs touching `.github/` run `npm ci && npm run typecheck && npm t
 | --- | --- | --- |
 | Issue [#861](https://github.com/mfrancza/agentic-development-workflow/issues/861) | Activity/composite: counting, reset epochs, live feedback revalidation, escalation/assignment and notification repair, with unit tests | None |
 | Issue [#862](https://github.com/mfrancza/agentic-development-workflow/issues/862) | Terraform: manage MAX_REVIEW_ROUNDS and document configuration/defaults | None |
-| Issue [#863](https://github.com/mfrancza/agentic-development-workflow/issues/863) | Integrate the activity into the authorized serialized response job; add workflow regressions and operational documentation | Issue #861, Issue #862 |
+| Issue [#863](https://github.com/mfrancza/agentic-development-workflow/issues/863) | Integrate the activity into the authorized serialized response job; add workflow regressions, pause diagnostics, responder prompt and operational documentation | Issue #861, Issue #862 |
 | Issue [#864](https://github.com/mfrancza/agentic-development-workflow/issues/864) | End-to-end validation of the capped loop, unlimited mode, clean completion, partial failures, and human resume | Issue #861, Issue #862, Issue #863 |
 
 Issues #861 and #862 can proceed independently. Issue #863 wires their contracts without modifying the entrypoint or reviewer trigger. Issue #864 depends on every implementation task. Native blocked-by dependencies mirror this table; all sub-issues remain `draft` until this design PR merges.
