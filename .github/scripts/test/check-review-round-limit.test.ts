@@ -26,12 +26,32 @@ describe("pure accounting", () => {
     expect(() => parseLogins('{}', [])).toThrow();
     expect(() => parseLogins('[1]', [])).toThrow();
   });
-  it("counts distinct submitted SHAs, including dismissed and matrix reviews, excluding author, humans and pending", () => {
+  it("counts submitted reviews including dismissed, excluding author, humans and pending", () => {
     const entries: Review[] = [review, { ...review, id: 2, state: "DISMISSED" }, { ...review, id: 3, commit_id: "sha2", state: "APPROVED", user: { login: "COPILOT" } }, { ...review, id: 4, commit_id: "sha3", user: { login: "human" } }, { ...review, id: 5, commit_id: "sha4", user: { login: "DEV[bot]" } }, { ...review, id: 6, state: "PENDING", submitted_at: null, commit_id: null }];
-    expect(countRounds(entries, [...DEFAULT_REVIEWERS, "dev[bot]"], "dev[bot]", initial)).toBe(2);
+    expect(countRounds(entries, [...DEFAULT_REVIEWERS, "dev[bot]"], "dev[bot]", initial)).toBe(3);
     expect(countRounds(entries, ["human"], "dev[bot]", initial)).toBe(1);
     expect(() => countRounds([{ ...review, commit_id: null }], DEFAULT_REVIEWERS, "dev", initial)).toThrow(/SHA/);
     expect(() => countRounds([{ ...review, user: null }], DEFAULT_REVIEWERS, "dev", initial)).toThrow(/author/);
+  });
+  it("counts the maximum lane per SHA, deduplicating deliveries and retaining dismissed passes", () => {
+    const model = (id: number, name: string, sha = "sha1"): Review => ({ ...review, id, commit_id: sha, body: `<!-- reviewer-model: ${name} -->\n### Review by \`${name}\`` });
+    const a = model(1, "a");
+    const b = model(2, "b");
+    expect(countRounds([a, b, a], DEFAULT_REVIEWERS, "dev", initial)).toBe(1);
+    expect(countRounds([a, b, { ...model(3, "a"), state: "DISMISSED" }, model(4, "b"), model(5, "a", "sha2")], DEFAULT_REVIEWERS, "dev", initial)).toBe(3);
+    expect(countRounds([a, { ...a, id: 6, user: { login: "human" } }], DEFAULT_REVIEWERS, "dev", initial)).toBe(1);
+  });
+  it("uses the legacy lane for headerless, malformed and multiple headers with warnings", () => {
+    const warn = vi.fn();
+    const entries = [review, { ...review, id: 2, body: '<!-- reviewer-model: -->' }, { ...review, id: 3, body: '<!-- reviewer-model: a -->\n<!-- reviewer-model: b -->' }, { ...review, id: 4, body: '<!-- reviewer-model: a -->' }];
+    expect(countRounds(entries, DEFAULT_REVIEWERS, "dev", initial, warn)).toBe(3);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+  it("fails closed for invalid IDs and contradictory duplicate records", () => {
+    for (const id of [0, -1, NaN, Number.MAX_SAFE_INTEGER + 1]) expect(() => countRounds([{ ...review, id }], DEFAULT_REVIEWERS, "dev", initial)).toThrow(/ID/);
+    for (const change of [{ commit_id: "other" }, { body: "changed" }, { state: "DISMISSED" }, { user: { login: "human" } }, { submitted_at: "2026-02-01T00:00:00Z" }]) {
+      expect(() => countRounds([review, { ...review, ...change }], DEFAULT_REVIEWERS, "dev", initial)).toThrow(/Contradictory/);
+    }
   });
   it("uses latest human reset timestamp and ID, excludes equal timestamps and ignores bot resets", () => {
     const epoch = findEpoch([reset, { ...reset, id: 11 }, { ...reset, id: 12, actor: { type: "Bot" }, created_at: "2026-02-01T00:00:00Z" }]);
@@ -55,6 +75,7 @@ describe("orchestration", () => {
     expect(await checkReviewRoundLimit(input, api)).toMatchObject({ proceed: false, count: 1, epoch: initial });
     expect(api.addLabel).toHaveBeenCalledBefore(api.assign as ReturnType<typeof vi.fn>);
     expect(api.createComment).toHaveBeenCalledOnce();
+    expect(api.createComment).toHaveBeenCalledWith(expect.stringContaining("Review rounds: 1"));
     expect(await checkReviewRoundLimit({ ...input, limit: 1 }, deps({ listReviews: vi.fn().mockResolvedValue([review, { ...review, id: 2, commit_id: "old" }]) }))).toMatchObject({ proceed: false, count: 2 });
   });
   it("counts commented automated reviews and applies the limit to body-only feedback", async () => {

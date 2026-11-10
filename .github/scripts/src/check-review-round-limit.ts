@@ -82,19 +82,39 @@ export function findEpoch(events: Event[]): Epoch {
   return resets.length ? { id: String(resets[0].id), at: resets[0].created_at } : { id: "initial", at: null };
 }
 
-export function countRounds(reviews: Review[], reviewers: string[], author: string, epoch: Epoch): number {
+export function countRounds(reviews: Review[], reviewers: string[], author: string, epoch: Epoch, warn: (message: string) => void = () => {}): number {
   const allowed = new Set(reviewers.map((login) => login.toLowerCase()));
-  const shas = new Set<string>();
+  const unique = new Map<number, Review>();
+  const eligible = (review: Review): boolean => SUBMITTED_STATES.has(review.state.toUpperCase()) && !!review.user?.login && review.user.login.toLowerCase() !== author.toLowerCase() && allowed.has(review.user.login.toLowerCase());
   for (const review of reviews) {
     if (SUBMITTED_STATES.has(review.state.toUpperCase()) && !review.user?.login) throw new Error(`Submitted review ${review.id} has no author`);
-    const login = review.user?.login?.toLowerCase();
-    if (!login || login === author.toLowerCase() || !allowed.has(login) || !SUBMITTED_STATES.has(review.state.toUpperCase())) continue;
+    if (eligible(review) && (!Number.isSafeInteger(review.id) || review.id <= 0)) throw new Error("Invalid eligible review ID");
+    if (!Number.isSafeInteger(review.id) || review.id <= 0) continue;
+    const previous = unique.get(review.id);
+    if (previous && (eligible(previous) || eligible(review))) {
+      const fields = (value: Review): unknown[] => [value.state.toUpperCase(), value.user?.login?.toLowerCase(), value.commit_id?.toLowerCase(), value.submitted_at, value.body ?? ""];
+      if (JSON.stringify(fields(previous)) !== JSON.stringify(fields(review))) throw new Error(`Contradictory duplicate review ID ${review.id}`);
+    }
+    if (!previous) unique.set(review.id, review);
+  }
+  const shas = new Map<string, Map<string, number>>();
+  for (const review of unique.values()) {
+    if (!eligible(review)) continue;
     const submitted = timestamp(review.submitted_at, "review submission");
     if (epoch.at && submitted <= timestamp(epoch.at, "reset")) continue;
     if (!review.commit_id?.trim()) throw new Error(`Eligible review ${review.id} has no commit SHA`);
-    shas.add(review.commit_id.toLowerCase());
+    const body = review.body ?? "";
+    const markers = body.match(/<!--\s*reviewer-model\b/gi) ?? [];
+    const header = body.match(/^\s*<!-- reviewer-model: ([^\s<>]+) -->[ \t]*(?:\r?\n|$)/);
+    if (markers.length && (markers.length !== 1 || !header)) warn(`Review ${review.id} has malformed or multiple reviewer-model headers; using legacy lane`);
+    const model = markers.length === 1 && header ? header[1] : null;
+    const lane = JSON.stringify([review.user!.login.toLowerCase(), model]);
+    const sha = review.commit_id.trim().toLowerCase();
+    const lanes = shas.get(sha) ?? new Map<string, number>();
+    lanes.set(lane, (lanes.get(lane) ?? 0) + 1);
+    shas.set(sha, lanes);
   }
-  return shas.size;
+  return [...shas.values()].reduce((total, lanes) => total + [...lanes.values()].reduce((max, count) => Math.max(max, count), 0), 0);
 }
 
 export function formatSummary(threads: Thread[], reviewUrl: string, state: string): string {
@@ -122,7 +142,7 @@ export async function checkReviewRoundLimit(input: { limit: number; reviewers: s
     if (input.limit !== 0) {
       const reviews = await deps.listReviews();
       if (input.reviewers.some((login) => login.toLowerCase() === review.user?.login.toLowerCase()) && !reviews.some((entry) => entry.id === review.id)) throw new Error("Triggering automated review missing from review history");
-      count = countRounds(reviews, input.reviewers, pull.author, epoch);
+      count = countRounds(reviews, input.reviewers, pull.author, epoch, deps.warn);
     }
     const currentFeedback = await deps.feedback(pull, review);
     if (!currentFeedback.proceed) return result(currentFeedback.reason, false, epoch, count);
@@ -146,7 +166,7 @@ export async function checkReviewRoundLimit(input: { limit: number; reviewers: s
     try { summary = formatSummary(await deps.threads(), latest.url, review.state); }
     catch (error) { summary = `Unresolved thread summary unavailable; see ${latest.url}/files.`; deps.warn(`Thread summary unavailable: ${String(error)}`); }
     const marker = `<!-- review-round-limit:v1 epoch=${epoch.id} -->`;
-    const body = `${marker}\n## Review-round limit reached\n\nReviewed commits: ${count}; limit: ${input.limit}. Epoch: ${epoch.id}${epoch.at ? ` (reset at ${epoch.at}; equal timestamps remain in the prior epoch)` : " (PR creation)"}.\n\nHead: ${latest.head}\nTriggering review: ${review.html_url || latest.url}\nWorkflow run: ${input.runUrl || "unavailable"}\n\n${summary}\n\n${assignmentWarnings.length ? `Routing warnings: ${assignmentWarnings.join("; ")}\n\n` : ""}${pauseReason}`;
+    const body = `${marker}\n## Review-round limit reached\n\nReview rounds: ${count}; limit: ${input.limit}. Epoch: ${epoch.id}${epoch.at ? ` (reset at ${epoch.at}; equal timestamps remain in the prior epoch)` : " (PR creation)"}.\n\nHead: ${latest.head}\nTriggering review: ${review.html_url || latest.url}\nWorkflow run: ${input.runUrl || "unavailable"}\n\n${summary}\n\n${assignmentWarnings.length ? `Routing warnings: ${assignmentWarnings.join("; ")}\n\n` : ""}${pauseReason}`;
     const existing = (await deps.listComments()).find((comment) => comment.author.toLowerCase() === latest.author.toLowerCase() && comment.body.includes(marker));
     if (existing) await deps.updateComment(existing.id, body); else await deps.createComment(body);
     return result(pauseReason, false, epoch, count);

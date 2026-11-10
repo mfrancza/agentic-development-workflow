@@ -39,7 +39,7 @@ outputs:
     description: Whether the response container may run
     value: ${{ steps.run.outputs.proceed }}
   round-count:
-    description: Distinct reviewed commit count, or empty when unavailable or unlimited
+    description: Review-round count across SHA and reviewer lanes, or empty when unavailable or unlimited
     value: ${{ steps.run.outputs.round-count }}
   limit:
     description: Parsed numeric limit
