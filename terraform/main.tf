@@ -73,6 +73,8 @@ module "agent_vars" {
   default_model                                    = var.default_model
   design_default_model                             = var.design_default_model
   groom_default_model                              = var.groom_default_model
+  enable_dependabot_alert_issues                   = var.enable_dependabot_alert_issues
+  dependabot_alert_issues_max_open_prs             = var.dependabot_alert_issues_max_open_prs
   admin_assignees                                  = var.admin_assignees
   code_reviewers                                   = var.code_reviewers
   fix_checks_allow                                 = var.fix_checks_allow

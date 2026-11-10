@@ -73,6 +73,16 @@ output "review_model_pairing_variable_name" {
   value       = github_actions_variable.review_model_pairing.variable_name
 }
 
+output "enable_dependabot_alert_issues_variable_name" {
+  description = "Name of the ENABLE_DEPENDABOT_ALERT_ISSUES Actions variable."
+  value       = github_actions_variable.enable_dependabot_alert_issues.variable_name
+}
+
+output "dependabot_alert_issues_max_open_prs_variable_name" {
+  description = "Name of the DEPENDABOT_ALERT_ISSUES_MAX_OPEN_PRS Actions variable."
+  value       = github_actions_variable.dependabot_alert_issues_max_open_prs.variable_name
+}
+
 output "resolve_conflicts_author_allowlist_variable_name" {
   description = "Name of the RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST Actions variable."
   value       = github_actions_variable.resolve_conflicts_author_allowlist.variable_name
