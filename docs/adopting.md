@@ -1119,10 +1119,23 @@ jobs:
 
 **Optional polling backstop.** GitHub does not always deliver `check_run`
 events, for example for some third-party check origins. A scheduled poller
-catches allowed failing checks the event-driven workflow missed. It applies
+catches allowed failing checks the event-driven workflow missed, including
+work displaced from the `agent-branch-pr-<N>` concurrency group when a newer
+pending run replaces it. It applies
 the same `FIX_CHECKS_ALLOW` allowlist, so an empty or missing allowlist
 dispatches nothing. The reusable takes the same per-PR lock for both stubs,
 so a poll and a check event never run the agent on the same PR at once.
+
+The caller's `schedule:` cron is the per-repository polling frequency setting;
+edit it in your copy of the stub. The example below runs every 15 minutes
+(96 scheduled polls per day). For lower polling cost, use `*/30 * * * *`
+(48 per day) or `0 * * * *` (24 per day), at the cost of slower recovery.
+Each poll starts a runner for discovery, even when no checks need fixing;
+eligible failures can also start agent jobs. Counts are nominal: GitHub may
+delay or drop scheduled runs. To disable scheduled polling, remove the entire
+`schedule:` block and retain `workflow_dispatch:` for manual-only polls.
+Event-driven fix-checks still works, but missed or displaced work then needs a
+manual poll to recover.
 
 ```yaml
 name: agent-fix-checks-poll
