@@ -72,7 +72,8 @@ export interface FeedbackCheckResult {
  *  2. Non-approval, non-commented states (changes_requested, dismissed, …) —
  *     always proceed.
  *  3. Commented or approved review — count unresolved PR review threads via
- *     GraphQL. Zero threads → skip; non-zero → proceed. On error:
+ *     GraphQL. Non-zero threads → proceed; zero threads → skip approvals and
+ *     commented reviews without content beyond the reviewer header. On error:
  *       - commented: fail open (proceed) immediately — no bare-approval fallback.
  *       - approved: fall through to the bare-approval fallback (step 4).
  *  4. Approved review — bare-approval fallback (only reached when step 3 errored):
@@ -134,6 +135,12 @@ export async function checkReviewerFeedback(
 
   if (unresolvedCount !== undefined) {
     if (unresolvedCount === 0) {
+      // Strip only the reviewer agent's complete, leading two-line header.
+      // Other text, including headings from other reviewers, remains feedback.
+      const content = body.replace(/^\s*<!-- reviewer-model:[^\r\n]* -->[ \t]*\r?\n[ \t]*### Review by `[^`\r\n]+`[ \t]*(?:\r?\n|$)/, "").trim();
+      if (stateLower === "commented" && content) {
+        return { proceed: true, reason: "Commented review has body content; proceeding." };
+      }
       return {
         proceed: false,
         reason:

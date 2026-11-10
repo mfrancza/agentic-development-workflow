@@ -56,13 +56,14 @@ For longer bodies, write to a file and use `--body-file` (or `-F body=@file` for
    - **Conflicts with a maintainer decision** → leave the maintainer-requested behavior unchanged and reply on the reviewer's root inline thread with the decision's permalink and the specific reason for declining. For a review-summary or conversation finding, use the PR-comment path and link both the finding and the decision. Do not claim a new commit for a reply-only outcome.
    - **Conflicting maintainer decisions** without an explicit withdrawal or replacement → leave disputed behavior unchanged, reply with links to both decisions and request clarification, then apply `human-required` and assign an involved verified maintainer as described below. Continue independent, non-conflicting work.
    - **No applicable conflict** → classify the feedback normally below. A non-maintainer finding can still identify a valid issue, correctness, or security problem; do not reject it solely because of its author.
-3. For each remaining actionable comment, classify:
+3. For each advisory point in a commented review body, act when the change is in scope for the linked issue, low-risk, and consistent with applicable maintainer decisions. Otherwise decline it with a brief reason (for example, out of scope, mistaken, or not worth the cost). Post one PR conversation comment linking or quoting the review, with one line per point citing the commit for work done or explaining the decline. A decline still requires a reply. Do not duplicate replies for the same finding in an inline thread.
+4. For each remaining actionable comment, classify:
    - **Needs a new change** → edit, run the required checks, `git add`, `git commit -m "..."`, then reply quoting the new commit SHA.
    - **Already addressed** by a commit since base → reply citing that commit's SHA (find it with `git log --oneline <base-sha>..HEAD`).
    - **Disagree / not actionable** → reply with your reasoning. Nits and style preferences you don't accept are fine to push back on, but say so.
-4. Once checks, local commits, and replies are complete, return. This action is commit-only: do not push or force-push, publish changes through another tool or API, or disable or bypass the model-session push guard. The entrypoint publishes after you exit.
-5. Do not request re-review yourself — the entrypoint re-requests review from all currently assigned reviewers automatically whenever HEAD has changed (i.e., new commits, amended commits, or any other history rewrite). If HEAD is unchanged, no re-review is requested.
-6. End by summarizing which threads got replies and which commits you made (if any). Be honest if you made no commits.
+5. Once checks, local commits, and replies are complete, return. This action is commit-only: do not push or force-push, publish changes through another tool or API, or disable or bypass the model-session push guard. The entrypoint publishes after you exit.
+6. Do not request re-review yourself — the entrypoint re-requests review from all currently assigned reviewers automatically whenever HEAD has changed (i.e., new commits, amended commits, or any other history rewrite). If HEAD is unchanged, no re-review is requested.
+7. End by summarizing which threads got replies and which commits you made (if any). Be honest if you made no commits.
 
 ## Before you commit
 

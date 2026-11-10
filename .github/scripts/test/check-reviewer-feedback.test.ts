@@ -203,6 +203,24 @@ describe("commented review — unresolved-thread path", () => {
     expect(deps.countInlineComments).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "An advisory finding.",
+    "<!-- reviewer-model: claude-sonnet-5-5 -->\n### Review by `claude-sonnet-5-5`\n\n- Consider a fix.",
+    "### Review by a human\nPlease check this.",
+  ])("proceeds with zero threads and body content: %s", async (body) => {
+    const deps = makeDeps({ countUnresolvedThreads: vi.fn().mockResolvedValue(0) });
+    expect((await checkReviewerFeedback({ ...BASE_INPUT, state: "COMMENTED", body }, deps)).proceed).toBe(true);
+  });
+
+  it.each([
+    "  \n ",
+    "<!-- reviewer-model: claude-sonnet-5-5 -->\n### Review by `claude-sonnet-5-5`\n\n",
+    "  <!-- reviewer-model: model -->\r\n### Review by `model`\r\n",
+  ])("skips with zero threads and no content beyond the header: %s", async (body) => {
+    const deps = makeDeps({ countUnresolvedThreads: vi.fn().mockResolvedValue(0) });
+    expect((await checkReviewerFeedback({ ...BASE_INPUT, state: "COMMENTED", body }, deps)).proceed).toBe(false);
+  });
+
   it("proceeds for a COMMENTED review by a distinct reviewer with one unresolved thread", async () => {
     const deps = makeDeps({
       countUnresolvedThreads: vi.fn().mockResolvedValue(1),
