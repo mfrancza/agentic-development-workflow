@@ -13,6 +13,7 @@
     "@actions/github": "^9.0.0"
   },
   "devDependencies": {
+    "@actions/expressions": "0.3.61",
     "@types/node": "^22.20.1",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3",
