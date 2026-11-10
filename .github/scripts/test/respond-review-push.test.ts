@@ -8,6 +8,7 @@ const entrypoint = readFileSync(new URL("../../../docker/scripts/entrypoint.sh",
 const action = entrypoint.match(/^action_respond_review\(\) \{\n[\s\S]*?^\}/m)?.[0];
 const helper = new URL("../../../docker/scripts/lib/branch-push.sh", import.meta.url).pathname;
 const checks = new URL("../../../docker/scripts/lib/pre-commit-checks.sh", import.meta.url).pathname;
+const guard = new URL("../../../docker/scripts/lib/model-push-guard.sh", import.meta.url).pathname;
 const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
 const branch = "review/feature";
 const branchRef = `refs/heads/${branch}`;
@@ -50,6 +51,7 @@ function runAction(model: string, options: { checkout?: string; check?: string; 
     log() { printf '%s\n' "$*"; }
     source "$HELPER"
     source "$CHECKS"
+    source "$GUARD"
     setup_repo() { cd "$WORK_DIR"; }
     gh() {
       printf 'gh %s\n' "$*" >> "$EVENTS"
@@ -66,7 +68,7 @@ function runAction(model: string, options: { checkout?: string; check?: string; 
     cwd: agent,
     encoding: "utf8",
     env: {
-      ...environment, ACTION: action, HELPER: helper, CHECKS: checks, WORK_DIR: agent,
+      ...environment, ACTION: action, HELPER: helper, CHECKS: checks, GUARD: guard, WORK_DIR: agent,
       WRITER: writer, BRANCH_REF: branchRef, EVENTS: events, GITHUB_PR_NUMBER: "123",
       GITHUB_REPO: "example/repo", GH_TOKEN: "test-token", CHECKOUT: options.checkout ?? ":", MODEL: model,
       PRE_COMMIT_SCRIPTS_DIR: ".", PRE_COMMIT_CHECK_CMD: options.check ?? "true",
@@ -84,6 +86,7 @@ function runNormalAction(name: string, model: string, ref: string) {
   const result = spawnSync("bash", ["-euo", "pipefail", "-c", `
     log() { printf '%s\n' "$*"; }
     source "$CHECKS"
+    source "$GUARD"
     setup_repo() { cd "$WORK_DIR"; }
     fix_checks_should_run() { return 0; }
     gh() {
@@ -99,7 +102,7 @@ function runNormalAction(name: string, model: string, ref: string) {
     cwd: agent,
     encoding: "utf8",
     env: {
-      ...environment, ACTION: body, ACTION_NAME: name, CHECKS: checks, WORK_DIR: agent,
+      ...environment, ACTION: body, ACTION_NAME: name, CHECKS: checks, GUARD: guard, WORK_DIR: agent,
       WRITER: writer, BRANCH_REF: ref, EVENTS: events, GITHUB_PR_NUMBER: "123",
       GITHUB_ISSUE_NUMBER: "123", GITHUB_RUN_ID: "123", GITHUB_REPO: "example/repo", GH_TOKEN: "test-token",
       MODEL: model, PRE_COMMIT_SCRIPTS_DIR: ".", PRE_COMMIT_CHECK_CMD: "true",
@@ -147,7 +150,30 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 describe("respond-review publication wiring", () => {
   it("sources the production helper", () => {
     expect(entrypoint).toContain('source "${SCRIPTS_DIR}/lib/branch-push.sh"');
+    expect(entrypoint).toContain('source "${SCRIPTS_DIR}/lib/model-push-guard.sh"');
     expect(action).toBeDefined();
+  });
+
+  it("rejects a model push and publishes after restoring the original hook", () => {
+    const hooks = join(root, "hooks");
+    mkdirSync(hooks);
+    writeFileSync(join(hooks, "pre-push"), '#!/bin/sh\necho original >> "$EVENTS"\n');
+    chmodSync(join(hooks, "pre-push"), 0o755);
+    git(agent, "config", "core.hooksPath", hooks);
+    const result = runAction('printf local > .github/local.txt; git add .github; git commit -m local; if git push origin HEAD; then exit 1; fi');
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain("Do not git push in this model session");
+    expect(result.events).toMatch(/model\noriginal\nrereview\nmarker\n/);
+    expect(git(agent, "config", "--local", "core.hooksPath")).toBe(hooks);
+    expect(remoteTip()).toBe(git(agent, "rev-parse", "HEAD"));
+  });
+
+  it("stops after a model failure without publishing", () => {
+    const result = runAction('return 7');
+    expect(result.status).not.toBe(0);
+    expect(result.events).not.toMatch(/rereview|marker/);
+    expect(remoteTip()).toBe(baseline);
+    expect(existsSync(join(root, "push-calls"))).toBe(false);
   });
 
   it("stops before retrieving reviews or invoking the model on checkout mismatch", () => {

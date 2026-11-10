@@ -27,6 +27,7 @@ source "${SCRIPTS_DIR}/lib/fix-checks-guard.sh"
 # (WORK_DIR, GITHUB_REPO, GH_TOKEN).
 source "${SCRIPTS_DIR}/lib/pre-commit-checks.sh"
 source "${SCRIPTS_DIR}/lib/branch-push.sh"
+source "${SCRIPTS_DIR}/lib/model-push-guard.sh"
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -532,12 +533,12 @@ action_fix_checks() {
     HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
 
     log "Running Claude to fix check failures"
-    run_agent "respond-to-checks.md" \
+    run_agent_without_push "respond-to-checks.md" \
         "The following CI checks failed on PR #${GITHUB_PR_NUMBER}:
 
 ${FAILURE_DETAILS}
 
-Fix the issues and commit the changes."
+Fix the issues and commit the changes locally. Do not push; the entrypoint publishes after the session." || return 1
 
     pre_commit_checks_run "$HEAD_BEFORE_CLAUDE" "$GITHUB_PR_NUMBER"
 
@@ -598,7 +599,7 @@ action_respond_review() {
     HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
 
     log "Running Claude to address review feedback"
-    run_agent "respond-to-review.md" \
+    run_agent_without_push "respond-to-review.md" \
         "Address review feedback on PR #${GITHUB_PR_NUMBER} in ${GITHUB_REPO}.
 
 Branch: ${BRANCH_NAME}
@@ -615,7 +616,7 @@ Inline review comments (each has an \`id\` for replying):
 ${INLINE_COMMENTS_JSON}
 
 PR conversation comments:
-${ISSUE_COMMENTS_JSON}"
+${ISSUE_COMMENTS_JSON}" || return 1
 
     pre_commit_checks_run "$HEAD_BEFORE_CLAUDE" "$GITHUB_PR_NUMBER"
 
