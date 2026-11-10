@@ -14,6 +14,7 @@ owner's organization.
 | `DEFAULT_MODEL` | string | Repo-wide default model for all agent containers. Issue-driven workflows can override per-issue via `model:*` labels. |
 | `DESIGN_DEFAULT_MODEL` | string | Design-agent default model. When non-empty, `agent-design` workflows prefer this value over `DEFAULT_MODEL`. Empty string (the default) means "not configured — fall through to `DEFAULT_MODEL`"; the caller stub uses `vars.DESIGN_DEFAULT_MODEL \|\| vars.DEFAULT_MODEL` so the fallback is transparent. |
 | `GROOM_DEFAULT_MODEL` | string | Grooming-agent default model. When non-empty, `agent-groom` workflows prefer this value over `DEFAULT_MODEL`. Empty string (the default) means "not configured — fall through to `DEFAULT_MODEL`"; the caller stub uses `vars.GROOM_DEFAULT_MODEL \|\| vars.DEFAULT_MODEL` so the fallback is transparent. It selects only the model the groomer runs on; the groomer's vendor anchors stay on `DEFAULT_MODEL` / `DESIGN_DEFAULT_MODEL`. |
+| `MAX_REVIEW_ROUNDS` | string integer | Review-response reviewed-commit limit; defaults to `"8"`, with `"0"` disabling the numerical cap. |
 | `ADMIN_ASSIGNEES` | JSON array | GitHub logins or `<org>/<team-slug>` references assigned to issues/PRs when the agent applies `human-required` and needs a human in the loop. |
 | `CODE_REVIEWERS` | JSON array | GitHub logins or `<org>/<team-slug>` references requested as PR reviewers when the agent opens a PR and wants human sign-off. |
 | `FIX_CHECKS_ALLOW` | JSON array | Raw Checks API `check_runs[].name` values allowed to trigger the fix-checks agent. Empty (`[]`) disables all fix-checks delivery. |
@@ -41,6 +42,7 @@ module "agent_vars" {
   default_model       = "sonnet"
   # design_default_model = "opus"  # omit or leave "" to fall back to default_model
   # groom_default_model  = "haiku" # omit or leave "" to fall back to default_model
+  # max_review_rounds    = 8       # default; use 0 for no numerical cap
   admin_assignees     = ["your-github-username", "<your-github-org>/maintainers"]
   code_reviewers      = ["your-github-username", "<your-github-org>/maintainers"]
   # fix_checks_allow = ["ci / Typecheck and test"] # raw Checks API check_runs[].name values; [] disables fix-checks
@@ -78,6 +80,7 @@ module "agent_vars" {
   default_model       = "sonnet"
   # design_default_model = "opus"  # omit or leave "" to fall back to default_model
   # groom_default_model  = "haiku" # omit or leave "" to fall back to default_model
+  # max_review_rounds    = 0       # no numerical cap; omit for the default 8
   admin_assignees     = ["your-github-username", "<your-github-org>/maintainers"]
   code_reviewers      = ["your-github-username", "<your-github-org>/maintainers"]
   # fix_checks_allow = ["ci / Typecheck and test"] # raw Checks API check_runs[].name values; [] disables fix-checks
@@ -132,6 +135,7 @@ provider "github" {
 | `default_model` | `string` | no | `"sonnet"` | Repo-wide default model for agent containers. |
 | `design_default_model` | `string` | no | `""` | Design-agent default model. When non-empty, `agent-design` uses this instead of `default_model`. Empty (the default) falls through to `default_model`. |
 | `groom_default_model` | `string` | no | `""` | Grooming-agent default model. When non-empty, `agent-groom` uses this instead of `default_model`. Empty (the default) falls through to `default_model`. Does not change the groomer's vendor anchors. |
+| `max_review_rounds` | `number` | no | `8` | Non-negative safe integer through `9007199254740991`; `0` disables the numerical cap. |
 | `admin_assignees` | `list(string)` | no | `[]` | GitHub logins or `<org>/<team-slug>` references to assign to escalation issues/PRs. |
 | `code_reviewers` | `list(string)` | no | `[]` | GitHub logins or `<org>/<team-slug>` references to request as PR reviewers. |
 | `fix_checks_allow` | `list(string)` | no | `[]` | Raw Checks API `check_runs[].name` values allowed to trigger fix-checks. Empty disables all fix-checks delivery. |
@@ -177,6 +181,7 @@ provider "github" {
 - `AUTO_TRIGGER_AGENTS` must never be absent from the repository — the workflow guard `vars.AUTO_TRIGGER_AGENTS != ''` prevents `fromJSON('')` from throwing a runtime error. All gates default to `false` so behavior is unchanged unless you opt in.
 - `REVIEWER_MODELS` defaults to `[]` (JSON-encoded empty array). Workflows guard with `vars.REVIEWER_MODELS != ''` before calling `fromJSON` — an absent variable evaluates to `''` and `fromJSON('')` would throw a runtime error; the guard fails closed (multi-reviewer disabled) instead. An empty list (`[]`) is the canonical signal that multi-reviewer is disabled.
 - `FIX_CHECKS_ALLOW` defaults to `[]` (JSON-encoded empty array), which disables all fix-checks delivery. Its entries are raw Checks API `check_runs[].name` values — not workflow names or potentially decorated labels in the Checks tab. Discover names with `gh api repos/$OWNER/$REPO/commits/$SHA/check-runs --jq '.check_runs[].name'`.
+- `MAX_REVIEW_ROUNDS` is stored as a decimal string. The planned response gate defaults a missing or whitespace-only variable to 8 and counts distinct commits reviewed by configured automated reviewers in the current epoch, not review submissions or response runs. Actionable feedback on the Nth reviewed commit pauses before another response; clean feedback does not escalate. See `docs/design/cap-review-response-rounds.md` for the integration contract.
 - `agent_allowlist`, `admin_assignees`, and `code_reviewers` accept case-insensitively unique, non-empty GitHub logins and `<org>/<team-slug>` references. References must use the repository owner's organization; malformed values such as `a/b/c` are rejected.
 - `AGENT_ALLOWLIST` is read directly by the in-reusable runtime gate, which resolves team references at trigger time. There is no `AGENT_ALLOWLIST_RESOLVED` Actions variable and no scheduled resolver, so team-membership changes apply to the next triggering event.
 - Team references in `agent_allowlist` and `admin_assignees` require an allowlist-resolver GitHub App installed on the repository owner's organization with Members: read. Configure its `ALLOWLIST_RESOLVER_APP_ID` and `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` repository secrets. `code_reviewers` team references pass directly to GitHub's reviewer-request API and do not require those secrets.

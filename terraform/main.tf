@@ -73,6 +73,7 @@ module "agent_vars" {
   default_model                                    = var.default_model
   design_default_model                             = var.design_default_model
   groom_default_model                              = var.groom_default_model
+  max_review_rounds                                = var.max_review_rounds
   admin_assignees                                  = var.admin_assignees
   code_reviewers                                   = var.code_reviewers
   fix_checks_allow                                 = var.fix_checks_allow

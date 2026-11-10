@@ -198,6 +198,10 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #                          org/team-slug references assigned by the groom agent when it
 #                          applies the human-required label; stored as the JSON-encoded
 #                          ADMIN_ASSIGNEES Actions variable; omit or set to [] to skip
+#   max_review_rounds   — (optional) non-negative safe integer; Terraform publishes
+#                          MAX_REVIEW_ROUNDS as a string. Default 8; 0 means no
+#                          numerical cap. Missing Actions variable defaults to 8
+#                          when the response gate is integrated.
 #   code_reviewers       — (optional) GitHub usernames or org/team-slug references to
 #                          request as PR reviewers when the implement agent determines
 #                          human review is warranted; stored as the JSON-encoded
@@ -223,6 +227,8 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #                          Omit or set to "" to use the built-in default of
 #                          .github/scripts without creating an Actions variable.
 ```
+
+The planned review-response gate counts distinct commit SHAs from submitted reviews by configured automated reviewers since the current budget epoch began, excluding the PR author's reviews. Human reviews do not count; repeated reviews of the same SHA count once, and dismissed reviews remain counted. For a limit of N, actionable feedback on the Nth reviewed commit pauses before another response (with 8, commits 1–7 may receive responses); clean feedback does not escalate. Escalation uses the existing `ADMIN_ASSIGNEES` configuration. The gate requires the separate workflow integration; setting the variable alone does not enable it. See [the design](docs/design/cap-review-response-rounds.md) for the contract.
 
 ```bash
 cd terraform
