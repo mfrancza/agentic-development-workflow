@@ -42,7 +42,7 @@ If an entrypoint push is rejected, rerun from the current remote or manually rec
 
 Day-to-day operation is driven entirely by GitHub labels and events. See [`AGENTS.md § Labels`](AGENTS.md#labels) for the full label reference — all `agent:*`, `model:*`, grooming, and lifecycle labels with their descriptions and workflow behavior.
 
-- Allowed check failure on an agent-authored PR → the agent is re-invoked to fix the checks. `agent-fix-checks` receives same-repository Actions failures through its explicit `workflow_run` subscriptions (including [`CI`](.github/workflows/ci.yml)) and other eligible origins through `check_run.completed`; [`agent-fix-checks-poll.yml`](.github/workflows/agent-fix-checks-poll.yml) polls every 15 minutes as a delivery-independent backstop. `FIX_CHECKS_ALLOW` is a universal opt-in across all of these paths: `[]` disables all fix-checks handling, and each JSON entry must exactly match a raw Checks API `check_runs[].name`, not a workflow name or a decorated Checks-tab label. A `human-required` label stops polling for that PR; remove it when the human has unblocked the work to re-enable automatic handling.
+- Allowed check failure on an agent-authored PR → the agent is re-invoked to fix the checks. `agent-fix-checks` receives same-repository Actions failures through its explicit `workflow_run` subscriptions (including [`CI`](.github/workflows/ci.yml)) and other eligible origins through `check_run.completed`; [`agent-fix-checks-poll.yml`](.github/workflows/agent-fix-checks-poll.yml) provides a delivery-independent backstop on the repository's configured poll cron. `FIX_CHECKS_ALLOW` is a universal opt-in across all of these paths: `[]` disables all fix-checks handling, and each JSON entry must exactly match a raw Checks API `check_runs[].name`, not a workflow name or a decorated Checks-tab label. A `human-required` label stops polling for that PR; remove it when the human has unblocked the work to re-enable automatic handling.
 - Push to `main` → the agent checks all open developer-agent PRs for merge conflicts and resolves them automatically; each conflicted PR is resolved in its own parallel job so a single failure does not block the others. If the agent cannot resolve a conflict confidently, it aborts, applies `human-required`, and posts a PR comment naming the files that need manual attention. `workflow_dispatch` with a `pr_number` input is available as a manual backstop for a specific PR — for example, to manually re-trigger conflict resolution for PR #42:
 
   ```bash
@@ -210,6 +210,8 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #                          set to "" to fall back to default_model (the default)
 #   auto_trigger_agents  — per-stage auto-trigger switches (all false by default;
 #                          set a key to true to auto-apply that stage's agent:* label)
+#   auto_review_authors — explicit GitHub logins whose same-repository PRs
+#                          auto-enroll for review; [] disables enrollment
 #   admin_assignees      — (optional) GitHub usernames or same-organization
 #                          org/team-slug references assigned on grooming or review-round
 #                          escalation; stored as the JSON-encoded
@@ -242,6 +244,24 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #                          Omit or set to "" to use the built-in default of
 #                          .github/scripts without creating an Actions variable.
 ```
+
+**Auto-review upgrade:** The new `auto_review_authors` list defaults to `[]`,
+which disables automatic enrollment even when `auto_trigger_agents.review` is
+`true`. Before upgrading, configure:
+
+```hcl
+auto_review_authors = ["<developer-agent-app-slug>[bot]"] # add other desired author logins
+auto_trigger_agents = { groom = false, design = false, developer = false, review = true }
+```
+
+Keep your existing values for the other switches. The authorized operator must
+apply the reviewed Terraform plan, and update the caller inputs and reusable pin
+together as described in the [adopting guide](docs/adopting.md#agent-auto-trigger-reusable-workflow).
+The list accepts logins only, including bot logins; teams and wildcards are not
+supported. Unlisted authors do not enroll merely because their branches begin
+with `agent/` or `design/`. Manual `agent:review` labeling remains available.
+Author enrollment grants no sender permissions: keep the developer App in
+`AGENT_ALLOWLIST` for downstream review authorization.
 
 ```bash
 cd terraform
