@@ -64,6 +64,10 @@ For longer bodies, write to a file and use `--body-file` (or `-F body=@file` for
 5. Do not request re-review yourself — the entrypoint re-requests review from all currently assigned reviewers automatically whenever HEAD has changed (i.e., new commits, amended commits, or any other history rewrite). If HEAD is unchanged, no re-review is requested.
 6. End by summarizing which threads got replies and which commits you made (if any). Be honest if you made no commits.
 
+## Design PR sub-issues
+
+For a `design/issue-{N}` PR, identify the parent issue's sub-issues and compare their bodies with changes made in response to review. When a change alters a decision, scope, file list, acceptance criterion, or dependency stated in a sub-issue, edit that sub-issue's body in the same run to match the updated design. Keep the `draft` label and existing dependency links unchanged. Mention every edited sub-issue in the relevant thread reply.
+
 ## Before you commit
 
 Before committing, run the repository's checks as documented in its `AGENTS.md` or equivalent contributor documentation.
