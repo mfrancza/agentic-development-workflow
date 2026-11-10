@@ -6,6 +6,7 @@
 ## Requirements as understood
 
 Issue #630 asks for an opt-in scheduled producer of ordinary GitHub issues, not another dependency updater or implementer.
+The PR owner's [explicit request](https://github.com/mfrancza/agentic-development-workflow/pull/872#discussion_r4519679820) also permits manual runs for replenishing batches, superseding the issue's schedule-only entry-point constraint; all other requirements remain unchanged.
 An alert qualifies only while open, with a non-withdrawn advisory and a patched version, when Dependabot's associated update reports a repository-fixable failure and has not produced a security-update PR.
 The motivating case is an npm transitive lockfile dependency with a patch available, where an unreachable local path dependency prevents Dependabot from preparing its own update.
 Authentication failures, inaccessible private registries, missing patches, and withdrawn advisories must not become agent work.
@@ -48,19 +49,23 @@ An approved sandbox must supply real error-shape and credential evidence before 
 
 ## Decisions
 
-### Decision 1 — One schedule, default off, ordinary TypeScript activity
+### Decision 1 — Scheduled and manual runs, default off
 
-Add `.github/workflows/agent-dependabot-alert-issues.yml` with only `schedule`, at `23 */6 * * *` (UTC).
-Do not add `workflow_dispatch`, `repository_dispatch`, webhooks, or a new `AGENT_ACTION`.
+Add `.github/workflows/agent-dependabot-alert-issues.yml` with `schedule` at `23 3 * * 1` (weekly, UTC) and `workflow_dispatch` with no inputs.
+An authorized operator can manually run the workflow after merging or closing open work to fill newly available capacity without waiting for the weekly schedule.
+Manual dispatch is not an opt-in override: both triggers use the same validation, eligibility, deduplication, capacity reservations, handoff, and failure behavior.
+Do not add `repository_dispatch`, webhooks, or a new `AGENT_ACTION`.
 The job-level exact comparison `vars.ENABLE_DEPENDABOT_ALERT_ISSUES == 'true'` happens before checkout and token minting.
 The activity also validates its enabled input before any API call, so direct test invocation does not silently bypass opt-in.
 Unrecognized enable values do not enable the feature; invalid capacity when enabled fails loudly before writes.
 
-Use top-level `permissions: { contents: read }`, checkout at the scheduled `github.sha` with `persist-credentials: false`, pinned external action SHAs, a ten-minute timeout, and repository-scoped concurrency `dependabot-alert-issues-${{ github.repository }}` with `cancel-in-progress: false`.
+For both events, reject non-default-branch refs at the job gate before checkout and token minting; checkout the triggering `github.sha` with `persist-credentials: false`.
+Use top-level `permissions: { contents: read }`, pinned external action SHAs, a ten-minute timeout, and repository-scoped concurrency `dependabot-alert-issues-${{ github.repository }}` with `cancel-in-progress: false` shared by both triggers.
+GitHub may replace an already pending run in this group; an operator can dispatch again or wait for the next schedule.
 No PR code or package-manager commands run in this job.
 Implement nontrivial logic in `.github/scripts/src/` and expose it through `.github/actions/schedule-dependabot-alert-issues/action.yml`, following the existing Octokit/activity conventions.
 
-Alternatives: a new implementer bypasses the requested policy path; a new webhook/manual trigger violates the sole-new-entry-point constraint; inline shell makes pagination, classification, and retry testing harder.
+Alternatives: a new implementer bypasses the requested policy path; a webhook adds an unnecessary entry point; inline shell makes pagination, classification, and retry testing harder.
 The composite action is a helper, not a new workflow trigger or externally callable reusable workflow.
 
 ### Decision 2 — Separate security reading from the existing writer identity
@@ -85,7 +90,7 @@ Expanding the developer App would expose alert-reading privileges to all its mod
 Copying alert details into an ordinary issue can broaden their visibility, particularly in public repositories.
 Opt-in must explicitly acknowledge that disclosure and approve the body fields/redaction policy, not merely install the App.
 Keep `human-required` on the parent/design PR and assign `mfrancza` until the permission, disclosure, and admission-limit decisions are reviewed.
-This document does not authorize creating an App, granting scopes, setting secrets, or enabling the schedule.
+This document does not authorize creating an App, granting scopes, setting secrets, or enabling the workflow.
 
 ### Decision 3 — Positive error classification, with revalidation before writes
 
@@ -153,7 +158,7 @@ Only an open, still-eligible marked issue with no such history receives the miss
 Historical-event lookup failures fail closed for this write.
 
 Issue creation must not be blindly retried after a timeout/ambiguous response.
-Stop the run and re-inventory on the next schedule; if a create actually succeeded, its marker is the recovery record.
+Stop the run and re-inventory on the next scheduled or manual run; if a create actually succeeded, its marker is the recovery record.
 After confirmed creation, immediately add the identity to the in-memory set and reserve capacity before considering another candidate.
 
 A closed issue remains a tombstone while its alert remains open, including the period after a fix merges but before alert state catches up.
@@ -185,7 +190,7 @@ Lowering the limit never cancels agents or closes PRs; it pauses admissions unti
 
 This is a conservative bound on **work admitted by this producer**, not a transactional cap on every future dependency PR in the repository.
 Dependabot/humans can open PRs after the last inventory; humans can reopen closed issues or open multiple PRs per issue; unlabeled unrelated dependency PRs are not recognizable reliably.
-A strict global cap would require shared admission at all PR writers, including changes outside this issue's schedule-only constraint.
+A strict global cap would require shared admission at all PR writers, including changes outside this producer's scope.
 Do not silently add a second implementation gate to pretend to provide that guarantee.
 The maintainer must approve these semantics; if a hard global cap is required, keep opt-in off and revise the scope instead.
 
@@ -196,16 +201,16 @@ Alternatives: counting only current PRs lets several ungroomed issues overfill t
 Add root and `agent-vars` module inputs `enable_dependabot_alert_issues` (boolean, default `false`) and `dependabot_alert_issues_max_open_prs` (integer, default `3`, validated non-negative), then publish the two Actions variables from that module.
 Wire the root module, examples, and module documentation consistently.
 Do not alter the actual deployment's opt-in, `AGENT_ALLOWLIST`, `AUTO_TRIGGER_AGENTS`, App grants, or branch-protection settings in this work.
-Update operator documentation for the new workflow/configuration and the manual reader-App/bootstrap approval contract when implementation lands; do not add copied lists of labels, actions, or triggers to `AGENTS.md` or `README.md`.
+Update operator documentation for the new workflow/configuration, manual dispatch after capacity frees up, and the manual reader-App/bootstrap approval contract when implementation lands; do not add copied lists of labels, actions, or triggers to `AGENTS.md` or `README.md`.
 
 The run summary records counts for scanned, eligible, skipped by stable reason, existing-open, closed-tombstone, created, grooming-handoff-repaired, capacity-deferred, and stale open work, plus counted PRs/reservations/limit.
 Log identifiers and safe reason codes, not raw security payloads.
 Permission/schema/pagination/inventory failures are visible failed runs, never successful empty scans.
-A failure after one confirmed write reports that partial progress and stops; the next schedule resumes idempotently.
+A failure after one confirmed write reports that partial progress and stops; the next scheduled or manual run resumes idempotently.
 
 Rollout order: approve this design's human-owned decisions; merge the tested disabled implementation; provision/install the reader manually in an approved sandbox; validate real error and token behavior; then separately opt in the production repository.
 Turning opt-in off prevents new producer runs but does not revoke an already queued/running developer job or cancel work already admitted.
-There is deliberately no manual-dispatch backdoor: live validation waits for the sandbox schedule, and deterministic tests invoke the activity with mocked clients.
+Manual dispatch remains subject to the same opt-in and human-approved permissions and disclosure contract; it is not a backdoor around rollout approval.
 
 ## Out of scope
 
@@ -222,10 +227,11 @@ There is deliberately no manual-dispatch backdoor: live validation waits for the
 - Exercise pagination beyond one page for alerts, issues, issue events, and PRs; malformed/null data; partial GraphQL errors; denied credentials; changing alert/default-branch state; and content that attempts markup, marker, mention, credential, or shell injection.
 - Reconcile twice against persistent mocked state: exactly one issue/one grooming request. Cover a successful create followed by label failure, ambiguous create response, completed grooming, a closed issue with a still-open alert, merged-fix alert lag, and reopening an alert.
 - Verify capacity with open/draft Dependabot and agent PRs, reservations before grooming, PR/reservation replacement, multiple PRs per issue, closed issues with open PRs, limit `0`, lowering the limit, partial inventory failure, and more candidates than remaining slots.
-- Statically assert schedule-only triggering, default-off pre-mint gating, non-cancelling concurrency, pinned actions, no new agent invocation, and no modifications to the existing allowlist/label/author checks.
+- Statically assert weekly schedule and input-free manual dispatch, default-off and default-branch pre-mint gating for both events, shared non-cancelling concurrency, pinned actions, no new agent invocation, and no modifications to the existing allowlist/label/author checks.
+- Verify manual runs use the same eligibility and admission rules: disabled and non-default-branch dispatches do not mint tokens or write, a full capacity creates nothing, and a dispatch after capacity frees admits only available slots without duplicates.
 - For implementation touching `.github/`, run `cd .github/scripts && npm ci && npm run typecheck && npm test`; also run the repository's existing actionlint and Terraform formatting/validation paths as applicable.
 - In an explicitly approved sandbox, demonstrate the read-only App can fetch a real failed update, the developer token produces one issue and `agent:groom` event, and no implementation occurs before `do`. With the existing auto-trigger flag on, normal grooming to `do` must reach the existing developer path; with it off, it must not auto-start. Do not change gates to make this test pass.
-- Record run URLs, redacted actual error shapes, issue/PR identities, capacity snapshots, two successive schedule results, and fix/close-lag behavior in the validation issue. The zero-alert schema probe is not a substitute for this evidence.
+- Record run URLs, redacted actual error shapes, issue/PR identities, capacity snapshots, successive scheduled and manual results, and fix/close-lag behavior in the validation issue. The zero-alert schema probe is not a substitute for this evidence.
 
 ## Task breakdown
 
@@ -238,5 +244,5 @@ Human approval and sandbox provisioning are rollout prerequisites, not permissio
 | Issue #867 | A: Implement alert discovery, source-evidence adapters, and fail-closed eligibility with unit tests | None; independent of Issue #868 |
 | Issue #868 | B: Add default-off Terraform configuration and operator/bootstrap documentation | None; independent of Issue #867 |
 | Issue #869 | C: Implement durable issue reconciliation, grooming recovery, and capacity reservations with tests | Issue #867 |
-| Issue #870 | D: Wire the schedule-only workflow and composite activity; add workflow contract tests | Issue #867, Issue #868, Issue #869 |
-| Issue #871 | E: Validate end-to-end scheduled remediation, permissions, deduplication, and reviewer capacity | Issue #867, Issue #868, Issue #869, Issue #870; human-approved sandbox |
+| Issue #870 | D: Wire the scheduled and manually dispatched workflow and composite activity; add workflow contract tests | Issue #867, Issue #868, Issue #869 |
+| Issue #871 | E: Validate end-to-end scheduled and manual remediation, permissions, deduplication, and reviewer capacity | Issue #867, Issue #868, Issue #869, Issue #870; human-approved sandbox |
