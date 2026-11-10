@@ -146,11 +146,12 @@ describe("GitHub adapter", () => {
 });
 
 describe("live feedback integration", () => {
-  it("preserves stale, self-review, clean and fail-open feedback semantics", async () => {
+  it("preserves old human feedback, self-review, clean and fail-open feedback semantics", async () => {
     const graphql = vi.fn().mockResolvedValue({ repository: { pullRequest: { reviewThreads: { nodes: [], pageInfo: { hasNextPage: false, endCursor: null } } } } });
     const octokit = { graphql, rest: { pulls: { listCommentsForReview: vi.fn() } } } as unknown as ReturnType<typeof getOctokit>;
     const api = makeDependencies({ octokit, owner: "org", repo: "repo", prNumber: 1, reviewId: 1, assignees: [] });
-    expect((await api.feedback(pull, { ...review, commit_id: "old" })).proceed).toBe(false);
+    expect((await api.feedback(pull, { ...review, user: { login: "human" }, commit_id: "old" })).proceed).toBe(true);
+    expect((await api.feedback(pull, { ...review, user: { login: "mfrancza-reviewer-agent[bot]" } })).proceed).toBe(true);
     expect((await api.feedback(pull, { ...review, user: { login: pull.author } })).proceed).toBe(false);
     expect((await api.feedback(pull, { ...review, state: "APPROVED" })).proceed).toBe(false);
     graphql.mockRejectedValue(new Error("unavailable"));
