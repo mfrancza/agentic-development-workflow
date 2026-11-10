@@ -324,6 +324,31 @@ retired on the first-party API. They are not recommendations here. Consult the
 inventory and checking affected open issues belongs to the vendor-refresh work, not this pricing review.
 Models present only in a vendor catalog are not automatically provisioned in this repository.
 
+## Adding a Model
+
+Adding a model touches several files that must stay in sync. Make these changes in the same PR:
+
+- **Labels:** add `model:<id>` in [`terraform/modules/labels/main.tf`](../terraform/modules/labels/main.tf).
+- **Routing:** for OpenAI and xAI models, add the ID to the matching case arm of `resolve_provider()` in both the [developer entrypoint](../docker/scripts/entrypoint.sh) and the [reviewer entrypoint](../docker/reviewer/entrypoint.sh), including the "Unknown model" error message. Anthropic `claude-*` IDs already route by prefix.
+- **Class table:** add the ID to [`.github/scripts/data/model-classes.json`](../.github/scripts/data/model-classes.json) and refresh the **Cross-Vendor Class Table** section above.
+- **Grooming:** if the groomer may select the model, add it to [`agents/grooming/label-criteria.json`](../agents/grooming/label-criteria.json) and to the pricing and task-class tables in this document. For OpenAI models, also add the ID to the OpenAI list in [`docker/scripts/prompts/groom.md`](../docker/scripts/prompts/groom.md) step 2, so the groomer recognizes it as an anchor model.
+- **Docs:** update the provider section in this document and the `model:<name>` examples in [`AGENTS.md`](../AGENTS.md).
+- **CLI support:** confirm that the agent CLI pinned in **both** [`docker/Dockerfile`](../docker/Dockerfile) and [`docker/reviewer/Dockerfile`](../docker/reviewer/Dockerfile) can run the model. If it can't, bump that CLI's version `ARG` in both Dockerfiles in the same PR, keeping the two values identical. Routing acceptance and vendor availability don't guarantee CLI support.
+
+**Checking CLI support.** Each provider runs through a different CLI with its own pinned version:
+
+| Provider | CLI and version `ARG` | How to check support |
+|---|---|---|
+| Anthropic | Claude Code, `CLAUDE_CODE_VERSION` | Check the Claude Code release notes for the model. An unsupported model fails immediately with `Claude Code <version> does not support this model; version <x> or newer is required`. |
+| OpenAI | Codex, `CODEX_CLI_VERSION` | Check the Codex release notes for the model. A model the CLI doesn't know still runs, but logs `Model metadata for <id> not found. Defaulting to fallback metadata`, which can degrade results. Treat that warning as unsupported. |
+| xAI | Grok Build CLI, `GROK_BUILD_CLI_VERSION` | Run `grok models` at the pinned version and confirm the ID is listed. Vendor docs alone are not enough. |
+
+**When bumping a CLI:**
+
+- Read the release notes between the old and new versions for changes to the flags and output the entrypoints rely on, and list anything relevant in the PR description.
+- After merge, run the new model once through the real workflow and confirm the run succeeds without the warnings above.
+- Repos that pull the published GHCR images only get the new CLI after the next release tag.
+
 ## Repo Defaults
 
 The configured fallback is set in
@@ -372,6 +397,10 @@ on the PR too: an issue's review override alone is not read by the reviewer work
 Entries below record changes at their original dates; historical model lists and prices are not
 current selection guidance.
 
+- **2026-11-09 (rev 15)** — Added the "Adding a Model" checklist (Issue #877), including the
+  requirement to confirm, and if needed bump, the pinned agent CLI in both Dockerfiles. Prompted by
+  Claude Code 2.1.150 refusing `claude-opus-5-5` (#873) and Codex 0.146.0 lacking metadata for
+  `gpt-6.1-terra` / `gpt-6.1-sol` (#874).
 - **2026-11-09 (rev 14)** — Updated default models (Issue #836, PR #842): removed the stale
   "This remains the repository default" note from the Sonnet tier description; updated the Sonnet
   note to clarify it is the cost-conscious Anthropic grooming choice. Updated `groom.md` step 3.2's

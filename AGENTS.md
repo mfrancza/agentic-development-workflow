@@ -545,6 +545,7 @@ At minimum, before opening a PR, check whether your change alters any of the fol
 - Required GitHub App permissions or repo Actions secrets.
 - The repository layout section above (new top-level directories or removed files).
 - The `docker/` image (base image, installed tools, or entrypoint contract).
+- Adding a model: follow [`docs/model-guidance.md`](docs/model-guidance.md) § "Adding a Model", including the check that the pinned agent CLI in both Dockerfiles supports it.
 
 If you touch `agents/grooming/label-criteria.json`, also refresh the label list in the **Labels** section above.
 
