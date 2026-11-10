@@ -19,6 +19,7 @@ let writer: string;
 let baseline: string;
 let parent: string;
 let environment: NodeJS.ProcessEnv;
+let lastStderr = "";
 
 function git(directory: string, ...args: string[]): string {
   return execFileSync("git", ["-C", directory, ...args], { env: environment, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
@@ -42,7 +43,8 @@ function evidence(scenario: string, status: number | null, concurrent: string, l
   const tip = final.status === 0 ? final.stdout.trim() : "missing";
   const reachable = concurrent === "none" || tip === "missing" ? "n/a" :
     String(spawnSync(realGit, ["-C", remote, "merge-base", "--is-ancestor", concurrent, tip]).status === 0);
-  console.log(`EVIDENCE ${scenario} status=${status} original=${baseline} writer=${concurrent} local=${local} final=${tip} writer-reachable=${reachable}`);
+  const read = (name: string) => existsSync(join(root, name)) ? readFileSync(join(root, name), "utf8").trim().replaceAll("\n", " | ") : "none";
+  console.log(`EVIDENCE ${scenario} attempts=${read("push-calls")} receives=${read("receives")} events=${read("events")} status=${status} original=${baseline} writer=${concurrent} local=${local} final=${tip} writer-reachable=${reachable} stderr=${lastStderr.trim().replaceAll("\n", " | ")}`);
 }
 
 function runAction(model: string, options: { checkout?: string; check?: string; race?: boolean } = {}) {
@@ -76,6 +78,7 @@ function runAction(model: string, options: { checkout?: string; check?: string; 
       RACE_PUSH: options.race ? "1" : "0",
     },
   });
+  lastStderr = result.stderr;
   return { ...result, events: readFileSync(events, "utf8") };
 }
 
@@ -110,6 +113,7 @@ function runNormalAction(name: string, model: string, ref: string) {
       PUSH_CALLS: join(root, "push-calls"), RACE_PUSH: "1",
     },
   });
+  lastStderr = result.stderr;
   return { ...result, events: readFileSync(events, "utf8") };
 }
 
@@ -117,6 +121,7 @@ const amend = 'printf amended > .github/amended.txt; git add .github; git commit
 const writerPush = 'git -C "$WRITER" push origin "HEAD:$BRANCH_REF"';
 
 beforeEach(() => {
+  lastStderr = "";
   root = mkdtempSync(join(tmpdir(), "respond-review-push-"));
   remote = join(root, "remote.git");
   agent = join(root, "agent");
@@ -143,6 +148,11 @@ exec "$REAL_GIT" "$@"
   baseline = commit(agent, "baseline");
   git(agent, "push", "origin", `HEAD:${branchRef}`);
   git(root, "clone", "--branch", branch, remote, writer);
+  writeFileSync(join(remote, "hooks", "post-receive"), `#!/bin/sh
+cat >> "${join(root, "receives")}"
+printf 'receive\\n' >> "${join(root, "events")}"
+`);
+  chmodSync(join(remote, "hooks", "post-receive"), 0o755);
 });
 
 afterEach(() => rmSync(root, { recursive: true, force: true }));
@@ -163,7 +173,7 @@ describe("respond-review publication wiring", () => {
     const result = runAction('printf local > .github/local.txt; git add .github; git commit -m local; if git push origin HEAD; then exit 1; fi');
     expect(result.status, result.stderr).toBe(0);
     expect(result.stderr).toContain("Do not git push in this model session");
-    expect(result.events).toMatch(/model\noriginal\nrereview\nmarker\n/);
+    expect(result.events).toMatch(/model\noriginal\nreceive\nrereview\nmarker\n/);
     expect(git(agent, "config", "--local", "core.hooksPath")).toBe(hooks);
     expect(remoteTip()).toBe(git(agent, "rev-parse", "HEAD"));
   });
