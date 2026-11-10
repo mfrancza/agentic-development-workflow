@@ -24,6 +24,18 @@ variable "default_model" {
   default     = "sonnet"
 }
 
+variable "max_review_rounds" {
+  description = "Maximum distinct automated-reviewed commits per review-response epoch; 0 disables the numerical cap. Stored as the MAX_REVIEW_ROUNDS Actions variable."
+  type        = number
+  default     = 8
+  nullable    = false
+
+  validation {
+    condition     = var.max_review_rounds >= 0 && var.max_review_rounds <= 9007199254740991 && floor(var.max_review_rounds) == var.max_review_rounds
+    error_message = "max_review_rounds must be a non-negative integer no greater than 9007199254740991."
+  }
+}
+
 variable "admin_assignees" {
   description = "GitHub logins (users or bots, such as `mfrancza-developer-agent[bot]`) or <org>/<team-slug> references (such as `<your-github-org>/dev`) to assign to issues and PRs that require human action (e.g. when the agent applies the human-required label and needs a human in the loop). Team references must use the repository owner's organization and are expanded to member logins by the grooming runtime; they require the allowlist-resolver App secrets (ALLOWLIST_RESOLVER_APP_ID and ALLOWLIST_RESOLVER_APP_PRIVATE_KEY). Stored as a JSON-encoded repository Actions variable ADMIN_ASSIGNEES so workflows can parse and assign without hardcoding identities in YAML."
   type        = list(string)

@@ -30,6 +30,11 @@ default_model = "sonnet"
 # Stored as the GROOM_DEFAULT_MODEL Actions variable.
 # groom_default_model = "haiku"
 
+# Review-response limit: 8 by default; set 0 for no numerical cap.
+# Stored as the MAX_REVIEW_ROUNDS Actions variable.
+# max_review_rounds = 8
+# max_review_rounds = 0
+
 # Humans to assign to issues and PRs when the agent applies the human-required
 # label (e.g. escalations requiring security, billing, or permission decisions).
 # Stored as ADMIN_ASSIGNEES Actions variable; workflows parse it with fromJSON().

@@ -28,6 +28,12 @@ resource "github_actions_variable" "default_model" {
   value         = var.default_model
 }
 
+resource "github_actions_variable" "max_review_rounds" {
+  repository    = var.repository
+  variable_name = "MAX_REVIEW_ROUNDS"
+  value         = tostring(var.max_review_rounds)
+}
+
 # Expose the admin assignees list as a JSON-encoded repository Actions variable
 # so workflows can assign issues and PRs to the right humans when the agent
 # applies the human-required label and needs a human in the loop.
