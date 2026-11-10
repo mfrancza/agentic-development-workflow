@@ -138,8 +138,8 @@ The [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composit
   - `protected-approval-gate-dispatcher.yml` — triggered by `workflow_run: protected-approval-gate-notify`; reruns the publisher for the PR that received a review, so the review-triggered job check attaches to the PR head SHA inside the publisher's own suite.
   - `protected-approval-gate-notify.yml` — a `pull_request_review`-triggered stub whose only purpose is to complete and signal the dispatcher.
   - `protected-approval-gate-backfill.yml` — `workflow_dispatch`-only caller of `protected-approval-gate-sweep-reusable.yml`; reruns the publisher for every open PR. Run this after enabling or re-enabling the gate.
-  - `protected-approval-gate-reconcile.yml` — scheduled (`*/5 * * * *`) caller of `protected-approval-gate-sweep-reusable.yml`; the periodic safety net that upper-bounds staleness when inline departed-SHA cleanup is dropped by pending-run replacement.
-  - `protected-approval-gate-sweep-reusable.yml` — reusable workflow called by backfill and reconcile; fans out across open PRs and triggers publisher reruns.
+  - `protected-approval-gate-reconcile.yml` — caller of `protected-approval-gate-sweep-reusable.yml`; dispatch manually to recover stale checks when inline departed-SHA cleanup is dropped by pending-run replacement. See the caller workflow for its schedule.
+  - `protected-approval-gate-sweep-reusable.yml` — reusable workflow called by backfill and reconcile; scheduled sweeps allocate runners only when the gate is enabled and the event cron matches the configured supported cadence (5, 10, 15, 20, 30, or 60 minutes; empty defaults to 10). A five-minute-only caller does not run the default cadence; use manual recovery or update the caller's schedule. Non-scheduled sweeps bypass both checks; admitted sweeps fan out across open PRs and trigger publisher reruns.
 
 ## Pre-commit validation
 
