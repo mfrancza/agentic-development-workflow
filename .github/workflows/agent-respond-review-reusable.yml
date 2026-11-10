@@ -64,6 +64,26 @@ on:
         type: string
         required: false
         default: ''
+      max-review-rounds:
+        description: 'Non-negative reviewed-commit limit; empty defaults to 8, 0 disables the numerical cap.'
+        type: string
+        required: false
+        default: ''
+      reviewer-logins:
+        description: 'JSON array of automated reviewer logins for accounting only, not authorization; empty uses built-in defaults.'
+        type: string
+        required: false
+        default: ''
+      escalation-assignee:
+        description: 'Optional explicit login to assign on escalation.'
+        type: string
+        required: false
+        default: ''
+      admin-assignees:
+        description: 'JSON array of escalation assignee logins or organization/team references.'
+        type: string
+        required: false
+        default: ''
       image:
         description: >
           Pre-built agent image reference to pull (e.g.
@@ -307,7 +327,38 @@ jobs:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
+      - name: Detect team references for escalation assignees
+        id: detect-team-refs
+        uses: ./_agentic-workflow/.github/actions/detect-team-refs
+        with:
+          assignees: ${{ inputs.admin-assignees }}
+
+      - name: Mint installation token for escalation assignee resolver
+        id: assignee-resolver
+        if: steps.detect-team-refs.outputs.assignees_has_team == 'true'
+        continue-on-error: true
+        uses: ./_agentic-workflow/.github/actions/agent-token
+        with:
+          client-id: ${{ secrets.ALLOWLIST_RESOLVER_APP_ID }}
+          private-key: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
+
+      - name: Check review-round limit
+        id: review-round-limit
+        uses: ./_agentic-workflow/.github/actions/check-review-round-limit
+        with:
+          token: ${{ steps.setup.outputs.token }}
+          resolver-token: ${{ steps.assignee-resolver.outputs.token }}
+          repo-owner: ${{ github.repository_owner }}
+          repo-name: ${{ inputs.repo-name }}
+          pr-number: ${{ inputs.pr-number }}
+          review-id: ${{ inputs.review-id }}
+          max-review-rounds: ${{ inputs.max-review-rounds }}
+          reviewer-logins: ${{ inputs.reviewer-logins }}
+          escalation-assignee: ${{ inputs.escalation-assignee }}
+          admin-assignees: ${{ inputs.admin-assignees }}
+
       - name: Resolve linked issue from PR body
+        if: steps.review-round-limit.outputs.proceed == 'true'
         id: linked-issue
         uses: ./_agentic-workflow/.github/actions/find-linked-issue
         with:
@@ -316,7 +367,7 @@ jobs:
           pr-number: ${{ inputs.pr-number }}
 
       - name: Resolve Claude model from issue labels
-        if: steps.linked-issue.outputs.proceed == 'true'
+        if: steps.review-round-limit.outputs.proceed == 'true' && steps.linked-issue.outputs.proceed == 'true'
         id: model
         uses: ./_agentic-workflow/.github/actions/resolve-model
         with:
@@ -328,12 +379,14 @@ jobs:
           agent-type: developer
 
       - name: Prepare agent log directory
+        if: steps.review-round-limit.outputs.proceed == 'true'
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/agent-logs"
           chmod 0777 "${RUNNER_TEMP}/agent-logs"
 
       - name: Run agent
+        if: steps.review-round-limit.outputs.proceed == 'true'
         uses: ./_agentic-workflow/.github/actions/run-agent
         env:
           # Pre-commit checks backstop: set per-deployment so the Docker image

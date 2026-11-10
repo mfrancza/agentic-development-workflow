@@ -1,8 +1,7 @@
 # Check review-round limit
 
-This composite action runs the `check-review-round-limit` activity. It is not
-yet wired into the respond-review workflow; workflow and Terraform integration
-are separate follow-up work. See the [design](../../../docs/design/cap-review-response-rounds.md).
+This composite action runs the `check-review-round-limit` activity inside the
+serialized respond-review work job. See the [design](../../../docs/design/cap-review-response-rounds.md).
 
 The activity revalidates the live PR and review feedback, then counts distinct
 commit SHAs from submitted reviews by the configured automated reviewers since

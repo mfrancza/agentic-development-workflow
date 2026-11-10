@@ -55,6 +55,8 @@ jobs:
       pr-author: ${{ github.event.pull_request.user.login }}
       head-sha: ${{ github.event.pull_request.head.sha }}
       review-commit-id: ${{ github.event.review.commit_id }}
+      max-review-rounds: ${{ vars.MAX_REVIEW_ROUNDS }}
+      admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}
       image: ''
       helpers-ref: ${{ github.sha }}
     secrets:
