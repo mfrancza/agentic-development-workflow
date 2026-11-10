@@ -3,6 +3,7 @@
 **Issue:** [#41](https://github.com/mfrancza/agentic-development-workflow/issues/41)
 **Parent design:** [code-review-agent.md](code-review-agent.md) (issue #27)
 **Sibling designs referenced:** [reviewer-container.md](reviewer-container.md) (issue #39, initial-review contract), [resolve-conflicts.md](resolve-conflicts.md) (issue #54, cross-references the same GitHub conflict-suppression behavior).
+**Review-response circuit breaker:** [cap-review-response-rounds.md](cap-review-response-rounds.md) adds the reviewed-commit budget and human-led resume without changing the reviewer trigger.
 
 ## Scope
 

@@ -207,13 +207,12 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #   auto_trigger_agents  — per-stage auto-trigger switches (all false by default;
 #                          set a key to true to auto-apply that stage's agent:* label)
 #   admin_assignees      — (optional) GitHub usernames or same-organization
-#                          org/team-slug references assigned by the groom agent when it
-#                          applies the human-required label; stored as the JSON-encoded
+#                          org/team-slug references assigned on grooming or review-round
+#                          escalation; stored as the JSON-encoded
 #                          ADMIN_ASSIGNEES Actions variable; omit or set to [] to skip
 #   max_review_rounds   — (optional) non-negative safe integer; Terraform publishes
 #                          MAX_REVIEW_ROUNDS as a string. Default 8; 0 means no
-#                          numerical cap. Missing Actions variable defaults to 8
-#                          when the response gate is integrated.
+#                          numerical cap. Missing Actions variable defaults to 8.
 #   code_reviewers       — (optional) GitHub usernames or org/team-slug references to
 #                          request as PR reviewers when the implement agent determines
 #                          human review is warranted; stored as the JSON-encoded
@@ -239,8 +238,6 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #                          Omit or set to "" to use the built-in default of
 #                          .github/scripts without creating an Actions variable.
 ```
-
-The planned review-response gate counts distinct commit SHAs from submitted reviews by configured automated reviewers since the current budget epoch began, excluding the PR author's reviews. Human reviews do not count; repeated reviews of the same SHA count once, and dismissed reviews remain counted. For a limit of N, actionable feedback on the Nth reviewed commit pauses before another response (with 8, commits 1–7 may receive responses); clean feedback does not escalate. Escalation uses the existing `ADMIN_ASSIGNEES` configuration. The gate requires the separate workflow integration; setting the variable alone does not enable it. See [the design](docs/design/cap-review-response-rounds.md) for the contract.
 
 ```bash
 cd terraform
@@ -295,6 +292,18 @@ terraform import 'github_issue_label.automation["question"]'    "$(terraform con
 ```
 
 App private keys are deliberately **not** managed by Terraform — keeping them out of `terraform.tfstate` is the whole point. Set them as repo Actions secrets out of band (next step).
+
+### Review-response round limit
+
+The response gate counts distinct commit SHAs from submitted reviews by configured automated reviewers since the current budget epoch began, excluding the PR author. Human reviews do not count; repeated reviews of a SHA count once, and dismissed reviews remain counted. For a limit of N, actionable feedback on the Nth reviewed commit pauses before another response (with 8, commits 1–7 may receive responses); clean feedback does not escalate. Missing or whitespace-only `MAX_REVIEW_ROUNDS` defaults to 8 even before Terraform is applied; `0` disables the numerical cap, not the pause label. Invalid values or accounting errors fail the job without starting a container. Existing PR history is counted immediately on rollout, so an already-over-limit PR pauses on its next actionable event.
+
+At the threshold, the developer App applies `human-required`, attempts to assign `ADMIN_ASSIGNEES`, and posts an escalation comment. Assignment is best-effort: missing configuration, unavailable team resolution, invalid assignees, and capacity or assignment failures produce warnings in the run and comment. Configure explicit logins or same-organization `org/team-slug` entries; teams require the optional `ALLOWLIST_RESOLVER_APP_ID` and `ALLOWLIST_RESOLVER_APP_PRIVATE_KEY` secrets. No assignee is guessed when none is available.
+
+**Human resume:** Investigate and resolve the original escalation, then remove `human-required` from the PR and obtain a fresh authorized review. For automated re-review, remove and reapply `agent:review` through the authorized label path, or push a deliberate update while that label remains. A fresh authorized human review can also trigger a response. Removing the label does not itself trigger the workflow, and rerunning an older review does not resume it. Any `human-required` label pauses this action, even if applied for a different reason; other escalation labels have separate runbooks. Only a human removal starts a new epoch, and reviews at the same timestamp as removal remain in the old epoch.
+
+The gate does not cancel an already-running response, block external pushes or reviewer runs, or prevent independent branch-writing actions. See [the review-round design](docs/design/cap-review-response-rounds.md).
+
+Adopting callers of `agent-respond-review-reusable.yml` can pass optional string inputs `max-review-rounds`, `reviewer-logins` (JSON array), `escalation-assignee` (login), and `admin-assignees` (JSON array of logins or teams). Empty `max-review-rounds` defaults to 8, and empty `reviewer-logins` uses the built-in reviewer identities. Custom reviewer logins affect accounting only and do not authorize review triggers; callers must retain their PR-author and self-review gates, and the reusable's existing review-author allowlist remains in force. Pass the adopter's own configuration explicitly, for example `max-review-rounds: ${{ vars.MAX_REVIEW_ROUNDS }}` and `admin-assignees: ${{ vars.ADMIN_ASSIGNEES }}`.
 
 ### 3. Set App credentials and API keys as Actions secrets
 

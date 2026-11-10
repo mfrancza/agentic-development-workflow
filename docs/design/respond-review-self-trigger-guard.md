@@ -7,6 +7,7 @@
 addresses a different respond-review re-trigger path (stale-SHA review on an
 already-pushed update); this design addresses author-identity and
 already-settled-feedback loops.
+**Review-response circuit breaker:** [cap-review-response-rounds.md](cap-review-response-rounds.md) adds a separate budget and pause after the existing authorization and feedback guards.
 
 ## Requirements as understood
 
