@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
 import { fileURLToPath } from "node:url";
-import { checkReviewerFeedback, makeInlineCommentCounter, makeUnresolvedThreadCounter } from "./check-reviewer-feedback.js";
+import { checkReviewerFeedback, makeInlineCommentCounter, makeUnresolvedThreadCounter } from "./lib/check-reviewer-feedback.js";
 import { expandTeamRefs } from "./lib/expand-team-refs.js";
 import { getOctokit } from "./lib/octokit.js";
 
