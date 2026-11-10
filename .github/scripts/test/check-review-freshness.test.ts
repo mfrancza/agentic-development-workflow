@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { checkReviewFreshness } from "../src/check-review-freshness.js";
-import { checkReviewRoundLimit, makeDependencies } from "../src/check-review-round-limit.js";
+import { checkReviewRoundLimit, DEFAULT_REVIEWERS, makeDependencies } from "../src/check-review-round-limit.js";
 import type { getOctokit } from "../src/lib/octokit.js";
 
 const input = { prNumber: 42, reviewId: 7, author: "mfrancza-reviewer-agent[bot]", reviewCommitId: "old" };
@@ -28,14 +28,18 @@ describe("post-lock freshness", () => {
     expect((await checkReviewFreshness(input, async () => { throw new Error("temporary"); })).proceed).toBe(true);
   });
   it("continues to mandatory accounting after a transient failure, but accounting errors fail closed", async () => {
-    expect((await checkReviewFreshness(input, async () => { throw new Error("temporary"); })).proceed).toBe(true);
-    const get = vi.fn().mockResolvedValue({ data: { state: "open", head: { sha: "new" }, user: { login: "dev", type: "Bot" }, labels: [], assignees: [], html_url: "url" } });
-    const getReview = vi.fn().mockResolvedValue({ data: { id: 7, state: "CHANGES_REQUESTED", body: "", commit_id: "old", user: { login: "human" }, submitted_at: "2026-01-01T00:00:00Z" } });
+    const review = { id: 7, state: "CHANGES_REQUESTED", body: "", commit_id: "old", user: { login: input.author }, submitted_at: "2026-01-01T00:00:00Z" };
+    const get = vi.fn().mockRejectedValueOnce(new Error("temporary")).mockResolvedValue({ data: { state: "open", head: { sha: "new" }, user: { login: "dev", type: "Bot" }, labels: [], assignees: [], html_url: "url" } });
+    const getReview = vi.fn().mockResolvedValue({ data: review });
     const listEvents = vi.fn();
-    const octokit = { rest: { pulls: { get, getReview }, issues: { listEvents } }, paginate: vi.fn().mockResolvedValue([]) } as unknown as ReturnType<typeof getOctokit>;
+    const listReviews = vi.fn();
+    const paginate = vi.fn().mockImplementation(async (method) => method === listReviews ? [review] : []);
+    const octokit = { rest: { pulls: { get, getReview, listReviews }, issues: { listEvents } }, paginate } as unknown as ReturnType<typeof getOctokit>;
+    expect((await checkReviewFreshness(input, async () => (await octokit.rest.pulls.get({ owner: "org", repo: "repo", pull_number: 42 })).data.head.sha)).proceed).toBe(true);
     const deps = makeDependencies({ octokit, owner: "org", repo: "repo", prNumber: 42, reviewId: 7, assignees: [] });
-    const options = { limit: 0, reviewers: [], runUrl: "" };
-    expect((await checkReviewRoundLimit(options, deps)).proceed).toBe(true);
+    const options = { limit: 8, reviewers: DEFAULT_REVIEWERS, runUrl: "" };
+    expect(await checkReviewRoundLimit(options, deps)).toMatchObject({ proceed: true, count: 1 });
+    expect(paginate).toHaveBeenCalledWith(listReviews, expect.anything());
     get.mockRejectedValue(new Error("accounting unavailable"));
     await expect(checkReviewRoundLimit(options, deps)).rejects.toThrow("accounting unavailable");
   });
