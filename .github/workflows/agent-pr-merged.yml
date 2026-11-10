@@ -20,9 +20,8 @@ jobs:
   # a checkout were present. By omitting the checkout entirely, there is no
   # local code-execution path that a merged PR can influence.
   #
-  # Pass the event body as an explicit reusable-workflow input. The reusable
-  # gate parses its typed input before taking the per-PR concurrency lock or
-  # minting an installation token.
+  # The reusable queries GitHub for closing issue references before taking the
+  # per-PR concurrency lock. The legacy body input is retained for compatibility.
 
   remove-developer-label:
     # Only act on PRs authored by the developer-agent bot.  Both merged and

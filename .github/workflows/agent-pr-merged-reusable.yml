@@ -13,8 +13,7 @@ name: agent-pr-merged (reusable)
 # permanent exception.
 #
 # The caller retains the developer-agent author security check. The reusable
-# gate parses the event body and rejects unlinked PRs before concurrency or
-# token minting.
+# gate queries GitHub and rejects unlinked PRs before concurrency.
 
 on:
   workflow_call:
@@ -25,7 +24,7 @@ on:
         type: number
         required: true
       pr-body:
-        description: 'Pull request body used to find the linked "Closes #N" issue.'
+        description: 'Legacy input retained for existing callers; ignored.'
         type: string
         required: true
     secrets:
@@ -44,24 +43,44 @@ jobs:
     outputs:
       proceed: ${{ steps.lookup.outputs.proceed }}
       issue_number: ${{ steps.lookup.outputs.issue_number }}
+      issue_repository: ${{ steps.lookup.outputs.issue_repository }}
     steps:
-      - name: Extract linked issue number from PR body
+      - name: Mint installation token for developer-agent
+        id: setup
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          client-id: ${{ secrets.DEVELOPER_APP_ID }}
+          private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
+
+      - name: Find linked issue through GitHub
         id: lookup
         env:
-          PR_BODY: ${{ inputs.pr-body }}
+          GH_TOKEN: ${{ steps.setup.outputs.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr-number }}
         run: |
           set -euo pipefail
-          # Keep untrusted PR body content in an environment variable rather
-          # than interpolating it into shell source.
-          ISSUE_NUM="$(printf '%s' "$PR_BODY" | grep -oiE 'closes #[0-9]+' | head -1 | grep -oE '[0-9]+' || true)"
-          if [ -z "${ISSUE_NUM:-}" ]; then
+          # Select GitHub's first closing reference, preserving single-issue cleanup.
+          # Keep its repository as well: issue numbers are only unique per repository.
+          RESPONSE="$(gh api graphql -f query='query($owner: String!, $name: String!, $number: Int!) {
+            repository(owner: $owner, name: $name) {
+              pullRequest(number: $number) {
+                closingIssuesReferences(first: 1) { nodes { number repository { nameWithOwner } } }
+              }
+            }
+          }' -f owner="${REPOSITORY%%/*}" -f name="${REPOSITORY#*/}" -F number="$PR_NUMBER")"
+          # An inaccessible or missing PR is an error, not an empty reference list.
+          NODES="$(jq -ce '.data.repository.pullRequest.closingIssuesReferences.nodes | select(type == "array")' <<< "$RESPONSE")"
+          LINK="$(jq -r '.[0] // empty | [.number, .repository.nameWithOwner] | @tsv' <<< "$NODES")"
+          if [ -z "$LINK" ]; then
             echo "PR body does not contain a 'Closes #N' reference; skipping."
             echo "proceed=false" >> "$GITHUB_OUTPUT"
           else
-            ISSUE_NUM="$(printf '%s' "$ISSUE_NUM" | tr -d '\r\n')"
+            IFS=$'\t' read -r ISSUE_NUM ISSUE_REPO <<< "$LINK"
             echo "Found linked issue #${ISSUE_NUM}."
             echo "proceed=true" >> "$GITHUB_OUTPUT"
             echo "issue_number=${ISSUE_NUM}" >> "$GITHUB_OUTPUT"
+            echo "issue_repository=${ISSUE_REPO}" >> "$GITHUB_OUTPUT"
           fi
 
   remove-developer-label:
@@ -88,7 +107,7 @@ jobs:
       - name: Remove agent:developer label from linked issue
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
-          GITHUB_REPO: ${{ github.repository }}
+          GITHUB_REPO: ${{ needs.gate.outputs.issue_repository }}
           ISSUE_NUMBER: ${{ needs.gate.outputs.issue_number }}
         run: |
           set -euo pipefail
