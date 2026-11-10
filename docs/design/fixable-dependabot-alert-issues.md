@@ -248,6 +248,11 @@ Manual dispatch remains subject to the same opt-in and human-approved permission
 - In an explicitly approved sandbox, demonstrate the read-only App can fetch a real failed update, the developer token produces one issue and `agent:groom` event, and no implementation occurs before `do`. With the existing auto-trigger flag on, normal grooming to `do` must reach the existing developer path; with it off, it must not auto-start. Do not change gates to make this test pass.
 - Record run URLs, redacted actual error shapes, issue/PR identities, capacity snapshots, successive scheduled and manual results, and fix/close-lag behavior in the validation issue. The zero-alert schema probe is not a substitute for this evidence.
 
+
+### Reconciliation activity contract
+
+The Task C entry point `.github/scripts/src/schedule-dependabot-alert-issues.ts` accepts `reader_token`, `writer_token`, `repo_owner`, `repo_name`, and `max_open_prs` action inputs. The reader token is used only for Dependabot discovery and revalidation; the developer writer token reads repository content, inventories issues and PRs, and writes issues and labels. An empty limit defaults to `3`; `0` still permits recovery of existing grooming handoffs. The activity emits the summary fields as outputs (with `skipped` encoded as JSON), including partial counts on failure. It emits only fixed failure reasons, never raw API errors. A future workflow must serialize runs and enforce the opt-in and credential gates described above; this activity does not implement those gates.
+
 ## Task breakdown
 
 All implementation issues carry `draft` until this design PR merges.
