@@ -62,6 +62,23 @@ variable "code_reviewers" {
   }
 }
 
+variable "enable_dependabot_alert_issues" {
+  description = "Opt in to scheduling issues for eligible Dependabot alerts."
+  type        = bool
+  default     = false
+}
+
+variable "dependabot_alert_issues_max_open_prs" {
+  description = "Dependabot issue scheduler admission capacity; zero pauses new admissions."
+  type        = number
+  default     = 3
+
+  validation {
+    condition     = var.dependabot_alert_issues_max_open_prs >= 0 && floor(var.dependabot_alert_issues_max_open_prs) == var.dependabot_alert_issues_max_open_prs
+    error_message = "dependabot_alert_issues_max_open_prs must be a non-negative integer."
+  }
+}
+
 variable "fix_checks_allow" {
   description = "Check-run names allowed to trigger the fix-checks agent. Stored as the JSON-encoded FIX_CHECKS_ALLOW Actions variable. Entries must be raw Checks API check_runs[].name values, not workflow names or decorated Checks-tab labels. An empty list disables all fix-checks delivery."
   type        = list(string)
