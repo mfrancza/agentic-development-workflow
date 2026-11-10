@@ -62,13 +62,15 @@ jobs:
           set -euo pipefail
           # Select GitHub's first closing reference, preserving single-issue cleanup.
           # Keep its repository as well: issue numbers are only unique per repository.
-          RESPONSE="$(gh api graphql -f query='query($owner: String!, $name: String!, $number: Int!) {
+          # shellcheck disable=SC2016 # GraphQL variables are expanded by GitHub, not the shell.
+          QUERY='query($owner: String!, $name: String!, $number: Int!) {
             repository(owner: $owner, name: $name) {
               pullRequest(number: $number) {
                 closingIssuesReferences(first: 1) { nodes { number repository { nameWithOwner } } }
               }
             }
-          }' -f owner="${REPOSITORY%%/*}" -f name="${REPOSITORY#*/}" -F number="$PR_NUMBER")"
+          }'
+          RESPONSE="$(gh api graphql -f query="$QUERY" -f owner="${REPOSITORY%%/*}" -f name="${REPOSITORY#*/}" -F number="$PR_NUMBER")"
           # An inaccessible or missing PR is an error, not an empty reference list.
           NODES="$(jq -ce '.data.repository.pullRequest.closingIssuesReferences.nodes | select(type == "array")' <<< "$RESPONSE")"
           LINK="$(jq -r '.[0] // empty | [.number, .repository.nameWithOwner] | @tsv' <<< "$NODES")"
@@ -78,9 +80,11 @@ jobs:
           else
             IFS=$'\t' read -r ISSUE_NUM ISSUE_REPO <<< "$LINK"
             echo "Found linked issue #${ISSUE_NUM}."
-            echo "proceed=true" >> "$GITHUB_OUTPUT"
-            echo "issue_number=${ISSUE_NUM}" >> "$GITHUB_OUTPUT"
-            echo "issue_repository=${ISSUE_REPO}" >> "$GITHUB_OUTPUT"
+            {
+              echo "proceed=true"
+              echo "issue_number=${ISSUE_NUM}"
+              echo "issue_repository=${ISSUE_REPO}"
+            } >> "$GITHUB_OUTPUT"
           fi
 
   remove-developer-label:
