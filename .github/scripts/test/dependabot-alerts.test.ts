@@ -25,7 +25,7 @@ function evidence(): NpmSourceEvidence {
   return {
     sha, manifest: JSON.stringify({ dependencies: { "local-module": "file:../local-module", parent: "^1.0.0" } }),
     lockfile: JSON.stringify({ lockfileVersion: 3, packages: {
-      "": {}, "node_modules/local-module": { resolved: "../local-module", link: true },
+      "": {}, "../local-module": { version: "1.0.0" }, "node_modules/local-module": { resolved: "../local-module", link: true },
       "node_modules/parent": { version: "1.0.0", resolved: "https://registry.npmjs.org/parent/-/parent-1.0.0.tgz" },
       "node_modules/parent/node_modules/vulnerable": { version: "1.0.0", resolved: "https://registry.npmjs.org/vulnerable/-/vulnerable-1.0.0.tgz" },
     } }), npmConfigs: [null, null], dependabotConfig: null,
@@ -51,6 +51,29 @@ describe("alert normalization and classification", () => {
     const candidate = alert();
     candidate.update!.error!.body = "some other error";
     expect(classifyAlert(candidate, evidence())).toEqual({ eligible: false, reason: "unverified-error-shape" });
+  });
+
+  it.each([2, 3])("accepts npm v%s link targets with public dependency declarations", version => {
+    const source = evidence();
+    const lock = JSON.parse(source.lockfile);
+    lock.lockfileVersion = version;
+    lock.packages["../local-module"].dependencies = { public: "^1.0.0" };
+    source.lockfile = JSON.stringify(lock);
+    expect(classifyAlert(alert(), source)).toEqual({ eligible: true });
+  });
+
+  it.each([
+    (packages: Record<string, Record<string, unknown>>) => { packages["../unrelated"] = { version: "1.0.0" }; },
+    (packages: Record<string, Record<string, unknown>>) => { delete packages["node_modules/local-module"]; },
+    (packages: Record<string, Record<string, unknown>>) => { packages["../local-module"].dependencies = { private: "git+ssh://private.example.test/repo" }; },
+    (packages: Record<string, Record<string, unknown>>) => { packages["../local-module"].dependencies = { private: "file:../other" }; },
+    (packages: Record<string, Record<string, unknown>>) => { packages["../local-module"].workspaces = ["packages/*"]; },
+  ])("rejects unverified local-target evidence %#", modify => {
+    const source = evidence();
+    const lock = JSON.parse(source.lockfile);
+    modify(lock.packages);
+    source.lockfile = JSON.stringify(lock);
+    expect(classifyAlert(alert(), source)).toEqual({ eligible: false, reason: "unverified-source-access" });
   });
 
   it.each([

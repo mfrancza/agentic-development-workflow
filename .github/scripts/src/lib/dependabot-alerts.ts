@@ -240,7 +240,18 @@ function evaluateNpmSource(alert: Alert, evidence: NpmSourceEvidence): Eligibili
     for (const [path, value] of Object.entries(packages)) {
       const entry = object(value);
       if (!entry) return { eligible: false, reason: "unverified-source-access" };
-      if (path && entry.resolved === undefined) return { eligible: false, reason: "unverified-source-access" };
+      if (path && entry.resolved === undefined) {
+        const matchingLink = [...localDependencies].some(([name, localPath]) => {
+          const link = object(packages[`node_modules/${name}`]);
+          return path === localPath && link?.link === true && link.resolved === localPath;
+        });
+        if (!matchingLink || Object.keys(entry).some(key => !["name", "version", "dependencies", "devDependencies", "optionalDependencies", "peerDependencies"].includes(key))) return { eligible: false, reason: "unverified-source-access" };
+        for (const section of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
+          if (entry[section] === undefined) continue;
+          const dependencies = object(entry[section]);
+          if (!dependencies || Object.values(dependencies).some(spec => typeof spec !== "string" || !/^[\d\s.*^~<>=|+-]+$/.test(spec))) return { eligible: false, reason: "unverified-source-access" };
+        }
+      }
       if (entry.resolved !== undefined && (typeof entry.resolved !== "string" ||
           (!/^https:\/\/registry\.npmjs\.org\/[a-zA-Z0-9@%._~/-]+$/.test(entry.resolved) &&
            !(entry.link === true && [...localDependencies].some(([name, localPath]) => path === `node_modules/${name}` && entry.resolved === localPath))))) return { eligible: false, reason: "unverified-source-access" };
