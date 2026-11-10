@@ -7,6 +7,7 @@
 
 Issue #630 asks for an opt-in scheduled producer of ordinary GitHub issues, not another dependency updater or implementer.
 The PR owner's [explicit request](https://github.com/mfrancza/agentic-development-workflow/pull/872#discussion_r4519679820) also permits manual runs for replenishing batches, superseding the issue's schedule-only entry-point constraint; all other requirements remain unchanged.
+The owner's [subsequent request](https://github.com/mfrancza/agentic-development-workflow/pull/872#discussion_r4520057992) requires reuse by adopter repositories, with each repository configuring its own schedule and open-PR limit.
 An alert qualifies only while open, with a non-withdrawn advisory and a patched version, when Dependabot's associated update reports a repository-fixable failure and has not produced a security-update PR.
 The motivating case is an npm transitive lockfile dependency with a patch available, where an unreachable local path dependency prevents Dependabot from preparing its own update.
 Authentication failures, inaccessible private registries, missing patches, and withdrawn advisories must not become agent work.
@@ -49,24 +50,33 @@ An approved sandbox must supply real error-shape and credential evidence before 
 
 ## Decisions
 
-### Decision 1 — Scheduled and manual runs, default off
+### Decision 1 — Reusable scheduled and manual runs, default off
 
-Add `.github/workflows/agent-dependabot-alert-issues.yml` with `schedule` at `23 3 * * 1` (weekly, UTC) and `workflow_dispatch` with no inputs.
-An authorized operator can manually run the workflow after merging or closing open work to fill newly available capacity without waiting for the weekly schedule.
+Add `.github/workflows/agent-dependabot-alert-issues-reusable.yml` with `workflow_call` and a thin repository-owned caller `.github/workflows/agent-dependabot-alert-issues.yml` with `schedule` at `23 3 * * 1` (weekly, UTC) and `workflow_dispatch` with no inputs.
+An adopter installs its own caller on its default branch, calls the reusable workflow at a pinned upstream ref, and sets its own literal cron schedule in that caller; the weekly cron is this repository's default, not a requirement for every adopter.
+GitHub's [schedule syntax](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#onschedule) belongs in the caller's workflow YAML, not a runtime Actions variable or reusable-workflow input; changing a repository's cadence means changing its caller on the default branch.
+Document a complete external caller example, including the schedule, input-free manual dispatch, explicit inputs and secrets, and upstream ref pinning; do not require adopters to copy the composite action or TypeScript implementation.
+An authorized operator can manually run the caller after merging or closing open work to fill newly available capacity without waiting for its schedule.
 Manual dispatch is not an opt-in override: both triggers use the same validation, eligibility, deduplication, capacity reservations, handoff, and failure behavior.
 Do not add `repository_dispatch`, webhooks, or a new `AGENT_ACTION`.
-The job-level exact comparison `vars.ENABLE_DEPENDABOT_ALERT_ISSUES == 'true'` happens before checkout and token minting.
+The reusable job itself accepts only the caller's `schedule` and `workflow_dispatch` events, and checks the caller repository's exact `vars.ENABLE_DEPENDABOT_ALERT_ISSUES == 'true'` before checkout and token minting; a different caller cannot bypass these gates by invoking `workflow_call`.
 The activity also validates its enabled input before any API call, so direct test invocation does not silently bypass opt-in.
 Unrecognized enable values do not enable the feature; invalid capacity when enabled fails loudly before writes.
 
-For both events, reject non-default-branch refs at the job gate before checkout and token minting; checkout the triggering `github.sha` with `persist-credentials: false`.
-Use top-level `permissions: { contents: read }`, pinned external action SHAs, a ten-minute timeout, and repository-scoped concurrency `dependabot-alert-issues-${{ github.repository }}` with `cancel-in-progress: false` shared by both triggers.
+For both events, the reusable rejects non-default-branch refs at the job gate before checkout and token minting.
+Operate on the caller repository: use its repository context for APIs, configuration, tokens, inventory and concurrency, and read any source evidence at its triggering `github.sha`, not the upstream helper commit.
+If a caller checkout is needed, check out that SHA separately with `persist-credentials: false` and never execute caller code.
+Resolve and check out upstream helpers separately using the existing required `helpers-ref` convention: repository-owned callers pass `github.sha`; external callers pass the same immutable full SHA used to select the reusable workflow.
+Validate and resolve the ref, verify the helper checkout HEAD against the resolved SHA, and run the composite action from the upstream checkout, not the adopter's workspace.
+Because the existing `helpers-ref` convention does not prove at runtime that the input matches the reusable's selected ref, document that matching the two pins is the caller's responsibility and statically check the supplied caller examples.
+Explicitly pass the existing developer App credentials and the proposed reader App credentials as named `workflow_call` secrets; do not use `secrets: inherit` or add a PAT fallback.
+Use `permissions: { contents: read }`, pinned external action SHAs, a ten-minute timeout, and repository-scoped concurrency `dependabot-alert-issues-${{ github.repository }}` with `cancel-in-progress: false` in the reusable job, shared by all callers and both triggers.
 GitHub may replace an already pending run in this group; an operator can dispatch again or wait for the next schedule.
 No PR code or package-manager commands run in this job.
 Implement nontrivial logic in `.github/scripts/src/` and expose it through `.github/actions/schedule-dependabot-alert-issues/action.yml`, following the existing Octokit/activity conventions.
 
 Alternatives: a new implementer bypasses the requested policy path; a webhook adds an unnecessary entry point; inline shell makes pagination, classification, and retry testing harder.
-The composite action is a helper, not a new workflow trigger or externally callable reusable workflow.
+The composite action is a helper; the reusable workflow centralizes policy while each caller owns only its event schedule and wiring.
 
 ### Decision 2 — Separate security reading from the existing writer identity
 
@@ -170,7 +180,8 @@ Alternatives: deduplicating only open issues recreates work after merge; package
 
 ### Decision 5 — Reviewer capacity uses admission reservations, not a new developer gate
 
-Expose `DEPENDABOT_ALERT_ISSUES_MAX_OPEN_PRS` with default `3`.
+Expose the caller repository's Actions variable `DEPENDABOT_ALERT_ISSUES_MAX_OPEN_PRS` with default `3` when unset or empty; each adopter configures it independently.
+Pass the effective value into the reusable activity as a string and validate it there before any write; an explicit `0` must not fall back to `3`.
 Accept only a non-negative integer; `0` pauses new admissions while permitting inventory and missing-groom-handoff recovery for already reserved issues.
 Reject decimals, negatives, malformed strings, and unsafe integers before writes.
 
@@ -201,7 +212,8 @@ Alternatives: counting only current PRs lets several ungroomed issues overfill t
 Add root and `agent-vars` module inputs `enable_dependabot_alert_issues` (boolean, default `false`) and `dependabot_alert_issues_max_open_prs` (integer, default `3`, validated non-negative), then publish the two Actions variables from that module.
 Wire the root module, examples, and module documentation consistently.
 Do not alter the actual deployment's opt-in, `AGENT_ALLOWLIST`, `AUTO_TRIGGER_AGENTS`, App grants, or branch-protection settings in this work.
-Update operator documentation for the new workflow/configuration, manual dispatch after capacity frees up, and the manual reader-App/bootstrap approval contract when implementation lands; do not add copied lists of labels, actions, or triggers to `AGENTS.md` or `README.md`.
+Update adopter documentation with the external caller, per-repository cron and limit configuration, manual dispatch after capacity frees up, and the manual reader-App/bootstrap approval contract when implementation lands; explain that the Apps, secrets, existing label/allowlist setup, and opt-in must be provisioned and approved separately for each adopter.
+Document both Terraform-managed variables and how adopters not using this Terraform module set the equivalent repository Actions variables; do not add copied lists of labels, actions, or triggers to `AGENTS.md` or `README.md`.
 
 The run summary records counts for scanned, eligible, skipped by stable reason, existing-open, closed-tombstone, created, grooming-handoff-repaired, capacity-deferred, and stale open work, plus counted PRs/reservations/limit.
 Log identifiers and safe reason codes, not raw security payloads.
@@ -227,7 +239,10 @@ Manual dispatch remains subject to the same opt-in and human-approved permission
 - Exercise pagination beyond one page for alerts, issues, issue events, and PRs; malformed/null data; partial GraphQL errors; denied credentials; changing alert/default-branch state; and content that attempts markup, marker, mention, credential, or shell injection.
 - Reconcile twice against persistent mocked state: exactly one issue/one grooming request. Cover a successful create followed by label failure, ambiguous create response, completed grooming, a closed issue with a still-open alert, merged-fix alert lag, and reopening an alert.
 - Verify capacity with open/draft Dependabot and agent PRs, reservations before grooming, PR/reservation replacement, multiple PRs per issue, closed issues with open PRs, limit `0`, lowering the limit, partial inventory failure, and more candidates than remaining slots.
-- Statically assert weekly schedule and input-free manual dispatch, default-off and default-branch pre-mint gating for both events, shared non-cancelling concurrency, pinned actions, no new agent invocation, and no modifications to the existing allowlist/label/author checks.
+- Statically assert this repository's weekly caller schedule and input-free manual dispatch, reusable event/default-off/default-branch pre-mint gates, shared non-cancelling concurrency, pinned actions, no new agent invocation, and no modifications to the existing allowlist/label/author checks.
+- Exercise a second repository's caller with a different literal cron and open-PR limit, including `0` and invalid values; verify it inventories and writes only its own repository and shares neither capacity nor concurrency with another repository.
+- Test an external caller without upstream helpers in its workspace: its pinned reusable and matching `helpers-ref` load upstream helpers, while source evidence comes from the caller's triggering SHA. Verify missing or unresolvable helper refs and checkout-SHA mismatches fail visibly, and statically check matching pins in the documented caller.
+- Verify direct calls from other event types, disabled repositories, and non-default-branch dispatches cannot mint tokens or write, even when the caller omits its own gates; check that both named App secrets are passed explicitly.
 - Verify manual runs use the same eligibility and admission rules: disabled and non-default-branch dispatches do not mint tokens or write, a full capacity creates nothing, and a dispatch after capacity frees admits only available slots without duplicates.
 - For implementation touching `.github/`, run `cd .github/scripts && npm ci && npm run typecheck && npm test`; also run the repository's existing actionlint and Terraform formatting/validation paths as applicable.
 - In an explicitly approved sandbox, demonstrate the read-only App can fetch a real failed update, the developer token produces one issue and `agent:groom` event, and no implementation occurs before `do`. With the existing auto-trigger flag on, normal grooming to `do` must reach the existing developer path; with it off, it must not auto-start. Do not change gates to make this test pass.
@@ -242,7 +257,7 @@ Human approval and sandbox provisioning are rollout prerequisites, not permissio
 | Issue | Task | Dependencies |
 | --- | --- | --- |
 | Issue #867 | A: Implement alert discovery, source-evidence adapters, and fail-closed eligibility with unit tests | None; independent of Issue #868 |
-| Issue #868 | B: Add default-off Terraform configuration and operator/bootstrap documentation | None; independent of Issue #867 |
+| Issue #868 | B: Add per-repository default-off Terraform configuration and adopter/bootstrap documentation, including caller schedule and limit | None; independent of Issue #867 |
 | Issue #869 | C: Implement durable issue reconciliation, grooming recovery, and capacity reservations with tests | Issue #867 |
-| Issue #870 | D: Wire the scheduled and manually dispatched workflow and composite activity; add workflow contract tests | Issue #867, Issue #868, Issue #869 |
-| Issue #871 | E: Validate end-to-end scheduled and manual remediation, permissions, deduplication, and reviewer capacity | Issue #867, Issue #868, Issue #869, Issue #870; human-approved sandbox |
+| Issue #870 | D: Wire the reusable workflow, scheduled/manual caller, and composite activity; add external-caller and workflow contract tests | Issue #867, Issue #868, Issue #869 |
+| Issue #871 | E: Validate end-to-end scheduled and manual remediation, adopter isolation/configuration, permissions, deduplication, and reviewer capacity | Issue #867, Issue #868, Issue #869, Issue #870; human-approved sandbox |
