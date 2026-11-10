@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
 import { getOctokit } from "./lib/octokit.js";
-import { reconcile, ReconciliationError, type Summary } from "./lib/dependabot-alert-issues.js";
+import { parseLimit, reconcile, ReconciliationError, type Summary } from "./lib/dependabot-alert-issues.js";
 
 function report(summary: Summary): void {
   core.info(`Dependabot issue reconciliation: ${JSON.stringify(summary)}`);
@@ -9,11 +9,13 @@ function report(summary: Summary): void {
 }
 
 async function run(): Promise<void> {
+  if (core.getInput("enabled", { trimWhitespace: false }) !== "true") throw new Error("invalid opt-in");
+  const limit = core.getInput("max_open_prs", { trimWhitespace: false });
+  parseLimit(limit);
   const reader = getOctokit(core.getInput("reader_token", { required: true }));
   const writer = getOctokit(core.getInput("writer_token", { required: true }));
   const owner = core.getInput("repo_owner", { required: true });
   const repo = core.getInput("repo_name", { required: true });
-  const limit = core.getInput("max_open_prs");
   report(await reconcile({ reader, writer, contentReader: writer, owner, repo, limit }));
 }
 
