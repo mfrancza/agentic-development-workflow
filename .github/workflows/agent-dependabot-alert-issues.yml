@@ -13,30 +13,17 @@ concurrency:
 
 jobs:
   schedule:
+    if: vars.ENABLE_DEPENDABOT_ALERT_ISSUES == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Check opt-in
-        id: opt-in
-        shell: bash
-        env:
-          ENABLED: ${{ vars.ENABLE_DEPENDABOT_ALERT_ISSUES }}
-        run: |
-          if [[ "$ENABLED" == 'true' ]]; then
-            echo 'enabled=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'Dependabot alert issue scheduling is disabled.'
-          fi
-
       - name: Check out scheduled revision
-        if: steps.opt-in.outputs.enabled == 'true'
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Mint reader token
-        if: steps.opt-in.outputs.enabled == 'true'
         id: reader
         uses: ./.github/actions/agent-token
         with:
@@ -44,7 +31,6 @@ jobs:
           private-key: ${{ secrets.DEPENDABOT_READER_APP_PRIVATE_KEY }}
 
       - name: Mint developer token
-        if: steps.opt-in.outputs.enabled == 'true'
         id: writer
         uses: ./.github/actions/agent-token
         with:
@@ -52,7 +38,6 @@ jobs:
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
       - name: Reconcile Dependabot alert issues
-        if: steps.opt-in.outputs.enabled == 'true'
         uses: ./.github/actions/schedule-dependabot-alert-issues
         with:
           enabled: ${{ vars.ENABLE_DEPENDABOT_ALERT_ISSUES }}

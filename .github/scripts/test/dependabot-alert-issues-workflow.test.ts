@@ -1,7 +1,4 @@
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as core from "@actions/core";
 import { getOctokit } from "../src/lib/octokit.js";
@@ -20,18 +17,6 @@ const wrapper = read(".github/actions/schedule-dependabot-alert-issues/action.ym
 const summary = { scanned: 2, eligible: 1, skipped: { "not-open": 1 }, existingOpen: 0, closedTombstone: 0, duplicates: 0,
   created: 1, groomingRepaired: 0, capacityDeferred: 0, staleOpen: 0, countedPrs: 0, reservations: 1, limit: 3 };
 
-function gate(value: string): string {
-  const script = workflow.match(/        run: \|\n((?:          .*\n)+)/)?.[1];
-  if (!script) throw new Error("missing opt-in script");
-  const directory = mkdtempSync(join(tmpdir(), "dependabot-gate-"));
-  try {
-    const output = join(directory, "output");
-    const result = spawnSync("bash", ["-e", "-c", script], { env: { ...process.env, ENABLED: value, GITHUB_OUTPUT: output }, encoding: "utf8" });
-    expect(result.status).toBe(0);
-    try { return readFileSync(output, "utf8"); } catch { return ""; }
-  } finally { rmSync(directory, { recursive: true, force: true }); }
-}
-
 describe("scheduled workflow contract", () => {
   it("has only the requested schedule, least privilege and non-cancelling repository lock", () => {
     expect(workflow.match(/^on:\n([\s\S]*?)\n\S/m)?.[1]).toBe("  schedule:\n    - cron: '23 */6 * * *'\n");
@@ -40,15 +25,11 @@ describe("scheduled workflow contract", () => {
     expect(workflow).toMatch(/timeout-minutes: (?:[1-9]|[12]\d|30)\n/);
   });
 
-  it.each(["", "false", "TRUE", "True", " true", "true ", "1", "true\n"])('rejects opt-in %j before checkout or tokens', (value) => {
-    expect(gate(value)).toBe("");
-  });
-  it("admits only exact true and gates every subsequent step", () => {
-    expect(gate("true")).toBe("enabled=true\n");
-    const steps = workflow.split(/\n      - name: /).slice(2);
-    expect(steps).toHaveLength(4);
-    for (const step of steps) expect(step).toContain("if: steps.opt-in.outputs.enabled == 'true'");
-    expect(workflow.indexOf("id: opt-in")).toBeLessThan(workflow.indexOf("actions/checkout@"));
+  it("gates the schedule job before allocating a runner", () => {
+    expect(workflow).toContain("  schedule:\n    if: vars.ENABLE_DEPENDABOT_ALERT_ISSUES == 'true'\n    runs-on:");
+    expect(workflow).not.toContain("steps.opt-in");
+    expect(workflow.split(/\n      - name: /).slice(1)).toHaveLength(4);
+    expect(workflow).toContain("enabled: ${{ vars.ENABLE_DEPENDABOT_ALERT_ISSUES }}");
     expect(workflow).toContain("ref: ${{ github.sha }}\n          persist-credentials: false");
   });
   it("uses pinned actions and separates the reader and writer identities", () => {
@@ -93,7 +74,7 @@ describe("activity input and credential boundaries", () => {
     await import("../src/schedule-dependabot-alert-issues.js");
     await vi.waitFor(() => expect(vi.mocked(core.setOutput).mock.calls.length + vi.mocked(core.setFailed).mock.calls.length).toBeGreaterThan(0));
   }
-  it.each(["", "false", "TRUE", " true", "true ", "1"])('rejects opt-in %j before any client or API call', async (enabled) => {
+  it.each(["", "false", "TRUE", "True", " true", "true ", "1", "true\n"])('rejects opt-in %j before any client or API call', async (enabled) => {
     inputs.enabled = enabled;
     await invoke();
     expect(getOctokit).not.toHaveBeenCalled();
