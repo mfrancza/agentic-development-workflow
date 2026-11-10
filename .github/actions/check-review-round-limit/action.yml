@@ -1,0 +1,97 @@
+name: Check review-round limit
+description: Revalidate feedback and enforce the review-round circuit breaker.
+inputs:
+  token:
+    description: Developer App installation token
+    required: true
+  resolver-token:
+    description: Optional token for expanding organization teams
+    required: false
+  repo-owner:
+    description: Repository owner
+    required: true
+  repo-name:
+    description: Repository name
+    required: true
+  pr-number:
+    description: Pull request number
+    required: true
+  review-id:
+    description: Triggering review ID
+    required: true
+  max-review-rounds:
+    description: Non-negative limit; empty defaults to 8 and 0 disables the numerical cap
+    required: false
+  reviewer-logins:
+    description: JSON array of automated reviewer logins for accounting only
+    required: false
+  escalation-assignee:
+    description: Optional explicit escalation assignee
+    required: false
+  admin-assignees:
+    description: JSON array of administrator logins or organization/team references
+    required: false
+  run-url:
+    description: URL of the workflow run
+    required: false
+outputs:
+  proceed:
+    description: Whether the response container may run
+    value: ${{ steps.run.outputs.proceed }}
+  round-count:
+    description: Distinct reviewed commit count, or empty when unavailable or unlimited
+    value: ${{ steps.run.outputs.round-count }}
+  limit:
+    description: Parsed numeric limit
+    value: ${{ steps.run.outputs.limit }}
+  epoch:
+    description: Initial or human reset event ID, when known
+    value: ${{ steps.run.outputs.epoch }}
+runs:
+  using: composite
+  steps:
+    - name: Resolve scripts directory
+      id: scripts-dir
+      shell: bash
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        scripts_dir="$(cd "$ACTION_PATH/../../scripts" && pwd)"
+        echo "dir=${scripts_dir}" >> "$GITHUB_OUTPUT"
+        if [[ "${scripts_dir}/" == "${GITHUB_WORKSPACE}/"* ]]; then
+          echo "cache-key-path=${scripts_dir}/package-lock.json" >> "$GITHUB_OUTPUT"
+        fi
+    - name: Set up Node.js with cache
+      if: steps.scripts-dir.outputs.cache-key-path != ''
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+        cache: npm
+        cache-dependency-path: ${{ steps.scripts-dir.outputs.cache-key-path }}
+    - name: Set up Node.js
+      if: steps.scripts-dir.outputs.cache-key-path == ''
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+      with:
+        node-version: '22'
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+    - name: Check review-round limit
+      id: run
+      shell: bash
+      run: npx --no-install tsx src/check-review-round-limit.ts
+      working-directory: ${{ steps.scripts-dir.outputs.dir }}
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_RESOLVER_TOKEN: ${{ inputs.resolver-token }}
+        INPUT_REPO_OWNER: ${{ inputs.repo-owner }}
+        INPUT_REPO_NAME: ${{ inputs.repo-name }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
+        INPUT_REVIEW_ID: ${{ inputs.review-id }}
+        INPUT_MAX_REVIEW_ROUNDS: ${{ inputs.max-review-rounds }}
+        INPUT_REVIEWER_LOGINS: ${{ inputs.reviewer-logins }}
+        INPUT_ESCALATION_ASSIGNEE: ${{ inputs.escalation-assignee }}
+        INPUT_ADMIN_ASSIGNEES: ${{ inputs.admin-assignees }}
+        INPUT_RUN_URL: ${{ inputs.run-url }}

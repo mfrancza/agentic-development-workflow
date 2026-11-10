@@ -3,7 +3,7 @@ import {
   checkReviewerFeedback,
   type FeedbackCheckInput,
   type FeedbackCheckDeps,
-} from "../src/check-reviewer-feedback.js";
+} from "../src/lib/check-reviewer-feedback.js";
 
 // Suppress @actions/core logging so test output stays clean.
 vi.mock("@actions/core", () => ({
