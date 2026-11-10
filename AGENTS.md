@@ -65,10 +65,7 @@ See [`docs/design-philosophy.md`](docs/design-philosophy.md) for the reasoning b
      review inherently expresses dissatisfaction regardless of thread state, and `DISMISSED` typically
      means a maintainer wants the agent to try again. `commented` is handled by the unresolved-thread
      check below.
-   - **Zero unresolved PR review threads** (primary check for `approved` and `commented` reviews): threads
-     are the ground truth for outstanding feedback; body text and inline comments are advisory when nothing
-     remains open, so this check comes first and covers both summary-carrying clean approvals and comment-
-     only reviews where all threads have been resolved.
+   - **Zero unresolved PR review threads**: skip approvals and commented reviews with empty or reviewer-header-only bodies. A commented review with body content beyond the reviewer header proceeds so its advisory points can be evaluated and answered on the PR conversation.
    - **Bare approval** (no body text, no inline review comments): fallback used only for `approved` reviews
      when the unresolved-thread query fails, to skip when there is provably nothing to respond to.
 

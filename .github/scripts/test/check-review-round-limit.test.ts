@@ -57,6 +57,12 @@ describe("orchestration", () => {
     expect(api.createComment).toHaveBeenCalledOnce();
     expect(await checkReviewRoundLimit({ ...input, limit: 1 }, deps({ listReviews: vi.fn().mockResolvedValue([review, { ...review, id: 2, commit_id: "old" }]) }))).toMatchObject({ proceed: false, count: 2 });
   });
+  it("counts commented automated reviews and applies the limit to body-only feedback", async () => {
+    const commented = { ...review, state: "COMMENTED", body: "Consider this advisory." };
+    expect(countRounds([commented], DEFAULT_REVIEWERS, pull.author, initial)).toBe(1);
+    const api = deps({ getReview: vi.fn().mockResolvedValue(commented), listReviews: vi.fn().mockResolvedValue([commented]) });
+    expect(await checkReviewRoundLimit(input, api)).toMatchObject({ proceed: false, count: 1 });
+  });
   it("honors pause in unlimited and below-limit modes without notification", async () => {
     const api = deps({ getPull: vi.fn().mockResolvedValue({ ...pull, labels: ["human-required"] }) });
     expect(await checkReviewRoundLimit({ ...input, limit: 0 }, api)).toMatchObject({ proceed: false, limit: 0 });
