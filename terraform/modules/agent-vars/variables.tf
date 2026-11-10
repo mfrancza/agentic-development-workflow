@@ -132,9 +132,14 @@ variable "enable_protected_approval_gate" {
 }
 
 variable "enable_protected_approval_gate_reconcile_minutes" {
-  description = "Minimum interval in minutes between protected-approval reconciliation sweeps (minimum 5). Stored as ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES."
+  description = "UTC scheduled cadence in minutes for protected-approval reconciliation: 5, 10, 15, 20, 30, or 60. Scheduled sweeps skip when the gate is disabled; manual dispatch bypasses this selection. Stored as ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES."
   type        = number
   default     = 10
+
+  validation {
+    condition     = contains([5, 10, 15, 20, 30, 60], var.enable_protected_approval_gate_reconcile_minutes)
+    error_message = "enable_protected_approval_gate_reconcile_minutes must be one of 5, 10, 15, 20, 30, or 60."
+  }
 }
 
 variable "auto_trigger_agents" {
