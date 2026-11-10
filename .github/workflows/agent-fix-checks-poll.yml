@@ -4,8 +4,6 @@ name: agent-fix-checks-poll
 # suppressed. The allowlist below is still the authorization boundary: an
 # empty, missing, or malformed FIX_CHECKS_ALLOW dispatches no agent runs.
 on:
-  schedule:
-    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 permissions:
