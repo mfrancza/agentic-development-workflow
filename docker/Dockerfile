@@ -27,7 +27,7 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 # reproducible; override at build time with --build-arg if you want a different
 # release. Kept in sync with docker/reviewer/Dockerfile so both images ship
 # the same Codex release.
-ARG CODEX_CLI_VERSION=0.146.0
+ARG CODEX_CLI_VERSION=0.167.0
 RUN npm install -g "@openai/codex@${CODEX_CLI_VERSION}"
 
 # Install Grok Build CLI. Pin to a specific version so workflow runs are
