@@ -210,6 +210,8 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #                          set to "" to fall back to default_model (the default)
 #   auto_trigger_agents  — per-stage auto-trigger switches (all false by default;
 #                          set a key to true to auto-apply that stage's agent:* label)
+#   auto_review_authors — explicit GitHub logins whose same-repository PRs
+#                          auto-enroll for review; [] disables enrollment
 #   admin_assignees      — (optional) GitHub usernames or same-organization
 #                          org/team-slug references assigned on grooming or review-round
 #                          escalation; stored as the JSON-encoded
@@ -242,6 +244,24 @@ live only in Actions secrets (step 3). If you are setting up your own fork, edit
 #                          Omit or set to "" to use the built-in default of
 #                          .github/scripts without creating an Actions variable.
 ```
+
+**Auto-review upgrade:** The new `auto_review_authors` list defaults to `[]`,
+which disables automatic enrollment even when `auto_trigger_agents.review` is
+`true`. Before upgrading, configure:
+
+```hcl
+auto_review_authors = ["<developer-agent-app-slug>[bot]"] # add other desired author logins
+auto_trigger_agents = { groom = false, design = false, developer = false, review = true }
+```
+
+Keep your existing values for the other switches. The authorized operator must
+apply the reviewed Terraform plan, and update the caller inputs and reusable pin
+together as described in the [adopting guide](docs/adopting.md#agent-auto-trigger-reusable-workflow).
+The list accepts logins only, including bot logins; teams and wildcards are not
+supported. Unlisted authors do not enroll merely because their branches begin
+with `agent/` or `design/`. Manual `agent:review` labeling remains available.
+Author enrollment grants no sender permissions: keep the developer App in
+`AGENT_ALLOWLIST` for downstream review authorization.
 
 ```bash
 cd terraform

@@ -1389,7 +1389,7 @@ supported (all opt-in, all default to `false`):
 | `auto-design`            | `issues.labeled` (`plan`)                                                                                              | Applies `agent:design`                                         |
 | `auto-developer-do`      | `issues.labeled` (`do`)                                                                                                | Applies `agent:developer` (or `blocked` if open blockers)      |
 | `auto-developer-undraft` | `issues.unlabeled` (`draft`)                                                                                           | Applies `agent:developer` (or `blocked`)                       |
-| `auto-review`            | `pull_request.opened` on `agent/…` or `design/…` branch, or authored by `<developer-agent-slug>[bot]` (same-repo only) | Applies `agent:review`                                         |
+| `auto-review`            | `pull_request.opened` or `ready_for_review` by a configured author (same-repo, non-draft) | Applies `agent:review`                                         |
 | `auto-developer-unblock` | `issues.closed`                                                                                                        | Applies `agent:developer` on newly-unblocked downstream issues |
 
 No agent container runs in this workflow — each job only mints an App token
@@ -1399,7 +1399,7 @@ and applies a label.
 
 - GitHub App: **developer-agent**.
 - Secrets: `DEVELOPER_APP_ID`, `DEVELOPER_APP_PRIVATE_KEY`.
-- Actions variables: `AGENT_ALLOWLIST`, `AUTO_TRIGGER_AGENTS` (managed by the
+- Actions variables: `AGENT_ALLOWLIST`, `AUTO_TRIGGER_AGENTS`, `AUTO_REVIEW_AUTHORS` (managed by the
   `agent-vars` module). `AUTO_TRIGGER_AGENTS` must always be present (even if
   all gates are `false`) to avoid `fromJSON('')` runtime errors.
 
@@ -1412,7 +1412,7 @@ on:
   issues:
     types: [opened, labeled, unlabeled, closed]
   pull_request:
-    types: [opened]
+    types: [opened, ready_for_review]
 
 permissions:
   contents: read
@@ -1429,6 +1429,8 @@ jobs:
       issue-label-name: ${{ github.event.label.name || '' }}
       issue-labels: ${{ toJSON(github.event.issue.labels.*.name || fromJSON('[]')) }}
       pr-number: ${{ github.event.pull_request.number || 0 }}
+      pr-is-draft: ${{ github.event.pull_request.draft || false }}
+      pr-body: ${{ github.event.pull_request.body || '' }}
       pr-head-repository: ${{ github.event.pull_request.head.repo.full_name || '' }}
       pr-author-login: ${{ github.event.pull_request.user.login || '' }}
       # Set this to your installation-specific developer App bot login.
@@ -1442,11 +1444,32 @@ jobs:
       ALLOWLIST_RESOLVER_APP_PRIVATE_KEY: ${{ secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY }}
 ```
 
-> **Set `developer-bot-login`.** Replace `<developer-agent-slug>[bot]` with your
-> developer-agent App's bot login (e.g. `my-developer-agent[bot]`). This lets the
-> reusable enroll PRs opened by the bot regardless of branch prefix (e.g.
-> `validate/*`, `test/*`). The reusable keeps the same-repository guard, so fork PRs
-> remain excluded even if the bot login matches.
+**Breaking upgrade: auto-review enrollment.** `auto_review_authors` defaults to
+`[]`, disabling automatic enrollment even with `auto_trigger_agents.review = true`.
+Before upgrading, configure the desired explicit author logins and retain the
+separate review switch in your Terraform values:
+
+```hcl
+auto_review_authors = ["<developer-agent-app-slug>[bot]", "other-author"]
+# Retain auto_trigger_agents.review = true alongside your other switch values.
+```
+
+The authorized operator applies the reviewed Terraform plan. Update the caller
+inputs and reusable pin together: remove the retired `pr-head-ref` and
+`pr-author-is-bot` inputs, forward the fields shown above, and subscribe to both
+PR events. Set required `developer-bot-login` to the installed developer App's
+`<developer-agent-app-slug>[bot]` login. It controls marker timing only and does
+not add the bot to the author list. That bot enrolls on `ready_for_review` after
+its authoritative marker is present; other listed authors enroll on non-draft
+`opened` or `ready_for_review` without a marker. Fork heads are excluded.
+
+The list contains logins only, including bot logins; team references and
+wildcards are unsupported. Unlisted authors no longer enroll based on `agent/`
+or `design/` branches. Existing PRs are not retroactively enrolled; manual
+`agent:review` labeling remains available. Enrollment grants no sender
+permissions. Keep the developer App in `AGENT_ALLOWLIST` for downstream review
+authorization. Setting the list to `[]` or disabling the review switch stops
+future enrollment without removing labels or canceling reviews already started.
 
 **Trust considerations.** Each transition mints a short-lived developer-agent
 token solely to write labels — no container is run, no code is compiled.
@@ -2466,24 +2489,11 @@ not used and can be left as-is for that run.
 
 ### `agent-auto-trigger` stub placeholder
 
-**Symptom:** The `agent-auto-trigger` caller stub's `auto-review` job contains
-`<developer-agent-slug>[bot]` as a literal placeholder in the `if:` condition.
-With `AUTO_TRIGGER_AGENTS.review = true`, PRs opened by the developer-agent bot on
-non-standard branch prefixes (e.g. `validate/*`, `test/*`) are silently skipped
-because the branch-prefix predicates do not match and the bot-login predicate is
-never evaluated.
-
-**Cause:** The developer-agent login predicate must be filled in before the workflow
-functions. It cannot be read from an Actions variable because it gates the workflow
-`if:` expression itself (before any variable lookup runs).
-
-**Fix:** Replace `<developer-agent-slug>[bot]` in the `auto-review` job's `if:`
-condition with your developer-agent App's bot login — for example,
-`my-developer-agent[bot]`. The bot login appears in the first comment a bot posts
-after installation, or can be confirmed by checking the App's page on GitHub. The
-same slug value (without `[bot]`) is also used in the `agent-resolve-conflicts`
-stub's `developer-author` input (as `app/<slug>`) and in the `agent-respond-review`
-and `agent-pr-merged` stubs.
+Set `developer-bot-login` to your installed developer App's bot login and also
+list that login in `auto_review_authors` to enroll its PRs. The input identifies
+the developer for marker timing; it does not grant enrollment. See the
+[auto-trigger migration](#agent-auto-trigger-reusable-workflow) for the full
+configuration and caller upgrade.
 
 ---
 
