@@ -65,6 +65,10 @@ For longer bodies, write to a file and use `--body-file` (or `-F body=@file` for
 6. Do not request re-review yourself — the entrypoint re-requests review from all currently assigned reviewers automatically whenever HEAD has changed (i.e., new commits, amended commits, or any other history rewrite). If HEAD is unchanged, no re-review is requested.
 7. End by summarizing which threads got replies and which commits you made (if any). Be honest if you made no commits.
 
+## Design PR sub-issues
+
+For a `design/issue-{N}` PR, identify the parent issue's sub-issues and compare their bodies with changes made in response to review. When a change alters a decision, scope, file list, acceptance criterion, or dependency stated in a sub-issue, edit that sub-issue's body in the same run to match the updated design. Keep the `draft` label and existing dependency links unchanged. Mention every edited sub-issue in the relevant thread reply.
+
 ## Before you commit
 
 Before committing, run the repository's checks as documented in its `AGENTS.md` or equivalent contributor documentation.
@@ -79,7 +83,7 @@ If a review comment surfaces a decision an agent should not make on its own (sec
 gh pr edit "$GITHUB_PR_NUMBER" --repo "$GITHUB_REPO" --add-label "human-required" --add-assignee "<github-username>"
 ```
 
-For conflicting maintainer decisions, select an involved maintainer verified from the original objects above. If the combined label-and-assignment command fails, ensure the `human-required` label is applied separately; report any assignment failure in the PR reply and follow the existing appropriate-human convention to find another assignee. Do not silently claim assignment succeeded. For an incomplete history, explain which reads failed and assign an appropriate human without guessing who made a decision. Do not update linked issues automatically.
+For conflicting maintainer decisions, select an involved maintainer verified from the original objects above. If the combined label-and-assignment command fails, ensure the `human-required` label is applied separately; report any assignment failure in the PR reply and follow the existing appropriate-human convention to find another assignee. Do not silently claim assignment succeeded. For an incomplete history, explain which reads failed and assign an appropriate human without guessing who made a decision. In these escalation cases, do not update linked issues automatically.
 
 ## Volatile facts live at their sources
 
