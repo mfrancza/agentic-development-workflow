@@ -18,6 +18,22 @@ variable "agent_allowlist" {
   }
 }
 
+variable "auto_review_authors" {
+  description = "Explicit GitHub PR author logins eligible for automatic review enrollment, including literal <slug>[bot] logins. Empty means no authors are enrolled; wildcards and team references are not supported. Stored as the JSON-encoded AUTO_REVIEW_AUTHORS Actions variable."
+  type        = list(string)
+  default     = []
+  nullable    = false
+
+  validation {
+    condition = alltrue([
+      for entry in var.auto_review_authors : can(regex("^[A-Za-z0-9]+(-[A-Za-z0-9]+)*(\\[bot\\])?$", entry))
+      ]) && length(distinct([
+        for entry in var.auto_review_authors : entry == null ? "" : lower(entry)
+    ])) == length(var.auto_review_authors)
+    error_message = "auto_review_authors must contain unique, unpadded GitHub logins with an optional literal [bot] suffix; wildcards and team references are not supported."
+  }
+}
+
 variable "default_model" {
   description = "Repo-wide default model passed to all agent workflows via the DEFAULT_MODEL Actions variable. Issue-driven workflows (agent-implement, agent-groom, agent-design, agent-fix-deployment) can override this per-issue via a model:<agent-type>:<name> label (e.g. model:developer:opus, model:groom:haiku — per-agent, takes precedence) or a generic model:<name> label (e.g. model:opus, model:haiku — applies to all agents for that issue); all other workflows always use this value. Accepts any value supported by the agent --model flag."
   type        = string

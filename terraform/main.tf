@@ -70,6 +70,7 @@ module "agent_vars" {
   source                                           = "./modules/agent-vars"
   repository                                       = github_repository.this.name
   agent_allowlist                                  = var.agent_allowlist
+  auto_review_authors                              = var.auto_review_authors
   default_model                                    = var.default_model
   design_default_model                             = var.design_default_model
   groom_default_model                              = var.groom_default_model

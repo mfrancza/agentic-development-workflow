@@ -16,6 +16,12 @@ resource "github_actions_variable" "agent_allowlist" {
   value         = jsonencode(var.agent_allowlist)
 }
 
+resource "github_actions_variable" "auto_review_authors" {
+  repository    = var.repository
+  variable_name = "AUTO_REVIEW_AUTHORS"
+  value         = jsonencode(var.auto_review_authors)
+}
+
 # Expose the default model as a repository Actions variable so all
 # workflows can pass it to the agent container via AGENT_MODEL. The
 # agent-implement, agent-groom, and agent-fix-deployment workflows can
