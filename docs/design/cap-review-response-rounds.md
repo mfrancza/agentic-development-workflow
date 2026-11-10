@@ -23,6 +23,8 @@ These are the runtime-failure grounds for adding a gate to the working response 
 
 ### 1. Count distinct reviewed commits from submitted automated reviews
 
+**Superseded accounting:** [Decision 3](reviewer-advisory-threads.md#3-extend-the-existing-budget-to-count-repeated-same-sha-passes) replaces distinct-SHA deduplication with review-ID and lane accounting. The remaining budget, reset, and escalation contracts below still apply.
+
 Read all pages of `pulls.listReviews` for the current PR. Count distinct non-empty `commit_id` values among reviews submitted during the current budget epoch by the configured automated reviewer identities. Keep `APPROVED`, `COMMENTED`, `CHANGES_REQUESTED`, and `DISMISSED` submissions with a non-null `submitted_at`; exclude pending reviews. Dismissal must not refund a round. Exclude the live PR author's reviews, so developer thread replies cannot consume the budget. Human reviews do not count.
 
 The composite/reusable contract includes an optional JSON `reviewer-logins` list, defaulting to the current known reviewer identities already admitted by the response authorization gate: `mfrancza-reviewer-agent[bot]`, `Copilot`, `copilot-pull-request-reviewer[bot]`, and `github-copilot[bot]`. Compare logins case-insensitively. An adopting caller with another reviewer App supplies its login explicitly. This list is for accounting only: membership never authorizes a trigger, and the existing allowlist gate remains mandatory. Do not infer identities from review body headers, model markers, or arbitrary `[bot]` suffixes.

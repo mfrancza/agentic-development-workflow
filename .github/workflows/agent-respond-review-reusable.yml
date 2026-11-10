@@ -59,7 +59,7 @@ on:
         required: false
         default: ''
       max-review-rounds:
-        description: 'Non-negative reviewed-commit limit; empty defaults to 8, 0 disables the numerical cap.'
+        description: 'Non-negative review-round limit; empty defaults to 8, 0 disables the numerical cap.'
         type: string
         required: false
         default: ''
