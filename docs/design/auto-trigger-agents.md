@@ -40,6 +40,10 @@ container, entrypoint, or prompt changes.
 
 ### The six transitions we are gating
 
+**Superseded:** Transition 5’s branch-based enrollment below is replaced by
+[configurable author enrollment](auto-review-configurable-authors.md). The
+remaining historical decisions are retained for context.
+
 The SDLC is a chain of stages linked by `agent:*` labels. Each transition
 is a "the previous stage finished; apply the next stage's label" event.
 Enumerated exhaustively (matching the trigger labels defined in

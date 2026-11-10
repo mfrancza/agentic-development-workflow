@@ -302,6 +302,25 @@ describe("docs/adopting.md caller stubs match their reusable workflow contracts"
   }
 });
 
+describe("auto-trigger adopter routing contract", () => {
+  it("subscribes to both PR events and forwards their routing fields", () => {
+    const section = guide.split("### `agent-auto-trigger` reusable workflow")[1].split("\n---")[0];
+    const stub = section.match(/```yaml\n([\s\S]*?)```/)?.[1];
+    expect(stub).toBeDefined();
+    expect(stub).toMatch(/pull_request:\s*\n\s*types: \[opened, ready_for_review\]/);
+    for (const field of ["pr-is-draft", "pr-body", "pr-head-repository", "pr-author-login", "developer-bot-login"]) {
+      expect(stub).toMatch(new RegExp(`^\\s+${field}:`, "m"));
+    }
+    for (const retired of ["pr-head-ref", "pr-author-is-bot"]) {
+      expect(stub).not.toMatch(new RegExp(`^\\s+${retired}:`, "m"));
+    }
+    expect(stub).toContain("github.event.pull_request.draft");
+    expect(stub).toContain("github.event.pull_request.body");
+    expect(stub).toContain("github.event.pull_request.head.repo.full_name");
+    expect(stub).toContain("github.event.pull_request.user.login");
+  });
+});
+
 const actionsDir = new URL(".github/actions/", repoRoot);
 const actionStubs = parseGuideActionStubs();
 
