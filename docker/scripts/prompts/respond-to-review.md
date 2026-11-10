@@ -7,6 +7,7 @@ The workflow pauses future responses while `human-required` is present. A human 
 ## Critical rules
 
 - **Never claim a commit you didn't make.** After any commit, verify with `git log --oneline -5` and quote the real SHA in your reply. If `git status` is clean and `git diff HEAD` is empty, you have not made a change — do not say you did.
+- **Describe local commits honestly.** A new commit is local until the entrypoint publishes it after your session; cite its real SHA without claiming it is already pushed or available remotely.
 - **Check what's already done before "fixing" anything.** The branch's commits since the base SHA are listed in your prompt. Run `git diff <base-sha>...HEAD -- <path>` to see exactly what's already in the diff. If a comment is already addressed by an existing commit, just reply pointing at that commit — do not refactor again.
 - **Replying is the deliverable.** Exiting zero without posting replies is a failed run. Every actionable comment must get either (a) a code change + reply citing the new commit, or (b) a reply citing an existing commit, or (c) a reply explaining why you disagree.
 - **Evaluate requests before changing code.** For the same requirement, an explicit, applicable decision by a qualifying maintainer on this PR supersedes conflicting linked-issue text, as specified by the canonical `AGENTS.md` adherence-to-the-linked-issue rule. Preserve all non-conflicting issue requirements and security standards; this rule does not authorize security, permissions, or other decisions requiring human escalation.
@@ -56,10 +57,10 @@ For longer bodies, write to a file and use `--body-file` (or `-F body=@file` for
    - **Conflicting maintainer decisions** without an explicit withdrawal or replacement → leave disputed behavior unchanged, reply with links to both decisions and request clarification, then apply `human-required` and assign an involved verified maintainer as described below. Continue independent, non-conflicting work.
    - **No applicable conflict** → classify the feedback normally below. A non-maintainer finding can still identify a valid issue, correctness, or security problem; do not reject it solely because of its author.
 3. For each remaining actionable comment, classify:
-   - **Needs a new change** → edit, `git add`, `git commit -m "..."`, then reply quoting the new commit SHA.
+   - **Needs a new change** → edit, run the required checks, `git add`, `git commit -m "..."`, then reply quoting the new commit SHA.
    - **Already addressed** by a commit since base → reply citing that commit's SHA (find it with `git log --oneline <base-sha>..HEAD`).
    - **Disagree / not actionable** → reply with your reasoning. Nits and style preferences you don't accept are fine to push back on, but say so.
-4. Do not push — the entrypoint pushes for you after you exit.
+4. Once checks, local commits, and replies are complete, return. This action is commit-only: do not push or force-push, publish changes through another tool or API, or disable or bypass the model-session push guard. The entrypoint publishes after you exit.
 5. Do not request re-review yourself — the entrypoint re-requests review from all currently assigned reviewers automatically whenever HEAD has changed (i.e., new commits, amended commits, or any other history rewrite). If HEAD is unchanged, no re-review is requested.
 6. End by summarizing which threads got replies and which commits you made (if any). Be honest if you made no commits.
 

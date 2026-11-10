@@ -24,15 +24,19 @@ The complete flow from issue to deployment is:
 - A human opens an issue and optionally applies `agent:groom` to classify it and surface clarifying questions.
 - For complex issues the groomer applies the `plan` label; a human applies `agent:design` to produce a design document and draft sub-issues before implementation begins.
 - A human applies `agent:developer` to trigger implementation on a fresh branch; the agent opens a PR.
-- CI runs automatically; an explicitly allowed actionable check failure re-invokes the agent (`fix-checks`) to diagnose and push fixes.
+- CI runs automatically; an explicitly allowed actionable check failure re-invokes the agent (`fix-checks`) to diagnose and commit fixes for the entrypoint to publish.
 - A human (or the agent itself) applies `agent:review` to request a code review from the reviewer agent.
-- On review feedback the developer agent addresses it (`respond-review`) and pushes updates; the cycle repeats until the PR is approved.
+- On review feedback the developer agent addresses it (`respond-review`) and commits updates for the entrypoint to publish; the cycle repeats until the PR is approved.
 - A human squash-merges the approved PR; the issue auto-closes via `Closes #N`.
 - On deployment failure the agent opens a follow-up fix-up PR and the cycle restarts.
 
-See [AGENTS.md](AGENTS.md) for the full list of `AGENT_ACTION` values and their required env vars.
+See the action functions in [`docker/scripts/entrypoint.sh`](docker/scripts/entrypoint.sh) for `AGENT_ACTION` values and required env vars.
 
-If respond-review cannot safely publish, rerun from the current remote or manually recover unpublished local commits if they remain available; do not retry with a newly fetched lease just to force publication. The [shared concurrency lock](docs/design/shared-branch-concurrency-group.md) does not cover humans or other outside writers. See the [publication safety design](docs/design/entrypoint-force-with-lease.md) for details.
+For `fix-checks` and `respond-review`, the model tests and commits locally, then the entrypoint publishes after the session. Review replies cite real commits without claiming unpublished commits are already remote. In contrast, the `implement` model still pushes its branch and opens a draft PR; the entrypoint injects the marker and makes the PR ready for review. `design` publication also remains model-owned.
+
+The planned temporary model-session pre-push guard diagnoses an ordinary in-session push and directs the model to commit locally and return. Client hooks can be bypassed with `--no-verify`, configuration overrides, another clone, or an API; they are not authorization or containment. See the [guard design](docs/design/fix-checks-entrypoint-publication.md).
+
+If an entrypoint push is rejected, rerun from the current remote or manually recover unpublished local commits if they remain available; the ephemeral clone may not survive. Do not retry with force or a newly fetched lease to force publication. The [shared concurrency lock](docs/design/shared-branch-concurrency-group.md) does not cover humans or other outside writers. See the [respond-review publication safety design](docs/design/entrypoint-force-with-lease.md) for its checkout-pinned lease.
 
 ## How it works
 
@@ -81,7 +85,7 @@ flowchart TD
     DevLabel -- "yes" --> Implement["<b>Developer agent</b><br/>(AGENT_ACTION=implement)<br/>creates <code>agent/issue-{N}</code>,<br/>implements solution, opens PR"]:::agent
 
     Implement --> CI{"CI checks pass?"}:::system
-    CI -- "no" --> FixChecks["<b>Developer agent</b><br/>(AGENT_ACTION=fix-checks)<br/>diagnoses failures,<br/>pushes fixes"]:::agent
+    CI -- "no" --> FixChecks["<b>Developer agent</b><br/>(AGENT_ACTION=fix-checks)<br/>diagnoses failures,<br/>commits fixes"]:::agent
     FixChecks --> CI
 
     CI -- "yes" --> ReviewLabel{"Apply <code>agent:review</code>?<br/>(human or developer agent;<br/>re-fires on each push while labeled)"}:::human
@@ -89,7 +93,7 @@ flowchart TD
     ReviewLabel -- "no (human reviews directly)" --> Review{"PR review submitted"}:::human
     ReviewerAgent --> Review
 
-    Review -- "changes requested" --> Respond["<b>Developer agent</b><br/>(AGENT_ACTION=respond-review)<br/>addresses feedback,<br/>pushes updates"]:::agent
+    Review -- "changes requested" --> Respond["<b>Developer agent</b><br/>(AGENT_ACTION=respond-review)<br/>addresses feedback,<br/>commits updates"]:::agent
     Respond --> CI
 
     Review -- "approved (≥1 human review; admins may bypass)" --> Merge["Human squash-merges PR to <code>main</code><br/>(issue auto-closed by <code>Closes #N</code> on merge)"]:::human
