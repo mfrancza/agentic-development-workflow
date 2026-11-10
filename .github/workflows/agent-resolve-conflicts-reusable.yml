@@ -383,20 +383,27 @@ jobs:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
           private-key: ${{ secrets.DEVELOPER_APP_PRIVATE_KEY }}
 
+      - name: Set up Node.js for label activities
+        if: inputs.sender-login != ''
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: _agentic-workflow/.github/scripts/package-lock.json
+
+      - name: Install helper dependencies for label activities
+        if: inputs.sender-login != ''
+        working-directory: _agentic-workflow/.github/scripts
+        run: npm ci
+
       - name: Clear prior conflict escalation
         if: inputs.sender-login != ''
+        working-directory: _agentic-workflow/.github/scripts
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ matrix.pr_number }}
-          COMMENT_BODY: 'Operator re-attempted resolution via `agent:resolve-conflicts`; prior escalation marker removed.'
-        run: |
-          set -euo pipefail
-          labels="$(gh api "repos/$REPO/issues/$PR_NUMBER/labels" --paginate --jq '.[].name')"
-          if printf '%s\n' "$labels" | grep -Fxq 'conflicts-escalated'; then
-            gh api --method DELETE "repos/$REPO/issues/$PR_NUMBER/labels/conflicts-escalated"
-            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$COMMENT_BODY"
-          fi
+        run: npx --no-install tsx src/clear-conflict-escalation.ts
 
       - name: Prepare agent log directory
         run: |
@@ -421,24 +428,12 @@ jobs:
 
       - name: Remove on-demand trigger label
         if: success() && inputs.sender-login != ''
+        working-directory: _agentic-workflow/.github/scripts
         env:
           GH_TOKEN: ${{ steps.setup.outputs.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ matrix.pr_number }}
-        run: |
-          set -euo pipefail
-          if ! result="$(gh api --method DELETE "repos/$REPO/issues/$PR_NUMBER/labels/agent%3Aresolve-conflicts" 2>&1)"; then
-            printf '%s\n' "$result" >&2
-            if [[ "$result" != *'(HTTP 404)'* ]]; then
-              exit 1
-            fi
-            labels="$(gh api "repos/$REPO/issues/$PR_NUMBER/labels" --paginate --jq '.[].name')"
-            if printf '%s\n' "$labels" | grep -Fxq 'agent:resolve-conflicts'; then
-              echo '::error::Trigger label is still present after the failed removal.'
-              exit 1
-            fi
-            echo '::notice::Trigger label was already removed.'
-          fi
+        run: npx --no-install tsx src/remove-conflict-trigger-label.ts
 
       - name: Upload agent logs
         if: always()

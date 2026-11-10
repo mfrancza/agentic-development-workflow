@@ -1,7 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const read = (path: string) =>
@@ -95,48 +92,17 @@ describe("on-demand conflict resolution workflow contract", () => {
     const cleanup = step(resolve, "Remove on-demand trigger label");
     expect(clear).toContain("if: inputs.sender-login != ''");
     expect(clear).toContain("GH_TOKEN: ${{ steps.setup.outputs.token }}");
-    expect(clear).toContain("labels/conflicts-escalated");
-    expect(clear).toContain("gh pr comment");
+    expect(clear).toContain("working-directory: _agentic-workflow/.github/scripts");
+    expect(clear).toContain("run: npx --no-install tsx src/clear-conflict-escalation.ts");
     expect(cleanup).toContain("if: success() && inputs.sender-login != ''");
     expect(cleanup).toContain("GH_TOKEN: ${{ steps.setup.outputs.token }}");
-    expect(cleanup).toContain("labels/agent%3Aresolve-conflicts");
+    expect(cleanup).toContain("working-directory: _agentic-workflow/.github/scripts");
+    expect(cleanup).toContain("run: npx --no-install tsx src/remove-conflict-trigger-label.ts");
+    expect(resolve.indexOf("name: Verify helper checkout HEAD matches resolved SHA")).toBeLessThan(resolve.indexOf("name: Install helper dependencies for label activities"));
+    expect(resolve.indexOf("name: Install helper dependencies for label activities")).toBeLessThan(resolve.indexOf("name: Clear prior conflict escalation"));
     expect(resolve.indexOf("name: Mint installation token for developer-agent")).toBeLessThan(resolve.indexOf("name: Clear prior conflict escalation"));
     expect(resolve.indexOf("name: Clear prior conflict escalation")).toBeLessThan(resolve.indexOf("name: Run agent"));
     expect(resolve.indexOf("name: Run agent")).toBeLessThan(resolve.indexOf("name: Remove on-demand trigger label"));
   });
 
-  it.each([
-    { deleteStatus: "success", labelsStatus: "success", labels: "", status: 0, reads: false },
-    { deleteStatus: "404", labelsStatus: "success", labels: "other", status: 0, reads: true },
-    { deleteStatus: "404", labelsStatus: "success", labels: "agent:resolve-conflicts", status: 1, reads: true },
-    { deleteStatus: "404", labelsStatus: "failure", labels: "", status: 1, reads: true },
-    { deleteStatus: "403", labelsStatus: "success", labels: "", status: 1, reads: false },
-    { deleteStatus: "network", labelsStatus: "success", labels: "", status: 1, reads: false },
-  ])("handles trigger cleanup: $deleteStatus / $labelsStatus / $labels", ({ deleteStatus, labelsStatus, labels, status, reads }) => {
-    const directory = mkdtempSync(join(tmpdir(), "conflict-cleanup-"));
-    try {
-      const log = join(directory, "calls");
-      writeFileSync(join(directory, "gh"), `#!/bin/bash
-echo "$*" >> "$CALLS"
-if [[ "$*" == *"--method DELETE"* ]]; then
-  if [[ "$DELETE_STATUS" == success ]]; then exit 0; fi
-  if [[ "$DELETE_STATUS" == network ]]; then echo 'network error' >&2; exit 1; fi
-  echo "gh: request failed (HTTP $DELETE_STATUS)" >&2
-  exit 1
-fi
-if [[ "$LABELS_STATUS" == failure ]]; then exit 1; fi
-printf '%s\\n' "$LABELS"
-`, { mode: 0o755 });
-      const cleanup = step(job("resolve"), "Remove on-demand trigger label");
-      const script = cleanup.split("        run: |\n")[1].replace(/^          /gm, "");
-      const result = spawnSync("bash", ["-c", script], {
-        encoding: "utf8",
-        env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, CALLS: log, DELETE_STATUS: deleteStatus, LABELS_STATUS: labelsStatus, LABELS: labels, REPO: "owner/repo", PR_NUMBER: "42" },
-      });
-      expect(result.status, result.stderr).toBe(status);
-      expect(readFileSync(log, "utf8").includes("--paginate")).toBe(reads);
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
-    }
-  });
 });
