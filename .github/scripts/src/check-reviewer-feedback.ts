@@ -1,4 +1,5 @@
 import * as core from "@actions/core";
+import { fileURLToPath } from "node:url";
 import { getOctokit } from "./lib/octokit.js";
 
 // ---------------------------------------------------------------------------
@@ -398,6 +399,8 @@ async function run(): Promise<void> {
   core.setOutput("proceed", String(result.proceed));
 }
 
-run().catch((err: unknown) => {
-  core.setFailed(err instanceof Error ? err.message : String(err));
-});
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  run().catch((err: unknown) => {
+    core.setFailed(err instanceof Error ? err.message : String(err));
+  });
+}
