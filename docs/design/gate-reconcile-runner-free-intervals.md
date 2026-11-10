@@ -127,14 +127,37 @@ clock or minute modulo, admits only the configured entry. The default remains
 10, and the reusable's existing `interval-minutes` string input continues to be
 forwarded from `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`.
 
-Retain the adopter caller's existing concurrency group and
-`cancel-in-progress: false`. Skipped runs can still appear in Actions, and the
-existing pending-run replacement behavior is not changed or guaranteed away.
-Scheduled delivery may be delayed or dropped. This is a wall-clock scheduling
-cadence, **not** a minimum elapsed time since the last successful completion:
-delayed events can run close together, and long sweeps or concurrency can make
-actual execution less frequent. There is no additional runner-backed spacing
-check.
+Replace the adopter caller's single workflow-level concurrency group with a
+group partitioned by the triggering cron string, retaining
+`cancel-in-progress: false`:
+
+```yaml
+concurrency:
+  group: protected-approval-gate-reconcile-${{ github.event.schedule || 'manual' }}
+  cancel-in-progress: false
+```
+
+The six distinct schedule strings produce six distinct groups; manual dispatch
+uses the separate `manual` group. At a coincident minute, a nonmatching cron
+cannot replace the matching run as a pending member of its group, even before
+the reusable's job condition is evaluated. This avoids relying on the ordering
+of job-level conditions and concurrency admission. A missing schedule falls
+back to `manual`, but the discovery predicate still rejects that scheduled
+event. The caller must replace the concurrency block as well as the cron table;
+updating only one leaves this failure mode open.
+
+This deliberately gives up global serialization between different cron groups
+and manual dispatches. A manual sweep or a sweep admitted before an interval
+change may overlap another sweep, as can a separate backfill. Publisher reruns
+continue to use the existing publisher concurrency and error handling; concurrent
+rerun requests can fail and must remain visible, with manual retry or the next
+scheduled sweep as recovery. Runs in the *same* group still have at most one
+pending run by default, so an unusually long sweep can cause later matching
+ticks to replace each other. Skipped workflow runs can still appear in Actions,
+and GitHub may delay or drop scheduled delivery independently of concurrency.
+This is a wall-clock cadence, **not** a minimum elapsed time since the last
+successful completion: delayed events can run close together, and long sweeps
+can make execution less frequent. There is no runner-backed spacing check.
 
 **Alternatives:** Keeping every integer of at least 5 is not practical with a
 small fixed cron table, and the previous elapsed-time guarantee cannot be
@@ -172,10 +195,11 @@ frequency without visibility.
 
 Updating only the reusable reference is insufficient: an old caller with only
 `*/5 * * * *` can no longer run scheduled reconciliation for the default 10.
-Adopters must update their pinned reusable and copy the new schedule block in
-the same change. Existing values outside the finite supported set must be
-changed. Keep manual dispatch available throughout migration and document the
-manual-only alternative of omitting `schedule` entirely.
+Adopters must update their pinned reusable and copy the new schedule and
+concurrency blocks in the same change. Existing values outside the finite
+supported set must be changed. Keep manual dispatch available throughout
+migration and document the manual-only alternative of omitting `schedule`
+entirely.
 
 The implementation updates `docs/adopting.md`, the relevant AGENTS.md behavior
 entry, Terraform input descriptions, and the module README alongside their
@@ -191,14 +215,15 @@ and subsequent implementation release notes):
 
 > Breaking: Protected-approval-gate scheduled reconciliation now uses runner-free
 > cron matching. When upgrading the sweep reusable, also replace your reconcile
-> caller's schedule block with the six-entry block in docs/adopting.md.
+> caller's schedule and concurrency blocks with those in docs/adopting.md.
 > ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES (and interval-minutes) now
 > supports only 5, 10, 15, 20, 30, or 60; empty still defaults to 10. Change any
 > other value before upgrading. Scheduled sweeps run only when
 > ENABLE_PROTECTED_APPROVAL_GATE is true. The setting selects a UTC cron cadence,
 > not a minimum delay since the last successful sweep; delayed ticks can execute
-> close together. Unsupported direct Actions-variable values skip scheduled
-> sweeps. Manual reconcile and backfill still run regardless of gate or interval
+> close together. Concurrency is partitioned by cron, so manual and differently
+> scheduled sweeps can overlap. Unsupported direct Actions-variable values skip
+> scheduled sweeps. Manual reconcile and backfill still run regardless of gate or interval
 > settings. Keeping only the old five-minute cron will not run the default
 > ten-minute cadence. Remove schedule entirely for manual-only operation.
 
@@ -220,6 +245,10 @@ testing only a separately reimplemented boolean helper. Cover:
   invalid matrix or start unintended rerun jobs.
 - Exact parity between the JSON mapping and schedule entries extracted from the
   adopter Markdown stub, and between both Terraform supported-value sets.
+- The copied caller partitions its workflow concurrency by the event's cron
+  string with a separate manual fallback and `cancel-in-progress: false`;
+  all six entries and manual dispatch have distinct keys. An old shared static
+  group must fail this contract even when the schedule table is correct.
 - Existing backfill caller remains manual and requires no interval setting.
 
 The workflow task adds reusable-specific assertions; the documentation task
@@ -247,6 +276,7 @@ run URLs, and Jobs API evidence for:
 | Gate disabled; real scheduled tick | Discovery and reruns skipped, no allocated runner or executed setup steps |
 | Gate enabled; interval 10; `*/5` tick | Same no-runner skip, even if other cron entries fire at that minute |
 | Gate enabled; interval 10; `*/10` tick | Discovery executes and actually reruns the open PR's publisher |
+| Gate enabled; interval 60; `:00` with all six schedules installed | Record the hourly run and coincident sibling run URLs, triggering schedule strings, conclusions and Jobs API evidence: `0 * * * *` executes discovery and reruns the publisher, is not cancelled as a replaced pending run, and delivered nonmatching siblings skip without runners |
 | Gate enabled; alternate supported interval | Another real matching entry executes, with a different entry skipped |
 | Unsupported direct setting | Scheduled tick skips without allocating a diagnostic runner |
 | Manual reconcile while disabled/invalid | Discovery and publisher rerun execute despite scheduling settings |
@@ -258,6 +288,13 @@ publisher run; a green workflow conclusion alone proves none of these. Where
 the platform exposes timing/usage data, attach it as corroboration, not as the
 sole evidence: zero recorded billable milliseconds can coexist with an
 allocated runner. No private token or secret belongs in the evidence.
+Capture the full burst, including any cancelled or missing runs; repeat if
+delivery is incomplete, and do not claim a pass if the matching hourly run or
+its publisher rerun is absent. This observation checks the chosen concurrency
+partition in a real coincident burst, not a guarantee against platform delivery
+loss or same-group pending replacement. Also exercise overlapping manual and
+scheduled sweeps against a scratch publisher and record any rerun failure and
+successful retry; do not silently ignore a failed request.
 
 GitHub documents multiple schedules and `github.event.schedule`, job-level
 conditions, and preservation of the caller event payload in a reusable. These
@@ -276,7 +313,7 @@ that issue's no-additional-runs constraint. Do not modify the fix-checks poll.
 - Fix-checks polling implementation or its scheduling contract (#891).
 - Supporting arbitrary elapsed-minute intervals, custom cron strings through
   the variable, external scheduling services, or exact delivery guarantees.
-- Eliminating skipped workflow-run records or redesigning pending-run handling.
+- Eliminating skipped workflow-run records or guaranteeing every scheduled tick.
 - Running a production rollout or Terraform apply as part of this design PR.
 
 ## Task breakdown
@@ -285,11 +322,15 @@ that issue's no-additional-runs constraint. Do not modify the fix-checks poll.
 |---|---|---|
 | Issue [#893](https://github.com/mfrancza/agentic-development-workflow/issues/893) | Add reusable pre-runner schedule predicate, remove paid interval guard, protect matrix, update AGENTS.md, and add reusable contract tests | None; independent of Issue #894 |
 | Issue [#894](https://github.com/mfrancza/agentic-development-workflow/issues/894) | Narrow both Terraform interval inputs to the supported set and update module reference documentation | None; independent of Issue #893 |
-| Issue [#895](https://github.com/mfrancza/agentic-development-workflow/issues/895) | Publish adopter cron stub, migration/upgrade guidance, and cross-surface contract checks | Issues #893 and #894 |
-| Issue [#896](https://github.com/mfrancza/agentic-development-workflow/issues/896) | Validate real scheduled skips, matching execution, and manual recovery end to end; publish evidence and notify Issue #891 | Issues #893, #894, and #895 |
+| Issue [#895](https://github.com/mfrancza/agentic-development-workflow/issues/895) | Publish adopter cron and partitioned concurrency stub, migration/upgrade guidance, and cross-surface contract checks | Issues #893 and #894 |
+| Issue [#896](https://github.com/mfrancza/agentic-development-workflow/issues/896) | Validate real scheduled skips, coincident matching execution, overlapping manual sweeps, and manual recovery end to end; publish evidence and notify Issue #891 | Issues #893, #894, and #895 |
+
+Issue #895's earlier instruction to retain the current concurrency group is
+superseded by Decision 2 above; implement the partitioned caller block instead.
 
 ## References
 
 - [GitHub: schedule events](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#schedule)
 - [GitHub: job-level conditions](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-jobs-with-conditions)
+- [GitHub: workflow concurrency](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#concurrency)
 - [GitHub: workflow_call event payload](https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows#workflow_call)
