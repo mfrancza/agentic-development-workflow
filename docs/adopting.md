@@ -1335,8 +1335,9 @@ untrusted PR code is never in scope.
 
 **What it does.**  
 When a developer-agent PR is merged or closed, removes the `agent:developer`
-label from the linked issue (extracted from the PR body's `Closes #N`
-reference). This prevents the routing label from accumulating on closed issues
+label from the first issue returned by GitHub’s `closingIssuesReferences`
+(including its repository). If there are no references, cleanup is skipped. This prevents the routing label from accumulating on closed
+issues
 and prevents `auto-trigger` from re-firing if someone re-opens the issue
 without re-applying the label. The reusable also handles the case where the
 label is already absent (benign no-op) vs. a real API failure (fails loudly).
@@ -1378,10 +1379,9 @@ jobs:
 ```
 
 > **Adapt the `if:` condition.** Replace `<developer-agent-slug>[bot]` with
-> your developer-agent App's bot login. The reusable extracts the issue number
-> from the explicit `pr-body` input because `github.event.pull_request.body` is
-> only available to the calling workflow — reusable workflows receive the
-> `workflow_call` event, not the original `pull_request` event.
+> your developer-agent App's bot login. The `pr-body` input is retained for compatibility and ignored;
+> the reusable queries GitHub using `pr-number`. The App needs access to the
+> linked issue’s repository to remove its label.
 
 **Trust considerations.** The developer-agent token has only Issues (R/W) — it
 removes the label and nothing else. The no-checkout design means no
