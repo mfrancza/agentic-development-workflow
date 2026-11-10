@@ -27,6 +27,7 @@ owner's organization.
 | `REVIEW_MODEL_PAIRING` | JSON object | Reviewer model-pair preferences. When `enabled` is `true`, the agent-review workflow uses the configured `policy`, `preferred_vendors`, `explicit_map`, and `fallback_chain` to pick a reviewer model based on the authoring model recorded in the PR body. Explicit `model:review:*` / `model:*` labels on the PR take precedence. Defaults to `enabled = false` (fail-safe opt-in). Workflow guards use `vars.REVIEW_MODEL_PAIRING != ''` before `fromJSON`. See `docs/design/configurable-model-pair-preferences.md` for resolver semantics. |
 | `PRE_COMMIT_CHECK_CMD` | string | Shell command run by the pre-commit checks backstop inside `PRE_COMMIT_SCRIPTS_DIR` (default `.github/scripts`) after a `.github/` change. The command is fully responsible for both setup (e.g. dependency installation) and the actual checks. Absent (the default, `count = 0`) disables the backstop — configure per-deployment to avoid baking repo-specific commands into the Docker image. Applies to `implement`, `fix-checks`, `respond-review`, and `fix-deployment`. |
 | `PRE_COMMIT_SCRIPTS_DIR` | string | Directory path (relative to `WORK_DIR`) where the pre-commit check command runs. Absent (the default, `count = 0`) means the helper uses its built-in default of `.github/scripts`. Set to a non-empty path to override the default for repos whose scripts live elsewhere. Applies to the same four actions as `PRE_COMMIT_CHECK_CMD`. |
+| `RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST` | JSON array | GitHub logins whose open PRs are swept for merge conflicts in addition to the developer-agent's; the default `[]` preserves agent-only behavior, `["*"]` sweeps every author, and the expanded sweep excludes fork-headed PRs. |
 
 ## Usage
 
@@ -144,6 +145,7 @@ provider "github" {
 | `review_model_pairing` | `object({enabled,policy,preferred_vendors,explicit_map,fallback_chain})` | no | `enabled=false` | Reviewer model-pair preferences. See `docs/design/configurable-model-pair-preferences.md`. |
 | `pre_commit_check_cmd` | `string` | no | `""` | Shell command for the pre-commit checks backstop. When non-empty, creates the `PRE_COMMIT_CHECK_CMD` Actions variable; empty (the default, `count = 0`) does not create the variable and the backstop skips checks for that deployment. |
 | `pre_commit_scripts_dir` | `string` | no | `""` | Custom scripts directory for the pre-commit backstop. When non-empty, creates the `PRE_COMMIT_SCRIPTS_DIR` Actions variable overriding the helper's built-in default of `.github/scripts`; empty (the default, `count = 0`) does not create the variable and the helper uses its built-in default. |
+| `resolve_conflicts_author_allowlist` | `list(string)` | no | `[]` | GitHub logins whose open PRs are swept for merge conflicts in addition to the developer-agent's; `["*"]` sweeps every author, and the expanded sweep excludes fork-headed PRs. Stored as the JSON-encoded `RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST` Actions variable. |
 
 ## Outputs
 
@@ -166,6 +168,7 @@ provider "github" {
 | `review_model_pairing_variable_name` | `string` | Name of the `REVIEW_MODEL_PAIRING` Actions variable (`"REVIEW_MODEL_PAIRING"`). |
 | `pre_commit_check_cmd_variable_name` | `string \| null` | Name of the `PRE_COMMIT_CHECK_CMD` Actions variable (`"PRE_COMMIT_CHECK_CMD"`), or `null` when `pre_commit_check_cmd` is empty and the variable is not created. |
 | `pre_commit_scripts_dir_variable_name` | `string \| null` | Name of the `PRE_COMMIT_SCRIPTS_DIR` Actions variable (`"PRE_COMMIT_SCRIPTS_DIR"`), or `null` when `pre_commit_scripts_dir` is empty and the variable is not created (the helper's built-in default of `.github/scripts` applies). |
+| `resolve_conflicts_author_allowlist_variable_name` | `string` | Name of the `RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST` Actions variable (`"RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST"`). |
 
 ## Notes
 
