@@ -81,13 +81,15 @@ Implement the following policy inside `rerunPublisher`:
    for equal timestamps. Process timestamp groups, including groups crossing page
    boundaries, so a page boundary cannot reintroduce the same-second bug. Once a
    timestamp group contains an eligible run, no older group needs examination.
-4. List each candidate's jobs using the latest-attempt filter (`filter: latest`),
-   paginating jobs. A run is preferred if a job named exactly
+4. List each candidate's jobs across all attempts (`filter: all`), paginating
+   jobs. A run is preferred if any attempt has a job named exactly
    `protected-approval-gate` or `protected-approval-gate (preview)` completed with
    `success` or `failure`. Failure is essential: that is the stale check to refresh.
    Skipped, queued, running, cancelled, or unrelated jobs do not demonstrate a
-   completed gate evaluation. Accept either gate mode, because configuration can
-   change between the original run and its rerun.
+   completed gate evaluation by themselves. An earlier completed evaluation still
+   qualifies when the latest attempt is in progress or skipped: reruns retain the
+   event's draft flag, and the two gate guards cover both toggle values. Accept
+   either gate mode, because configuration can change between attempts.
 5. Rerun the highest-ranked preferred run. If the complete search finds no
    preferred run, rerun the highest-ranked current-head matching run, even if both
    gate jobs skipped. If no current-head match exists, return `no-prior-run`.
@@ -120,7 +122,10 @@ Re-fetch the live head immediately before triggering the selected run. If it
 changed during discovery, return `api-error` with a diagnostic and do not rerun
 the old head. A push after that final read remains an ordinary distributed race;
 its synchronize publisher is responsible for the new head. Rerun rejection for a
-busy run retains existing warning behavior; this fix adds no retry loop.
+busy run retains existing warning behavior and must not fall back to another run.
+The busy attempt may have read approvals before the latest review, so rejection
+does not guarantee a refreshed check; a later event or manual recovery is needed.
+This fix adds no retry loop.
 
 **Alternative: treat read failures as no eligible run.** Rejected because missing
 evidence would recreate the arbitrary-run selection failure under API errors.
@@ -150,8 +155,10 @@ Vitest coverage must exercise:
   gate: rerun the evaluated run, for both preview and enforcing names.
 - Newer old-head evaluated runs ignored; only old-head runs yields `no-prior-run`.
 - Multiple evaluated runs: newest timestamp wins; equal timestamps use run ID.
-- Latest attempt controls eligibility; an earlier successful attempt does not
-  qualify a latest skipped attempt. Unrelated/skipped/incomplete jobs do not qualify.
+- An earlier completed gate job qualifies even when the latest attempt is skipped
+  or in progress; with a same-timestamp draft-payload run, select the evaluated
+  run, and return `api-error` without fallback if its rerun is rejected as busy.
+  Unrelated/skipped/incomplete jobs alone do not qualify.
 - Workflow pages and timestamp ties across pages, paginated jobs, null PR arrays,
   and a separate PR sharing the same SHA.
 - No preferred run: current-head fallback; no matching run: no rerun.
