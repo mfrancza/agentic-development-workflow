@@ -54,6 +54,7 @@ function runAction(model: string, options: { checkout?: string; check?: string; 
     source "$HELPER"
     source "$CHECKS"
     source "$GUARD"
+    source "$REPLY_HELPER"
     setup_repo() { cd "$WORK_DIR"; }
     gh() {
       printf 'gh %s\n' "$*" >> "$EVENTS"
@@ -70,7 +71,7 @@ function runAction(model: string, options: { checkout?: string; check?: string; 
     cwd: agent,
     encoding: "utf8",
     env: {
-      ...environment, ACTION: action, HELPER: helper, CHECKS: checks, GUARD: guard, WORK_DIR: agent,
+      ...environment, ACTION: action, HELPER: helper, CHECKS: checks, GUARD: guard, REPLY_HELPER: new URL("../../../docker/scripts/lib/reply-only-rereview.sh", import.meta.url).pathname, WORK_DIR: agent,
       WRITER: writer, BRANCH_REF: branchRef, EVENTS: events, GITHUB_PR_NUMBER: "123",
       GITHUB_REPO: "example/repo", GH_TOKEN: "test-token", CHECKOUT: options.checkout ?? ":", MODEL: model,
       PRE_COMMIT_SCRIPTS_DIR: ".", PRE_COMMIT_CHECK_CMD: options.check ?? "true",

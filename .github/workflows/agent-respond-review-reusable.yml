@@ -410,6 +410,7 @@ jobs:
           xai-api-key: ${{ secrets.XAI_API_KEY }}
           repo: ${{ github.repository }}
           agent-action: respond-review
+          reviewer-bot-login: 'mfrancza-reviewer-agent[bot]'
           pr-number: ${{ inputs.pr-number }}
           model: ${{ steps.model.outputs.claude_model || vars.DEFAULT_MODEL }}
           logs-dir: ${{ runner.temp }}/agent-logs
