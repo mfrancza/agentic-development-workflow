@@ -1962,11 +1962,7 @@ jobs:
 ```
 
 `.github/workflows/protected-approval-gate-reconcile.yml` (scheduled safety
-net). The cron uses GitHub's shortest supported interval, every 5 minutes,
-because schedules cannot read Actions variables; the sweep skips runs that
-come sooner than
-`ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES` after the last successful
-one:
+net and manual recovery):
 
 ```yaml
 name: protected-approval-gate-reconcile
@@ -1974,6 +1970,11 @@ name: protected-approval-gate-reconcile
 on:
   schedule:
     - cron: '*/5 * * * *'
+    - cron: '*/10 * * * *'
+    - cron: '*/15 * * * *'
+    - cron: '*/20 * * * *'
+    - cron: '*/30 * * * *'
+    - cron: '0 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -1982,7 +1983,7 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: protected-approval-gate-reconcile
+  group: protected-approval-gate-reconcile-${{ github.event.schedule || 'manual' }}
   cancel-in-progress: false
 
 jobs:
@@ -1992,6 +1993,12 @@ jobs:
       repo: ${{ github.repository }}
       interval-minutes: ${{ vars.ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES }}
 ```
+
+The reusable selects the matching UTC cron for `ENABLE_PROTECTED_APPROVAL_GATE_RECONCILE_MINUTES`: `5`, `10`, `15`, `20`, `30`, or `60` minutes; an empty input defaults to `10`. Scheduled events skip without allocating a runner when the gate is disabled or unset, the cron does not match, or a directly configured interval is unsupported or noncanonical. Skipped workflow-run records may still appear. Manual reconcile dispatch and backfill bypass the gate and interval checks, including for invalid values. For manual-only operation, remove the `schedule` block and keep `workflow_dispatch`.
+
+This setting selects a UTC wall-clock cadence, not a minimum elapsed time since the last successful sweep. GitHub may delay or drop scheduled events, and delayed ticks may run close together. Concurrency is partitioned by cron with a separate manual group, so manual and differently scheduled sweeps can overlap. A long sweep can also cause pending runs in the same group to be replaced; retry manually or wait for the next scheduled sweep if needed.
+
+**Upgrade migration.** When updating the reusable pin, replace the old five-minute-only schedule and concurrency blocks with the blocks above in the same change. Updating the pin alone leaves the default ten-minute cadence without a matching event. Previously supported integer values outside `5`, `10`, `15`, `20`, `30`, and `60` must be changed to a supported cadence before upgrading; Terraform rejects them, while direct Actions-variable edits skip scheduled sweeps without a diagnostic runner. If a sweep does not run, inspect the variable and caller schedule.
 
 **Which approvals count.** By default (`PROTECTED_APPROVAL_REVIEWERS` empty
 or unset), the latest approval from **any** reviewer other than the PR author
