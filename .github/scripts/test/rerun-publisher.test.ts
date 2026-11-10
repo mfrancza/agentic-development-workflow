@@ -1,140 +1,70 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { rerunPublisher } from "../src/lib/rerun-publisher.js";
-import type { RerunResult } from "../src/lib/rerun-publisher.js";
-
-// Minimal Octokit mock shape needed by rerunPublisher.
-function makeOctokit(overrides: {
-  listWorkflowRuns?: ReturnType<typeof vi.fn>;
-  reRunWorkflow?: ReturnType<typeof vi.fn>;
-}) {
-  return {
-    rest: {
-      actions: {
-        listWorkflowRuns: overrides.listWorkflowRuns ?? vi.fn().mockResolvedValue({ data: { workflow_runs: [] } }),
-        reRunWorkflow: overrides.reRunWorkflow ?? vi.fn().mockResolvedValue({}),
-      },
-    },
+const run = (id: number, sha = "head", prs: number[] | null = [10], created_at = "2024-01-01T00:00:00Z") => ({ id, head_sha: sha, pull_requests: prs?.map(number => ({ number })) ?? null, created_at });
+const job = (name = "protected-approval-gate", conclusion = "success", status = "completed") => ({ name, conclusion, status });
+function setup(runs = [run(1)], jobs: Record<number, ReturnType<typeof job>[]> = {}) {
+  const get = vi.fn().mockResolvedValue({ data: { head: { sha: "head" } } });
+  const listWorkflowRuns = vi.fn().mockResolvedValue({ data: { workflow_runs: runs } });
+  const listJobsForWorkflowRun = vi.fn().mockImplementation(async ({ run_id }: { run_id: number }) => ({ data: { jobs: jobs[run_id] ?? [] } }));
+  const reRunWorkflow = vi.fn().mockResolvedValue({});
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  } as any;
+  const octokit = { rest: { pulls: { get }, actions: { listWorkflowRuns, listJobsForWorkflowRun, reRunWorkflow } } } as any;
+  return { get, listWorkflowRuns, listJobsForWorkflowRun, reRunWorkflow, invoke: () => rerunPublisher(octokit, "owner", "repo", 10, "publisher.yml") };
 }
-
-/** Builds a mock workflow_run object with the given id and PR numbers. */
-function workflowRun(id: number, prNumbers: number[], createdAt = "2024-01-01T00:00:00Z") {
-  return { id, created_at: createdAt, pull_requests: prNumbers.map(number => ({ number })) };
-}
-
-const OWNER = "owner";
-const REPO = "repo";
-const WORKFLOW = "protected-approval-gate-publisher.yml";
-
 describe("rerunPublisher", () => {
-  beforeEach(() => vi.clearAllMocks());
-
-  it("triggers a rerun of the latest pull_request_target run for the given PR and returns rerun-triggered", async () => {
-    const reRunWorkflow = vi.fn().mockResolvedValue({});
-    const listWorkflowRuns = vi.fn().mockResolvedValue({ data: { workflow_runs: [workflowRun(42, [10, 11])] } });
-    const octokit = makeOctokit({ listWorkflowRuns, reRunWorkflow });
-
-    const result: RerunResult = await rerunPublisher(octokit, OWNER, REPO, 10, WORKFLOW);
-
-    expect(result).toEqual({ status: "rerun-triggered", runId: 42 });
-    expect(listWorkflowRuns).toHaveBeenCalledWith({ owner: OWNER, repo: REPO, workflow_id: WORKFLOW, event: "pull_request_target", per_page: 100, page: 1 });
-    expect(reRunWorkflow).toHaveBeenCalledWith({ owner: OWNER, repo: REPO, run_id: 42 });
+  it.each(["protected-approval-gate", "protected-approval-gate (preview)"])("prefers an evaluated %s over a first-listed skipped run", async name => {
+    const t = setup([run(20), run(10)], { 20: [job(name, "skipped")], 10: [job(name, "failure")] });
+    expect(await t.invoke()).toEqual({ status: "rerun-triggered", runId: 10 });
+    expect(t.reRunWorkflow).toHaveBeenCalledTimes(1);
   });
-
-  it("returns no-prior-run when no workflow run includes the target PR number", async () => {
-    const reRunWorkflow = vi.fn();
-    const listWorkflowRuns = vi.fn().mockResolvedValue({ data: { workflow_runs: [workflowRun(42, [99])] } });
-    const octokit = makeOctokit({ listWorkflowRuns, reRunWorkflow });
-
-    const result = await rerunPublisher(octokit, OWNER, REPO, 10, WORKFLOW);
-
-    expect(result).toEqual({ status: "no-prior-run" });
-    expect(reRunWorkflow).not.toHaveBeenCalled();
+  it("ranks evaluated candidates by timestamp then descending id", async () => {
+    const t = setup([run(2), run(3), run(9, "head", [10], "2023-01-01T00:00:00Z")], { 2: [job()], 3: [job()], 9: [job()] });
+    expect(await t.invoke()).toEqual({ status: "rerun-triggered", runId: 3 });
+    expect(t.listJobsForWorkflowRun).toHaveBeenCalledTimes(1);
   });
-
-  it("returns no-prior-run when the workflow has no runs at all", async () => {
-    const reRunWorkflow = vi.fn();
-    const listWorkflowRuns = vi.fn().mockResolvedValue({ data: { workflow_runs: [] } });
-    const octokit = makeOctokit({ listWorkflowRuns, reRunWorkflow });
-
-    const result = await rerunPublisher(octokit, OWNER, REPO, 10, WORKFLOW);
-
-    expect(result).toEqual({ status: "no-prior-run" });
-    expect(reRunWorkflow).not.toHaveBeenCalled();
+  it("ignores old heads and PRs sharing the SHA or missing identity", async () => {
+    const t = setup([run(9, "old"), run(8, "head", [11]), run(7, "head", null), run(2)], { 9: [job()], 2: [job()] });
+    expect(await t.invoke()).toEqual({ status: "rerun-triggered", runId: 2 });
+    expect(t.listJobsForWorkflowRun).toHaveBeenCalledTimes(1);
+    const old = setup([run(9, "old")]);
+    expect(await old.invoke()).toEqual({ status: "no-prior-run" });
+    expect(old.reRunWorkflow).not.toHaveBeenCalled();
   });
-
-  it("returns api-error (does not throw) when the reRunWorkflow call fails", async () => {
-    const reRunWorkflow = vi.fn().mockRejectedValue(new Error("Not Found"));
-    const listWorkflowRuns = vi.fn().mockResolvedValue({ data: { workflow_runs: [workflowRun(42, [10])] } });
-    const octokit = makeOctokit({ listWorkflowRuns, reRunWorkflow });
-
-    const result = await rerunPublisher(octokit, OWNER, REPO, 10, WORKFLOW);
-
-    expect(result).toEqual({ status: "api-error", message: "Not Found" });
-    expect(reRunWorkflow).toHaveBeenCalledWith({ owner: OWNER, repo: REPO, run_id: 42 });
+  it("falls back to the highest-ranked matching run only after all jobs are checked", async () => {
+    const t = setup([run(1), run(2)], { 2: [job("other"), job(undefined, "skipped")], 1: [job(undefined, "success", "in_progress")] });
+    expect(await t.invoke()).toEqual({ status: "rerun-triggered", runId: 2 });
+    expect(t.listJobsForWorkflowRun).toHaveBeenCalledTimes(2);
+    expect(await setup([]).invoke()).toEqual({ status: "no-prior-run" });
   });
-
-  it("stops at the first matching run (latest) without fetching subsequent pages", async () => {
-    const reRunWorkflow = vi.fn().mockResolvedValue({});
-    // Two runs on page 1; first (id=100) is the latest. Second (id=50) should not be rerun.
-    const listWorkflowRuns = vi.fn().mockResolvedValue({
-      data: { workflow_runs: [workflowRun(100, [10], "2024-02-01T00:00:00Z"), workflowRun(50, [10], "2024-01-01T00:00:00Z")] },
-    });
-    const octokit = makeOctokit({ listWorkflowRuns, reRunWorkflow });
-
-    const result = await rerunPublisher(octokit, OWNER, REPO, 10, WORKFLOW);
-
-    expect(result).toEqual({ status: "rerun-triggered", runId: 100 });
-    expect(reRunWorkflow).toHaveBeenCalledTimes(1);
-    expect(reRunWorkflow).toHaveBeenCalledWith({ owner: OWNER, repo: REPO, run_id: 100 });
-    // Should only have fetched page 1 (found immediately)
-    expect(listWorkflowRuns).toHaveBeenCalledTimes(1);
+  it("searches all attempts, including an earlier completed job when the latest skipped", async () => {
+    const t = setup([run(2), run(1)], { 2: [job(undefined, "skipped")], 1: [job(undefined, "skipped"), job(undefined, "failure")] });
+    t.reRunWorkflow.mockRejectedValue(new Error("busy"));
+    expect(await t.invoke()).toEqual({ status: "api-error", message: "busy" });
+    expect(t.listJobsForWorkflowRun).toHaveBeenCalledWith(expect.objectContaining({ run_id: 1, filter: "all" }));
+    expect(t.reRunWorkflow).toHaveBeenCalledTimes(1);
   });
-
-  it("paginates to find a matching run when the first page has no match", async () => {
-    const reRunWorkflow = vi.fn().mockResolvedValue({});
-    const listWorkflowRuns = vi.fn()
-      // Page 1: 100 runs, none matching PR 10
-      .mockResolvedValueOnce({ data: { workflow_runs: Array.from({ length: 100 }, (_, i) => workflowRun(1000 + i, [99])) } })
-      // Page 2: 1 run matching PR 10
-      .mockResolvedValueOnce({ data: { workflow_runs: [workflowRun(77, [10])] } });
-    const octokit = makeOctokit({ listWorkflowRuns, reRunWorkflow });
-
-    const result = await rerunPublisher(octokit, OWNER, REPO, 10, WORKFLOW);
-
-    expect(result).toEqual({ status: "rerun-triggered", runId: 77 });
-    expect(listWorkflowRuns).toHaveBeenCalledTimes(2);
-    expect(listWorkflowRuns).toHaveBeenNthCalledWith(1, expect.objectContaining({ page: 1 }));
-    expect(listWorkflowRuns).toHaveBeenNthCalledWith(2, expect.objectContaining({ page: 2 }));
+  it("handles run timestamp ties across pages and paginated jobs", async () => {
+    const t = setup();
+    t.listWorkflowRuns.mockResolvedValueOnce({ data: { workflow_runs: [run(1), ...Array.from({ length: 99 }, (_, i) => run(1000 + i, "head", [99]))] } }).mockResolvedValueOnce({ data: { workflow_runs: [run(2)] } });
+    t.listJobsForWorkflowRun.mockImplementation(async ({ run_id, page }: { run_id: number; page: number }) => ({ data: { jobs: run_id === 2 && page === 1 ? Array.from({ length: 100 }, () => job("other")) : run_id === 2 ? [job()] : [] } }));
+    expect(await t.invoke()).toEqual({ status: "rerun-triggered", runId: 2 });
+    expect(t.listWorkflowRuns).toHaveBeenCalledTimes(2);
+    expect(t.listJobsForWorkflowRun).toHaveBeenCalledTimes(2);
   });
-
-  it("returns no-prior-run after exhausting all pages with no match", async () => {
-    const reRunWorkflow = vi.fn();
-    const listWorkflowRuns = vi.fn()
-      // Page 1: 100 runs, none matching PR 10
-      .mockResolvedValueOnce({ data: { workflow_runs: Array.from({ length: 100 }, (_, i) => workflowRun(1000 + i, [99])) } })
-      // Page 2: 0 runs (end of pagination)
-      .mockResolvedValueOnce({ data: { workflow_runs: [] } });
-    const octokit = makeOctokit({ listWorkflowRuns, reRunWorkflow });
-
-    const result = await rerunPublisher(octokit, OWNER, REPO, 10, WORKFLOW);
-
-    expect(result).toEqual({ status: "no-prior-run" });
-    expect(reRunWorkflow).not.toHaveBeenCalled();
+  it.each(["head", "runs", "jobs", "rerun", "recheck"])("normalizes %s errors without another rerun", async where => {
+    const t = setup();
+    if (where === "head") t.get.mockRejectedValue(new Error("bad head"));
+    if (where === "runs") t.listWorkflowRuns.mockRejectedValue(new Error("bad runs"));
+    if (where === "jobs") t.listJobsForWorkflowRun.mockRejectedValue(new Error("bad jobs"));
+    if (where === "rerun") t.reRunWorkflow.mockRejectedValue(new Error("bad rerun"));
+    if (where === "recheck") t.get.mockResolvedValueOnce({ data: { head: { sha: "head" } } }).mockRejectedValueOnce(new Error("bad recheck"));
+    expect(await t.invoke()).toEqual({ status: "api-error", message: `bad ${where}` });
+    expect(t.reRunWorkflow.mock.calls.length).toBeLessThanOrEqual(1);
   });
-
-  it("handles runs with null pull_requests gracefully", async () => {
-    const reRunWorkflow = vi.fn();
-    const listWorkflowRuns = vi.fn().mockResolvedValue({
-      // Some runs have null pull_requests (e.g. push-triggered runs listed by the same endpoint)
-      data: { workflow_runs: [{ id: 42, created_at: "2024-01-01T00:00:00Z", pull_requests: null }] },
-    });
-    const octokit = makeOctokit({ listWorkflowRuns, reRunWorkflow });
-
-    const result = await rerunPublisher(octokit, OWNER, REPO, 10, WORKFLOW);
-
-    expect(result).toEqual({ status: "no-prior-run" });
-    expect(reRunWorkflow).not.toHaveBeenCalled();
+  it("rejects a changed head before dispatch", async () => {
+    const t = setup();
+    t.get.mockResolvedValueOnce({ data: { head: { sha: "head" } } }).mockResolvedValueOnce({ data: { head: { sha: "new" } } });
+    expect(await t.invoke()).toEqual({ status: "api-error", message: expect.stringContaining("head changed") });
+    expect(t.reRunWorkflow).not.toHaveBeenCalled();
   });
 });

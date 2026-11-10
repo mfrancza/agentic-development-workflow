@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { listReviews, listPulls, getPull, listWorkflowRuns, reRunWorkflow, paginate, listMembersInOrg, summaryAddHeading, summaryAddRaw, summaryWrite } = vi.hoisted(() => {
+const { listReviews, listPulls, getPull, listWorkflowRuns, listJobs, reRunWorkflow, paginate, listMembersInOrg, summaryAddHeading, summaryAddRaw, summaryWrite } = vi.hoisted(() => {
   const summaryWrite = vi.fn().mockResolvedValue(undefined);
   return {
     listReviews: vi.fn(), listPulls: vi.fn(), getPull: vi.fn(),
-    listWorkflowRuns: vi.fn(), reRunWorkflow: vi.fn(),
+    listWorkflowRuns: vi.fn(), listJobs: vi.fn(), reRunWorkflow: vi.fn(),
     paginate: vi.fn(), listMembersInOrg: vi.fn(),
     summaryAddHeading: vi.fn(), summaryAddRaw: vi.fn(), summaryWrite,
   };
@@ -19,6 +19,7 @@ vi.mock("@actions/core", () => {
     error: vi.fn(),
     warning: vi.fn(),
     notice: vi.fn(),
+    info: vi.fn(),
     setFailed: vi.fn(),
     summary,
   };
@@ -27,7 +28,7 @@ vi.mock("@actions/github", () => ({
   getOctokit: vi.fn().mockReturnValue({
     paginate, rest: {
       pulls: { listReviews, list: listPulls, get: getPull },
-      actions: { listWorkflowRuns, reRunWorkflow },
+      actions: { listWorkflowRuns, listJobsForWorkflowRun: listJobs, reRunWorkflow },
       teams: { listMembersInOrg },
     },
   }),
@@ -56,6 +57,7 @@ describe("check-protected-approval-gate", () => {
     listPulls.mockResolvedValue({ data: [pr(42, "developer[bot]")] });
     listReviews.mockResolvedValue({ data: [] });
     listWorkflowRuns.mockResolvedValue({ data: { workflow_runs: [] } });
+    listJobs.mockResolvedValue({ data: { jobs: [] } });
     reRunWorkflow.mockResolvedValue({});
     paginate.mockResolvedValue([]);
     summaryWrite.mockResolvedValue(undefined);
@@ -184,26 +186,42 @@ describe("check-protected-approval-gate", () => {
 
   it("triggers departed-SHA sibling reruns for remaining open PRs on the old SHA", async () => {
     mockInputs({ departed_sha: "old-sha", departed_pr_number: "42" });
-    getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "live-sha") });
+    getPull.mockImplementation(async ({ pull_number }: { pull_number: number }) => ({ data: pull_number === 43 ? pr(43, "human", "old-sha") : pr(42, "developer[bot]", "live-sha") }));
     listPulls.mockImplementation(async ({ page }: { page: number }) => ({
       data: page === 1 ? [pr(42, "developer[bot]", "live-sha"), pr(43, "human", "old-sha")] : [],
     }));
     listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
-    listWorkflowRuns.mockResolvedValue({ data: { workflow_runs: [{ id: 999, created_at: "2024-01-01T00:00:00Z", pull_requests: [{ number: 43 }] }] } });
+    listWorkflowRuns.mockResolvedValue({ data: { workflow_runs: [{ id: 999, head_sha: "old-sha", created_at: "2024-01-01T00:00:00Z", pull_requests: [{ number: 43 }] }] } });
     await run();
     expect(listWorkflowRuns).toHaveBeenCalledWith(expect.objectContaining({ workflow_id: "protected-approval-gate-publisher.yml", event: "pull_request_target" }));
     expect(reRunWorkflow).toHaveBeenCalledWith({ owner: "owner", repo: "repo", run_id: 999 });
     expect(vi.mocked(core.notice)).toHaveBeenCalledWith(expect.stringContaining("PR #43"));
   });
 
+  it("selects each sibling's current-head evaluated run independently", async () => {
+    mockInputs({ departed_sha: "old-sha", departed_pr_number: "42" });
+    getPull.mockImplementation(async ({ pull_number }: { pull_number: number }) => ({ data: pr(pull_number, "human", pull_number === 42 ? "live-sha" : "old-sha") }));
+    listPulls.mockResolvedValue({ data: [pr(43, "human", "old-sha"), pr(44, "human", "old-sha")] });
+    listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
+    listWorkflowRuns.mockResolvedValue({ data: { workflow_runs: [
+      { id: 101, head_sha: "old-sha", created_at: "2024-01-01T00:00:00Z", pull_requests: [{ number: 43 }] },
+      { id: 102, head_sha: "old-sha", created_at: "2024-01-01T00:00:00Z", pull_requests: [{ number: 44 }] },
+    ] } });
+    listJobs.mockResolvedValue({ data: { jobs: [{ name: "protected-approval-gate (preview)", status: "completed", conclusion: "failure" }] } });
+    await run();
+    expect(reRunWorkflow.mock.calls.map(([args]) => args.run_id)).toEqual([101, 102]);
+    expect(getPull).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 43 }));
+    expect(getPull).toHaveBeenCalledWith(expect.objectContaining({ pull_number: 44 }));
+  });
+
   it("warns (does not fail) when a sibling's rerun API call errors", async () => {
     mockInputs({ departed_sha: "old-sha", departed_pr_number: "42" });
-    getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "live-sha") });
+    getPull.mockImplementation(async ({ pull_number }: { pull_number: number }) => ({ data: pull_number === 43 ? pr(43, "human", "old-sha") : pr(42, "developer[bot]", "live-sha") }));
     listPulls.mockImplementation(async ({ page }: { page: number }) => ({
       data: page === 1 ? [pr(42, "developer[bot]", "live-sha"), pr(43, "human", "old-sha")] : [],
     }));
     listReviews.mockResolvedValue({ data: [review("alice", "APPROVED"), review("bob", "APPROVED")] });
-    listWorkflowRuns.mockResolvedValue({ data: { workflow_runs: [{ id: 999, created_at: "2024-01-01T00:00:00Z", pull_requests: [{ number: 43 }] }] } });
+    listWorkflowRuns.mockResolvedValue({ data: { workflow_runs: [{ id: 999, head_sha: "old-sha", created_at: "2024-01-01T00:00:00Z", pull_requests: [{ number: 43 }] }] } });
     reRunWorkflow.mockRejectedValue(new Error("Forbidden"));
     await run();
     expect(vi.mocked(core.warning)).toHaveBeenCalledWith(expect.stringContaining("Rerun API error"));
@@ -213,7 +231,7 @@ describe("check-protected-approval-gate", () => {
 
   it("warns (does not fail) when no prior publisher run exists for a sibling", async () => {
     mockInputs({ departed_sha: "old-sha", departed_pr_number: "42" });
-    getPull.mockResolvedValue({ data: pr(42, "developer[bot]", "live-sha") });
+    getPull.mockImplementation(async ({ pull_number }: { pull_number: number }) => ({ data: pull_number === 43 ? pr(43, "human", "old-sha") : pr(42, "developer[bot]", "live-sha") }));
     listPulls.mockImplementation(async ({ page }: { page: number }) => ({
       data: page === 1 ? [pr(42, "developer[bot]", "live-sha"), pr(43, "human", "old-sha")] : [],
     }));

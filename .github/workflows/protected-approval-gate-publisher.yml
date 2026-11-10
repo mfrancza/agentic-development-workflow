@@ -2,7 +2,7 @@ name: protected-approval-gate-publisher
 
 # Runs on every pull_request_target event to publish the gate check on the PR head
 # commit. Review events are handled by the dispatcher workflow
-# (protected-approval-gate-dispatcher.yml), which reruns the latest
+# (protected-approval-gate-dispatcher.yml), which reruns a selected current-head
 # pull_request_target publisher run rather than running directly at the
 # default-branch SHA. The activity decides whether a PR author is protected;
 # do not gate this workflow on AGENT_ALLOWLIST.

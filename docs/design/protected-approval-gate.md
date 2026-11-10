@@ -30,7 +30,7 @@ The computation is executed by a **publisher** workflow that runs under
 code (not the attacker-controllable PR head), and carries a write-capable
 `GITHUB_TOKEN`. Decision 5 details the event-routing architecture: review
 events are handled by a separate dispatcher workflow that reruns the
-publisher's latest `pull_request_target` run via the rerun API, so the
+publisher's current-head `pull_request_target` run via the rerun API, preferring a run with an evaluated gate job, so the
 resulting job check attaches to the PR head SHA rather than the
 default-branch SHA. The publication mechanism was subsequently revised
 in [`docs/design/protected-approval-gate-job-check.md`](protected-approval-gate-job-check.md)

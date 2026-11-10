@@ -4,7 +4,7 @@ name: protected-approval-gate-dispatcher
 # runs on the default-branch SHA (workflow_run behaviour), so it must not
 # publish checks directly — doing so would attach the auto-emitted job check to
 # the default branch instead of the reviewed PR head. Instead it locates the
-# latest pull_request_target publisher run for the affected PR and calls the
+# current-head pull_request_target publisher run for the affected PR and calls the
 # rerun API so the publisher re-executes under its original pull_request_target
 # context and the resulting check attaches to the PR head SHA.
 # See docs/design/protected-approval-gate-job-check.md, Decision 5.

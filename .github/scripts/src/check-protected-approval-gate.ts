@@ -238,11 +238,11 @@ export async function run(): Promise<void> {
           core.notice(`Triggered publisher rerun (run ${rerunResult.runId}) for sibling PR #${siblingNumber} on departed SHA ${departedSha}.`);
           rerunLines.push(`- PR #${siblingNumber}: rerun triggered (run ${rerunResult.runId})`);
         } else if (rerunResult.status === "no-prior-run") {
-          core.warning(`No prior pull_request_target publisher run found for sibling PR #${siblingNumber}; the scheduled reconcile sweep will reconcile it.`);
-          rerunLines.push(`- PR #${siblingNumber}: no prior run found — skipped; scheduled sweep will reconcile`);
+          core.warning(`No prior pull_request_target publisher run found for sibling PR #${siblingNumber}; the independent scheduled sweep may help.`);
+          rerunLines.push(`- PR #${siblingNumber}: no prior run found — skipped; independent scheduled sweep may help`);
         } else {
-          core.warning(`Rerun API error for sibling PR #${siblingNumber}: ${rerunResult.message}; the scheduled reconcile sweep will reconcile it.`);
-          rerunLines.push(`- PR #${siblingNumber}: rerun API error (${rerunResult.message}) — scheduled sweep will reconcile`);
+          core.warning(`Rerun API error for sibling PR #${siblingNumber}: ${rerunResult.message}; the independent scheduled sweep may help.`);
+          rerunLines.push(`- PR #${siblingNumber}: rerun API error (${rerunResult.message}) — independent scheduled sweep may help`);
         }
       }
       await core.summary.addRaw(rerunLines.join("\n")).write();

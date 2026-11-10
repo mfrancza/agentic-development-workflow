@@ -7,14 +7,14 @@ import { rerunPublisher } from "./lib/rerun-publisher.js";
  *
  * Reads GITHUB_TOKEN, REPO (owner/repo), PR_NUMBER, and
  * PUBLISHER_WORKFLOW_FILE from the environment, then calls the shared
- * rerunPublisher helper to locate the latest pull_request_target run of
+ * rerunPublisher helper to select a current-head pull_request_target run of
  * the publisher workflow for the given PR and trigger a rerun.
  *
  * Exits 0 in all cases (same graceful-degradation posture as the
  * departed-SHA sibling step in check-protected-approval-gate.ts):
  *   - rerun-triggered → core.notice
- *   - no-prior-run    → core.warning (scheduled sweep will reconcile)
- *   - api-error       → core.warning (scheduled sweep will reconcile)
+ *   - no-prior-run    → core.warning (independent sweep may help)
+ *   - api-error       → core.warning (independent sweep may help)
  */
 export async function run(): Promise<void> {
   const token = process.env.GITHUB_TOKEN;
@@ -37,9 +37,9 @@ export async function run(): Promise<void> {
   if (result.status === "rerun-triggered") {
     core.notice(`Triggered publisher rerun (run ${result.runId}) for PR #${prNumber}.`);
   } else if (result.status === "no-prior-run") {
-    core.warning(`No prior pull_request_target publisher run found for PR #${prNumber}. The scheduled reconcile sweep will reconcile it.`);
+    core.warning(`No prior pull_request_target publisher run found for PR #${prNumber}. The independent scheduled sweep may help; inspect the publisher runs and retry if needed.`);
   } else {
-    core.warning(`Rerun API error for PR #${prNumber}: ${result.message}. The scheduled reconcile sweep will reconcile it.`);
+    core.warning(`Rerun API error for PR #${prNumber}: ${result.message}. The independent scheduled sweep may help; inspect the publisher runs and retry if needed.`);
   }
 }
 
