@@ -21,7 +21,7 @@ RUN curl -fsSL -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
 # reproducible; override at build time with --build-arg if you want a different
 # release. Kept in sync with docker/Dockerfile so the reviewer and developer
 # images run against the same CLI.
-ARG CLAUDE_CODE_VERSION=2.1.150
+ARG CLAUDE_CODE_VERSION=2.1.321
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}"
 
 # Install OpenAI Codex CLI. Pin to a specific version so workflow runs are
