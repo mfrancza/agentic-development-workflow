@@ -69,6 +69,10 @@ inputs:
     description: 'PR number injected as GITHUB_PR_NUMBER; omit when not applicable'
     required: false
     default: ''
+  reviewer-bot-login:
+    description: 'First-party reviewer login for reply-only re-review; empty disables it'
+    required: false
+    default: ''
   run-id:
     description: 'Workflow run ID injected as GITHUB_RUN_ID; omit when not applicable'
     required: false
@@ -159,6 +163,7 @@ runs:
         _AGENT_ACTION: ${{ inputs.agent-action }}
         _GITHUB_ISSUE_NUMBER: ${{ inputs.issue-number }}
         _GITHUB_PR_NUMBER: ${{ inputs.pr-number }}
+        _REVIEWER_BOT_LOGIN: ${{ inputs.reviewer-bot-login }}
         _GITHUB_RUN_ID: ${{ inputs.run-id }}
         _ESCALATION_ASSIGNEE: ${{ inputs.escalation-assignee }}
         _OUTPUT_DIR: ${{ inputs.output-dir }}
@@ -197,6 +202,7 @@ runs:
         [[ -n "${_AGENT_ACTION}" ]] && _opt_env+=(-e AGENT_ACTION="${_AGENT_ACTION}")
         [[ -n "${_GITHUB_ISSUE_NUMBER}" ]] && _opt_env+=(-e GITHUB_ISSUE_NUMBER="${_GITHUB_ISSUE_NUMBER}")
         [[ -n "${_GITHUB_PR_NUMBER}" ]] && _opt_env+=(-e GITHUB_PR_NUMBER="${_GITHUB_PR_NUMBER}")
+        [[ -n "${_REVIEWER_BOT_LOGIN}" ]] && _opt_env+=(-e REVIEWER_BOT_LOGIN="${_REVIEWER_BOT_LOGIN}")
         [[ -n "${_GITHUB_RUN_ID}" ]] && _opt_env+=(-e GITHUB_RUN_ID="${_GITHUB_RUN_ID}")
         [[ -n "${_ESCALATION_ASSIGNEE}" ]] && _opt_env+=(-e ESCALATION_ASSIGNEE="${_ESCALATION_ASSIGNEE}")
         [[ -n "${_RESOLVE_THREADS_FILE}" ]] && _opt_env+=(-e RESOLVE_THREADS_FILE="${_RESOLVE_THREADS_FILE}")

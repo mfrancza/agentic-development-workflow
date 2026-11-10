@@ -28,6 +28,7 @@ source "${SCRIPTS_DIR}/lib/fix-checks-guard.sh"
 source "${SCRIPTS_DIR}/lib/pre-commit-checks.sh"
 source "${SCRIPTS_DIR}/lib/branch-push.sh"
 source "${SCRIPTS_DIR}/lib/model-push-guard.sh"
+source "${SCRIPTS_DIR}/lib/reply-only-rereview.sh"
 
 # -----------------------------------------------------------------------------
 # Helpers
@@ -598,6 +599,10 @@ action_respond_review() {
     # re-request review when the agent actually changed the branch tip.
     HEAD_BEFORE_CLAUDE="$(git rev-parse HEAD)"
 
+    local reply_dir reply_snapshot_ok=false
+    reply_dir="$(mktemp -d)"
+    if reply_review_snapshot "$reply_dir/snapshot"; then reply_snapshot_ok=true; fi
+
     log "Running Claude to address review feedback"
     run_agent_without_push "respond-to-review.md" \
         "Address review feedback on PR #${GITHUB_PR_NUMBER} in ${GITHUB_REPO}.
@@ -616,7 +621,7 @@ Inline review comments (each has an \`id\` for replying):
 ${INLINE_COMMENTS_JSON}
 
 PR conversation comments:
-${ISSUE_COMMENTS_JSON}" || return 1
+${ISSUE_COMMENTS_JSON}" || { rm -rf "$reply_dir"; return 1; }
 
     pre_commit_checks_run "$HEAD_BEFORE_CLAUDE" "$GITHUB_PR_NUMBER"
 
@@ -630,6 +635,10 @@ ${ISSUE_COMMENTS_JSON}" || return 1
     fi
 
     inject_authored_by_marker "$GITHUB_PR_NUMBER"
+    if [[ "$HEAD_BEFORE_CLAUDE" == "$HEAD_AFTER_CLAUDE" && "$reply_snapshot_ok" == true ]]; then
+        reply_review_request "$reply_dir/snapshot" "$checkout_sha"
+    fi
+    rm -rf "$reply_dir"
 }
 
 # Re-request review from every user and team currently assigned as a reviewer
