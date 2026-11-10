@@ -1,63 +1,64 @@
+import * as core from "@actions/core";
 import type { getOctokit } from "./octokit.js";
 
 type Octokit = ReturnType<typeof getOctokit>;
 
-/** Structured result returned by {@link rerunPublisher}. */
 export type RerunResult =
   | { status: "rerun-triggered"; runId: number }
   | { status: "no-prior-run" }
   | { status: "api-error"; message: string };
 
-/**
- * Locates the latest `pull_request_target` run of the given publisher workflow
- * for the specified PR and triggers a rerun.
- *
- * The workflow-runs listing is sorted by `created_at` descending (GitHub API
- * default), so the first matching run found on any page is the most-recent run
- * for that PR. Pagination stops as soon as a matching run is found.
- *
- * @param octokit       Authenticated Octokit client (needs `actions: write`).
- * @param owner         Repository owner login.
- * @param repo          Repository name.
- * @param prNumber      Pull request number to search for in `pull_requests[].number`.
- * @param workflowFile  Workflow filename, e.g. "protected-approval-gate-publisher.yml".
- * @returns             A structured result: `rerun-triggered` when the rerun API succeeds,
- *                      `no-prior-run` when no `pull_request_target` run exists for this PR,
- *                      or `api-error` when the rerun API call fails.
- */
+/** Rerun the newest evaluated publisher for this PR's live head, or its newest run as a fallback. */
 export async function rerunPublisher(
-  octokit: Octokit,
-  owner: string,
-  repo: string,
-  prNumber: number,
-  workflowFile: string,
+  octokit: Octokit, owner: string, repo: string, prNumber: number, workflowFile: string,
 ): Promise<RerunResult> {
-  for (let page = 1; ; page++) {
-    const { data } = await octokit.rest.actions.listWorkflowRuns({
-      owner,
-      repo,
-      workflow_id: workflowFile,
-      event: "pull_request_target",
-      per_page: 100,
-      page,
-    });
-
-    for (const run of data.workflow_runs) {
-      const prNums = (run.pull_requests ?? []).map((pr) => pr.number);
-      if (prNums.includes(prNumber)) {
-        // First match in descending created_at order is the latest run for this PR.
-        try {
-          await octokit.rest.actions.reRunWorkflow({ owner, repo, run_id: run.id });
-          return { status: "rerun-triggered", runId: run.id };
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          return { status: "api-error", message };
+  try {
+    const getHead = async () => {
+      const { data } = await octokit.rest.pulls.get({ owner, repo, pull_number: prNumber });
+      if (!data.head.sha) throw new Error(`Missing head SHA for PR #${prNumber}`);
+      return data.head.sha;
+    };
+    const head = await getHead();
+    // Gather all pages before sorting: equal timestamps can straddle page boundaries.
+    const candidates: { id: number; created_at: string }[] = [];
+    for (let page = 1; ; page++) {
+      const { data } = await octokit.rest.actions.listWorkflowRuns({
+        owner, repo, workflow_id: workflowFile, event: "pull_request_target", per_page: 100, page,
+      });
+      for (const run of data.workflow_runs) {
+        if (run.head_sha === head && (run.pull_requests ?? []).some(pr => pr.number === prNumber)) {
+          candidates.push(run);
         }
       }
+      if (data.workflow_runs.length < 100) break;
     }
+    candidates.sort((a, b) => b.created_at.localeCompare(a.created_at) || b.id - a.id);
+    if (!candidates.length) return { status: "no-prior-run" };
 
-    if (data.workflow_runs.length < 100) {
-      return { status: "no-prior-run" };
+    let selected: typeof candidates[number] | undefined;
+    for (const candidate of candidates) {
+      for (let page = 1; ; page++) {
+        const { data } = await octokit.rest.actions.listJobsForWorkflowRun({
+          owner, repo, run_id: candidate.id, filter: "all", per_page: 100, page,
+        });
+        if (data.jobs.some(job =>
+          (job.name === "protected-approval-gate" || job.name === "protected-approval-gate (preview)") &&
+          job.status === "completed" && (job.conclusion === "success" || job.conclusion === "failure"))) {
+          selected = candidate;
+          break;
+        }
+        if (data.jobs.length < 100) break;
+      }
+      if (selected) break;
     }
+    const preferred = !!selected;
+    selected ??= candidates[0];
+    core.info(`Selected publisher run ${selected.id} for PR #${prNumber} on ${head}: ${preferred ? "evaluated gate job" : "fallback (no evaluated gate job found)"}.`);
+    const currentHead = await getHead();
+    if (currentHead !== head) throw new Error(`PR #${prNumber} head changed from ${head} to ${currentHead} during publisher selection`);
+    await octokit.rest.actions.reRunWorkflow({ owner, repo, run_id: selected.id });
+    return { status: "rerun-triggered", runId: selected.id };
+  } catch (error) {
+    return { status: "api-error", message: error instanceof Error ? error.message : String(error) };
   }
 }

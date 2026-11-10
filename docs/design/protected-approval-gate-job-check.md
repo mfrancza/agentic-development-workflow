@@ -16,7 +16,7 @@ reusable-workflow layer in the publisher with a top-level job (the reusable
 pattern mangles the resulting check name into `publish / check`, which does
 not match the required context). For review events, scheduled reconcile,
 manual backfill, and departed-SHA sibling reconciliation, trigger a **rerun
-of the latest `pull_request_target` publisher run**
+of a current-head `pull_request_target` publisher run**
 (`POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun`) rather than
 publishing a new check-run from a workflow run whose head SHA is the
 default branch. The job's exit code is the published conclusion: non-zero
@@ -322,7 +322,7 @@ arbitrary strings including spaces and punctuation.
 ### Decision 5 — Review events trigger the publisher via `POST /actions/runs/{run_id}/rerun`
 
 **Decision.** For each `pull_request_review` event, trigger a rerun of
-the latest `pull_request_target` publisher run for the affected PR. The
+a current-head `pull_request_target` publisher run for the affected PR. The
 rerun re-executes the publisher workflow using the original event
 context (same event payload, same PR head SHA, same base branch
 workflow YAML and composite-action pin), and the resulting job check
@@ -336,10 +336,17 @@ a check-run itself, it:
 1. Reads `github.event.workflow_run.pull_requests[0].number` (same shape
    as `agent-fix-checks.yml`; applies the same `!= null` guard for
    fork-headed PRs where `pull_requests` is empty).
-2. Finds the latest `pull_request_target` publisher workflow run for that
-   PR via `GET /repos/{owner}/{repo}/actions/workflows/protected-approval-gate-publisher.yml/runs?event=pull_request_target&...` filtered to
-   `pull_requests[].number == <PR number>` and sorted by `created_at`
-   descending.
+2. The shared TypeScript helper fetches the live head, paginates publisher
+   runs matching both PR identity and head, and ranks them by creation time
+   and descending run ID for ties. It prefers a run with an enforcing or
+   preview gate job completed with success or failure in any attempt. It
+   falls back to the newest matching current-head run only when none evaluated;
+   no current-head match means no rerun. Read errors abort selection. The
+   helper rechecks the head before dispatch and logs preference or fallback.
+   A skipped-only fallback cannot guarantee an evaluation. A busy rerun is not
+   retried; a later event or manual recovery is needed. A push after the final
+   head read remains a race handled by the synchronize publisher.
+
 3. Calls `POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun` on that
    run id.
 
@@ -356,8 +363,8 @@ rerun has no run to target. This case is bounded:
 
 - **New PRs just opened**: `pull_request_target: opened` fires
   immediately on PR creation; the dispatcher never sees a review event
-  before that run exists. The `opened` run is the first publisher run,
-  and all subsequent dispatcher reruns can target it.
+  before that run exists. The `opened` run is the first publisher run;
+  later head changes require a publisher run for the new head.
 - **Pre-existing PRs when the publisher workflow is first deployed**:
   no prior `pull_request_target` run exists. Operational mitigation:
   the operator pushes any no-op commit to the PR branch, which fires
@@ -470,6 +477,8 @@ the current sweep already enumerates every open PR each interval.
 | Dispatch an independent per-SHA cleanup workflow via `gh workflow run` | Was considered and rejected under the current Decision 8a Alternatives table (does not survive pending-run replacement; dispatched workflows run on default branch SHA, no PR-head attachment). The rerun model avoids both failure modes. |
 | Collapse backfill and reconcile into one workflow with a `force` input | Possible refactor, but the current two-file split clearly separates the one-shot operational action (backfill) from the recurring safety net (reconcile), and both files are already thin caller stubs. Keep the split. |
 
+The shell sweep has independent latest-run selection and does not use the TypeScript helper; it is not guaranteed to repair the draft-payload ambiguity.
+
 ### Decision 7 — Departed-SHA sibling reconciliation triggers sibling publisher reruns, not cross-PR Checks API writes
 
 **Decision.** On `pull_request_target: synchronize` (departing SHA =
@@ -483,7 +492,7 @@ activity:
    `checks.create` call.
 2. For each remaining open PR on the departing SHA (looked up via the
    paginated open-PR listing, same source as the current Decision 8a
-   candidate resolution), triggers a rerun of that sibling PR's latest
+   candidate resolution), uses the same current-head selection helper to rerun that sibling PR's
    `pull_request_target` publisher run via `POST /actions/runs/{run_id}/rerun`.
 3. Fails loudly (exit non-zero) if the open-PR listing fails, so the
    departed-SHA reconciliation does not silently drop siblings on an
@@ -509,7 +518,8 @@ The current design's "departed-SHA cleanup must survive pending-run
 replacement" protection carries over: if the triggering PR's run is
 discarded by concurrency replacement before the sibling-rerun step
 executes, the scheduled reconcile sweep (Decision 6) re-triggers the
-sibling's publisher within one sweep interval. Decision 6 does not need
+sibling's publisher within one sweep interval when its independent selection
+chooses an appropriate payload. Decision 6 does not need
 to know about departed-SHAs; it reruns the latest publisher run for
 every open PR, which produces an updated check-run on each PR's own
 head SHA (= the departing SHA for the stranded sibling).
@@ -737,10 +747,12 @@ rather than the Checks API call arguments.
 5. **(new) Review-event rerun.** With a developer-agent PR that failed
    its initial `pull_request_target: opened` publisher run (0
    approvals), submit two qualifying approvals. The notifier fires,
-   the dispatcher reruns the publisher's latest `pull_request_target`
+   the dispatcher reruns an evaluated current-head `pull_request_target`
    run, and the resulting new publisher run's auto-emitted check on
    the PR head SHA is `conclusion: success`. Assert the merge box
-   clears.
+   clears. Also open a draft, edit its body/marker, and mark it ready on
+   the unchanged head with same-second publisher runs; after approvals verify
+   the evaluated run is selected and its check refreshed.
 6. **(new) Review event on PR with only OFF-mode prior publisher runs.**
    Simulate an OFF→ON flip on a PR whose only prior publisher runs were
    from OFF mode (preview job only). The sweep and dispatcher locate
@@ -879,11 +891,11 @@ rather than the Checks API call arguments.
 
 | Issue | Task | Depends on |
 |-------|------|-----------|
-| [#759](https://github.com/mfrancza/agentic-development-workflow/issues/759) | TypeScript activity + composite action update: remove the Checks API publication path (Decision 9); make the composite action exit non-zero on `conclusion = failure` (Decision 3); fix the `evaluateSha` null-return by falling back on the triggering PR when the open-PR listing omits it (Decision 8); write the per-PR tally, departed-SHA sibling list, and rerun API outcomes to `$GITHUB_STEP_SUMMARY`. Add a helper (in `.github/scripts/src/lib/`) that given a PR number locates the latest `pull_request_target` publisher workflow run and calls `POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun`, used by both the publisher activity (for departed-SHA sibling reruns, Decision 7) and the new dispatcher (Decisions 5 and 6). Update unit tests to assert exit code and summary content instead of `createCheck` call arguments. | — |
+| [#759](https://github.com/mfrancza/agentic-development-workflow/issues/759) | TypeScript activity + composite action update: remove the Checks API publication path (Decision 9); make the composite action exit non-zero on `conclusion = failure` (Decision 3); fix the `evaluateSha` null-return by falling back on the triggering PR when the open-PR listing omits it (Decision 8); write the per-PR tally, departed-SHA sibling list, and rerun API outcomes to `$GITHUB_STEP_SUMMARY`. Add a helper (in `.github/scripts/src/lib/`) that given a PR number selects a current-head `pull_request_target` publisher workflow run as in Decision 5 and calls `POST /repos/{owner}/{repo}/actions/runs/{run_id}/rerun`, used by both the publisher activity (for departed-SHA sibling reruns, Decision 7) and the new dispatcher (Decisions 5 and 6). Update unit tests to assert exit code and summary content instead of `createCheck` call arguments. | — |
 | [#760](https://github.com/mfrancza/agentic-development-workflow/issues/760) | Publisher workflow restructure: inline `protected-approval-gate-publisher.yml` to a single top-level job named `protected-approval-gate` and a sibling top-level job named `protected-approval-gate (preview)` (Decisions 2 and 4). Both jobs include the helper-checkout bootstrap, optional allowlist-resolver mint, and composite-action invocation inline (no reusable layer). Remove the `workflow_run` trigger from the publisher (moved to the new dispatcher per Decision 5). Preserve per-PR concurrency, draft `if:`, and the full `pull_request_target` trigger set from the parent design. Delete `.github/workflows/protected-approval-gate-reusable.yml`. | Issue #759 |
-| [#761](https://github.com/mfrancza/agentic-development-workflow/issues/761) | New dispatcher workflow + sweep rework: add `protected-approval-gate-dispatcher.yml` (triggered by `workflow_run: protected-approval-gate-notify` completed, per Decision 5) that uses the shared rerun helper from issue #759 to re-run the latest `pull_request_target` publisher run for the affected PR. Rework `protected-approval-gate-reconcile.yml` and `protected-approval-gate-backfill.yml` to use a shared sweep reusable (`protected-approval-gate-sweep-reusable.yml`) that enumerates open PRs and reruns each one's latest publisher run (Decision 6), replacing the current per-SHA Checks API publication. Remove the per-SHA concurrency group and the `checks: write` permission from the sweep reusable; add `actions: write`. Preserve the interval guard and the fail-closed listing posture. | Issue #759 |
+| [#761](https://github.com/mfrancza/agentic-development-workflow/issues/761) | New dispatcher workflow + sweep rework: add `protected-approval-gate-dispatcher.yml` (triggered by `workflow_run: protected-approval-gate-notify` completed, per Decision 5) that uses the shared rerun helper from issue #759 to re-run a selected current-head `pull_request_target` publisher run for the affected PR. Rework `protected-approval-gate-reconcile.yml` and `protected-approval-gate-backfill.yml` to use a shared sweep reusable (`protected-approval-gate-sweep-reusable.yml`) that enumerates open PRs and reruns each one's latest publisher run (Decision 6), replacing the current per-SHA Checks API publication. Remove the per-SHA concurrency group and the `checks: write` permission from the sweep reusable; add `actions: write`. Preserve the interval guard and the fail-closed listing posture. | Issue #759 |
 | [#762](https://github.com/mfrancza/agentic-development-workflow/issues/762) | Documentation: update `docs/design/protected-approval-gate.md` (replace Decision 6 and the Checks-API-centric portions of Decisions 7, 8, 8a, and 9 with cross-references to this document); update `AGENTS.md` (Repository Layout for the new dispatcher file; branch-protection cross-reference); update `docs/adopting.md` (publisher copy requirement from Decision 10; retire the "push a new commit to clear Expected" caveat); update `terraform/modules/branch-protection/README.md` (same caveat retirement; rerun-based backfill wording). Does not touch Terraform code — the ruleset, variables, and labels are unchanged. | Issue #760, Issue #761 |
-| [#763](https://github.com/mfrancza/agentic-development-workflow/issues/763) | End-to-end validation on a scratch PR: execute the Decision 12 acceptance tests on the live repository with the gate enabled. Specifically assert `mergeStateStatus` clears to `CLEAN`/`HAS_HOOKS` after qualifying approvals land under each code path (`pull_request_target: opened`, review-event rerun, scheduled reconcile rerun, departed-SHA sibling rerun). Verify the fork-PR path (write-capable token on `pull_request_target`), the preview-context behavior under OFF→ON, and the modified-notifier residual-risk floor (one-approval degradation under attack). | Issue #759, Issue #760, Issue #761, Issue #762 |
+| [#763](https://github.com/mfrancza/agentic-development-workflow/issues/763) | End-to-end validation on a scratch PR: execute the Decision 12 acceptance tests on the live repository with the gate enabled. Specifically assert `mergeStateStatus` clears to `CLEAN`/`HAS_HOOKS` after qualifying approvals land under each code path (`pull_request_target: opened`, review-event rerun, scheduled reconcile rerun, departed-SHA sibling rerun). Include draft opening → body/marker edit → ready on an unchanged head with same-second runs, then verify the evaluated publisher is rerun after approvals. Verify the fork-PR path (write-capable token on `pull_request_target`), the preview-context behavior under OFF→ON, and the modified-notifier residual-risk floor (one-approval degradation under attack). | Issue #759, Issue #760, Issue #761, Issue #762 |
 
 Dependencies are recorded natively as GitHub blocked-by relationships on
 the sub-issues.
