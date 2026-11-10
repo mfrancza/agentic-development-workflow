@@ -129,3 +129,8 @@ auto_trigger_agents = {
 # Leave unset (or set to "") to disable the backstop (the default).
 # Example for an npm-based repo:
 # pre_commit_check_cmd = "npm ci && npm run typecheck && npm test"
+
+# Dependabot issue scheduling is opt-in and requires human approval and reader-App bootstrap.
+# The capacity is an admission reservation limit, not a strict global PR cap; zero pauses new admissions.
+# enable_dependabot_alert_issues       = false
+# dependabot_alert_issues_max_open_prs = 3

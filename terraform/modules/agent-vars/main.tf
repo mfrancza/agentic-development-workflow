@@ -61,6 +61,18 @@ resource "github_actions_variable" "fix_checks_allow" {
   value         = jsonencode(var.fix_checks_allow)
 }
 
+resource "github_actions_variable" "enable_dependabot_alert_issues" {
+  repository    = var.repository
+  variable_name = "ENABLE_DEPENDABOT_ALERT_ISSUES"
+  value         = tostring(var.enable_dependabot_alert_issues)
+}
+
+resource "github_actions_variable" "dependabot_alert_issues_max_open_prs" {
+  repository    = var.repository
+  variable_name = "DEPENDABOT_ALERT_ISSUES_MAX_OPEN_PRS"
+  value         = tostring(var.dependabot_alert_issues_max_open_prs)
+}
+
 # Expose protected PR authors as JSON so workflows can scope the gate without
 # hardcoding identities.
 resource "github_actions_variable" "protected_pr_author_logins" {

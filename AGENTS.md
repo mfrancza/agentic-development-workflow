@@ -140,6 +140,8 @@ The [`.github/actions/run-agent`](.github/actions/run-agent/action.yml) composit
 
 ## Pre-commit validation
 
+The opt-in Dependabot alert issue scheduler's Terraform variables, reader-App approval and secrets, reservation semantics, and rollback limitations are documented in the [operator contract](README.md#dependabot-alert-issue-scheduling) and [design](docs/design/fixable-dependabot-alert-issues.md). Do not provision credentials or enable the feature without separate human approval.
+
 When a change touches any path under `.github/`, run this repository's checks before committing:
 
 ```bash

@@ -18,6 +18,8 @@ owner's organization.
 | `ADMIN_ASSIGNEES` | JSON array | GitHub logins or `<org>/<team-slug>` references assigned to issues/PRs when the agent applies `human-required` and needs a human in the loop. |
 | `CODE_REVIEWERS` | JSON array | GitHub logins or `<org>/<team-slug>` references requested as PR reviewers when the agent opens a PR and wants human sign-off. |
 | `FIX_CHECKS_ALLOW` | JSON array | Raw Checks API `check_runs[].name` values allowed to trigger the fix-checks agent. Empty (`[]`) disables all fix-checks delivery. |
+| `ENABLE_DEPENDABOT_ALERT_ISSUES` | string (`"true"` / `"false"`) | Opt-in for Dependabot alert issue scheduling; defaults to `"false"`. |
+| `DEPENDABOT_ALERT_ISSUES_MAX_OPEN_PRS` | string integer | Scheduler admission capacity; defaults to `"3"`, and `"0"` pauses new admissions. |
 | `PROTECTED_PR_AUTHOR_LOGINS` | JSON array | PR author logins subject to the protected approval threshold. Defaults to `["mfrancza-developer-agent[bot]"]`. |
 | `PROTECTED_APPROVAL_REVIEWERS` | JSON array | Logins and `<org>/<team-slug>` references whose approvals count toward `REQUIRED_APPROVAL_COUNT`. Defaults to `[]`, meaning any reviewer other than the PR author counts. Team references need the allowlist-resolver App secrets. |
 | `REQUIRED_APPROVAL_COUNT` | string integer | Required non-self approvals for protected PRs. Defaults to `"2"`. |
@@ -45,6 +47,8 @@ module "agent_vars" {
   # max_review_rounds    = 8       # default; use 0 for no numerical cap
   admin_assignees     = ["your-github-username", "<your-github-org>/maintainers"]
   code_reviewers      = ["your-github-username", "<your-github-org>/maintainers"]
+  # enable_dependabot_alert_issues       = false
+  # dependabot_alert_issues_max_open_prs = 3 # 0 pauses new admissions
   # fix_checks_allow = ["ci / Typecheck and test"] # raw Checks API check_runs[].name values; [] disables fix-checks
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
   # protected_approval_reviewers                     = ["<maintainer-login>", "<org>/<team-slug>"]
@@ -83,6 +87,8 @@ module "agent_vars" {
   # max_review_rounds    = 0       # no numerical cap; omit for the default 8
   admin_assignees     = ["your-github-username", "<your-github-org>/maintainers"]
   code_reviewers      = ["your-github-username", "<your-github-org>/maintainers"]
+  # enable_dependabot_alert_issues       = false
+  # dependabot_alert_issues_max_open_prs = 3 # 0 pauses new admissions
   # fix_checks_allow = ["ci / Typecheck and test"] # raw Checks API check_runs[].name values; [] disables fix-checks
   # protected_pr_author_logins                       = ["<developer-agent-app-slug>[bot]"]
   # protected_approval_reviewers                     = ["<maintainer-login>", "<org>/<team-slug>"]
@@ -139,6 +145,8 @@ provider "github" {
 | `admin_assignees` | `list(string)` | no | `[]` | GitHub logins or `<org>/<team-slug>` references to assign to escalation issues/PRs. |
 | `code_reviewers` | `list(string)` | no | `[]` | GitHub logins or `<org>/<team-slug>` references to request as PR reviewers. |
 | `fix_checks_allow` | `list(string)` | no | `[]` | Raw Checks API `check_runs[].name` values allowed to trigger fix-checks. Empty disables all fix-checks delivery. |
+| `enable_dependabot_alert_issues` | `bool` | no | `false` | Opt in to Dependabot alert issue scheduling after human approval. |
+| `dependabot_alert_issues_max_open_prs` | `number` | no | `3` | Non-negative integer admission capacity; zero pauses new admissions. |
 | `protected_pr_author_logins` | `list(string)` | no | developer-agent bot | Protected PR-author logins, encoded as JSON. |
 | `protected_approval_reviewers` | `list(string)` | no | `[]` | Logins and `<org>/<team-slug>` references whose approvals count; empty counts any non-author reviewer. |
 | `required_approval_count` | `number` | no | `2` | Non-self approvals required for a protected PR. |
@@ -162,6 +170,8 @@ provider "github" {
 | `admin_assignees_variable_name` | `string` | Name of the `ADMIN_ASSIGNEES` Actions variable (`"ADMIN_ASSIGNEES"`). |
 | `code_reviewers_variable_name` | `string` | Name of the `CODE_REVIEWERS` Actions variable (`"CODE_REVIEWERS"`). |
 | `fix_checks_allow_variable_name` | `string` | Name of the `FIX_CHECKS_ALLOW` Actions variable (`"FIX_CHECKS_ALLOW"`). |
+| `enable_dependabot_alert_issues_variable_name` | `string` | Name of `ENABLE_DEPENDABOT_ALERT_ISSUES`. |
+| `dependabot_alert_issues_max_open_prs_variable_name` | `string` | Name of `DEPENDABOT_ALERT_ISSUES_MAX_OPEN_PRS`. |
 | `protected_pr_author_logins_variable_name` | `string` | Name of `PROTECTED_PR_AUTHOR_LOGINS`. |
 | `protected_approval_reviewers_variable_name` | `string` | Name of `PROTECTED_APPROVAL_REVIEWERS`. |
 | `required_approval_count_variable_name` | `string` | Name of `REQUIRED_APPROVAL_COUNT`. |
@@ -175,6 +185,8 @@ provider "github" {
 | `resolve_conflicts_author_allowlist_variable_name` | `string` | Name of the `RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST` Actions variable (`"RESOLVE_CONFLICTS_AUTHOR_ALLOWLIST"`). |
 
 ## Notes
+
+- Dependabot capacity reserves slots for admitted issues without a counted open PR; it is not a strict global PR cap. See the [operator contract](../../../README.md#dependabot-alert-issue-scheduling) for approvals, credentials, and rollback.
 
 - `DESIGN_DEFAULT_MODEL` defaults to `""` (empty string). The caller stub expresses the fallback as `vars.DESIGN_DEFAULT_MODEL || vars.DEFAULT_MODEL` — when empty, GitHub Actions evaluates the empty string as falsy and falls through to `DEFAULT_MODEL`, preserving existing behavior for repos that have not set this variable. Set it to any model identifier accepted by the agent `--model` flag to give the design stage its own model tier.
 - `GROOM_DEFAULT_MODEL` defaults to `""` (empty string). The caller stub expresses the fallback as `vars.GROOM_DEFAULT_MODEL || vars.DEFAULT_MODEL` — when empty, GitHub Actions evaluates the empty string as falsy and falls through to `DEFAULT_MODEL`, preserving existing behavior for repos that have not set this variable. Set it to any model identifier accepted by the agent `--model` flag to give the grooming stage its own model tier. It does not affect label selection: the grooming workflow passes the downstream defaults into the container as the vendor anchors (`GROOM_IMPL_ANCHOR_MODEL` = `DEFAULT_MODEL`, `GROOM_DESIGN_ANCHOR_MODEL` = `DESIGN_DEFAULT_MODEL || DEFAULT_MODEL`).
