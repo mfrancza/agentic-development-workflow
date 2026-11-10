@@ -11,6 +11,11 @@ agent_allowlist = [
   "mfrancza-developer-agent[bot]",
 ]
 
+auto_review_authors = [
+  "mfrancza-developer-agent[bot]",
+  "mfrancza-s-claude-code[bot]",
+]
+
 default_model        = "gpt-6.1-terra"
 design_default_model = "gpt-6.1-sol"
 # Haiku is cheap for the bounded grooming pass. The groomer runs on Anthropic
