@@ -96,6 +96,8 @@ locals {
     # later uses dateless canonical IDs, but each remains a pinned snapshot.
     # The entrypoints accept any `claude-*` ID, so ad hoc IDs continue to work;
     # these labels provide the current lineup in the GitHub label picker.
+    # Routing by prefix doesn't mean the pinned Claude Code CLI can run a new
+    # model; see docs/model-guidance.md "Adding a Model".
     "model:claude-opus-5-5" = {
       color       = "1d76db"
       description = "Run agents pinned to Claude Opus 5.5 (overrides DEFAULT_MODEL)."
@@ -118,7 +120,9 @@ locals {
     # docs/design/multi-provider-models.md. Add new models to all three in the
     # same PR. Sourced from https://platform.openai.com/docs/models at
     # implementation time (September 2026); focus on models useful for software
-    # tasks per docs/design/multi-provider-models.md requirement 4.
+    # tasks per docs/design/multi-provider-models.md requirement 4. Also confirm
+    # the pinned Codex CLI supports each new model; see docs/model-guidance.md
+    # "Adding a Model".
     "model:gpt-6-astra" = {
       color       = "1d76db"
       description = "Run agents on this issue with OpenAI gpt-6-astra (overrides DEFAULT_MODEL)."
@@ -152,7 +156,9 @@ locals {
     # (the pinned version in both Dockerfiles). Image/video models are excluded;
     # only text/coding-capable models are listed. Kept in one-to-one sync with
     # the xai) case-arm in resolve_provider() in both entrypoints per
-    # docs/design/grok-build-cli.md Decision 5.
+    # docs/design/grok-build-cli.md Decision 5. New models must appear in
+    # `grok models` at the pinned CLI version; see docs/model-guidance.md
+    # "Adding a Model".
     "model:grok-4.20-0309-non-reasoning" = {
       color       = "1d76db"
       description = "Run agents with xAI grok-4.20-0309-non-reasoning (overrides DEFAULT_MODEL)."
