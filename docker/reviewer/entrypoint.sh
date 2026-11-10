@@ -478,10 +478,10 @@ git diff --name-only "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 printf '\nFull diff (base..head):\n' >> "$CONTEXT_FILE"
 git diff "${BASE_SHA}..HEAD" >> "$CONTEXT_FILE"
 {
-    printf '\nExisting open (unresolved) review threads (evaluate each against the current\n'
-    printf 'diff; append the GraphQL id of each addressed thread to %s,\n' "${RESOLVE_THREADS_FILE}"
-    printf 'one id per line, before posting the review; skip new findings already\n'
-    printf 'covered by still-open threads):\n'
+    printf '\nExisting open (unresolved) review threads (evaluate semantic fixes and\n'
+    printf 'qualified advisory declines; append eligible GraphQL ids to %s,\n' "${RESOLVE_THREADS_FILE}"
+    printf 'one id per line, before posting; follow the prompt rules for duplicates\n'
+    printf 'and blocking replacements):\n'
     printf '%s\n' "${REVIEW_THREADS_JSON}"
     printf '\nCI check status:\n'
     printf '%s\n' "${CHECKS_JSON}"
