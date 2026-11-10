@@ -37,7 +37,7 @@ describe("respond-review round-limit workflow contract", () => {
   it("enforces the gate under the existing lock after trusted checkout and token minting", () => {
     expect(work).toContain("needs: [feedback-gate, authorize]");
     expect(work).toContain("group: agent-branch-pr-${{ inputs.pr-number }}\n      cancel-in-progress: false");
-    const ordered = ["Resolve helpers-ref to commit SHA", "Check out upstream helper actions", "Verify helper checkout HEAD matches resolved SHA", "Mint installation token for developer-agent", "Detect team references for escalation assignees", "Mint installation token for escalation assignee resolver", "Check review-round limit", "Resolve linked issue from PR body", "Resolve Claude model from issue labels", "Prepare agent log directory", "Run agent", "Upload agent logs"];
+    const ordered = ["Resolve helpers-ref to commit SHA", "Check out upstream helper actions", "Verify helper checkout HEAD matches resolved SHA", "Check review freshness", "Mint installation token for developer-agent", "Detect team references for escalation assignees", "Mint installation token for escalation assignee resolver", "Check review-round limit", "Resolve linked issue from PR body", "Resolve Claude model from issue labels", "Prepare agent log directory", "Run agent", "Upload agent logs"];
     const positions = ordered.map((name) => work.indexOf(step(name)));
     expect(positions).toEqual([...positions].sort((left, right) => left - right));
     expect(step("Check out upstream helper actions")).toContain("ref: ${{ steps.resolve-ref.outputs.sha }}");
@@ -49,7 +49,7 @@ describe("respond-review round-limit workflow contract", () => {
   it("uses a fresh optional resolver and passes trusted identifiers and token", () => {
     expect(step("Detect team references for escalation assignees")).toContain("assignees: ${{ inputs.admin-assignees }}");
     const resolver = step("Mint installation token for escalation assignee resolver");
-    expect(resolver).toContain("if: steps.detect-team-refs.outputs.assignees_has_team == 'true'");
+    expect(resolver).toContain("steps.detect-team-refs.outputs.assignees_has_team == 'true'");
     expect(resolver).toContain("continue-on-error: true");
     expect(resolver).toContain("secrets.ALLOWLIST_RESOLVER_APP_ID");
     expect(resolver).toContain("secrets.ALLOWLIST_RESOLVER_APP_PRIVATE_KEY");
@@ -63,6 +63,19 @@ describe("respond-review round-limit workflow contract", () => {
     for (const name of ["Resolve linked issue from PR body", "Resolve Claude model from issue labels", "Prepare agent log directory", "Run agent"]) {
       expect(step(name)).toContain("steps.review-round-limit.outputs.proceed == 'true'");
     }
+    for (const name of ["Mint installation token for developer-agent", "Detect team references for escalation assignees", "Mint installation token for escalation assignee resolver", "Check review-round limit", "Resolve linked issue from PR body", "Resolve Claude model from issue labels", "Prepare agent log directory", "Run agent"]) {
+      expect(step(name)).toContain("steps.review-freshness.outputs.proceed == 'true'");
+    }
+    const freshness = step("Check review freshness");
+    for (const binding of ["token: ${{ github.token }}", "review-author: ${{ inputs.review-author }}", "review-commit-id: ${{ inputs.review-commit-id }}", "pr-number: ${{ inputs.pr-number }}", "review-id: ${{ inputs.review-id }}"]) expect(freshness).toContain(binding);
+    expect(freshness).toContain("uses: ./_agentic-workflow/.github/actions/check-review-freshness");
+    expect(freshness).toContain("repo-owner: ${{ github.repository_owner }}");
+    expect(freshness).toContain("repo-name: ${{ inputs.repo-name }}");
+    const feedback = reusable.slice(reusable.indexOf("      - name: Check for reviewer feedback"), reusable.indexOf("\n  authorize:"));
+    expect(feedback).not.toContain("head-sha:");
+    expect(feedback).not.toContain("review-commit-id:");
+    expect(caller).not.toContain("head-sha:");
+    expect(caller).toContain("review-commit-id: ${{ github.event.review.commit_id }}");
     expect(step("Upload agent logs")).toContain("if: always()");
     expect(step("Check review-round limit")).not.toContain("continue-on-error");
     expect(reusable).not.toMatch(/(?:contents|issues|pull-requests):\s*write/);

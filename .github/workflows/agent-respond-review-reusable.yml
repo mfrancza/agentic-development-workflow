@@ -49,18 +49,12 @@ on:
         type: string
         required: true
       head-sha:
-        description: >
-          Current PR head SHA (github.event.pull_request.head.sha). When empty,
-          the stale-SHA guard inside check-reviewer-feedback is skipped
-          (fail-open).
+        description: 'Deprecated no-op retained for compatibility.'
         type: string
         required: false
         default: ''
       review-commit-id:
-        description: >
-          The commit SHA the review was submitted against
-          (github.event.review.commit_id). When empty, the stale-SHA guard
-          falls through (does not skip on a missing value).
+        description: 'Reviewed commit SHA used for post-lock bot freshness; empty fails open.'
         type: string
         required: false
         default: ''
@@ -190,8 +184,6 @@ jobs:
           repo-name: ${{ inputs.repo-name }}
           review-author: ${{ inputs.review-author }}
           pr-author: ${{ inputs.pr-author }}
-          head-sha: ${{ inputs.head-sha }}
-          review-commit-id: ${{ inputs.review-commit-id }}
 
   authorize:
     needs: feedback-gate
@@ -320,8 +312,21 @@ jobs:
           fi
           echo "Helper checkout HEAD verified: ${actual_sha}"
 
+      - name: Check review freshness
+        id: review-freshness
+        uses: ./_agentic-workflow/.github/actions/check-review-freshness
+        with:
+          token: ${{ github.token }}
+          repo-owner: ${{ github.repository_owner }}
+          repo-name: ${{ inputs.repo-name }}
+          pr-number: ${{ inputs.pr-number }}
+          review-id: ${{ inputs.review-id }}
+          review-author: ${{ inputs.review-author }}
+          review-commit-id: ${{ inputs.review-commit-id }}
+
       - name: Mint installation token for developer-agent
         id: setup
+        if: steps.review-freshness.outputs.proceed == 'true'
         uses: ./_agentic-workflow/.github/actions/agent-token
         with:
           client-id: ${{ secrets.DEVELOPER_APP_ID }}
@@ -329,13 +334,14 @@ jobs:
 
       - name: Detect team references for escalation assignees
         id: detect-team-refs
+        if: steps.review-freshness.outputs.proceed == 'true'
         uses: ./_agentic-workflow/.github/actions/detect-team-refs
         with:
           assignees: ${{ inputs.admin-assignees }}
 
       - name: Mint installation token for escalation assignee resolver
         id: assignee-resolver
-        if: steps.detect-team-refs.outputs.assignees_has_team == 'true'
+        if: steps.review-freshness.outputs.proceed == 'true' && steps.detect-team-refs.outputs.assignees_has_team == 'true'
         continue-on-error: true
         uses: ./_agentic-workflow/.github/actions/agent-token
         with:
@@ -344,6 +350,7 @@ jobs:
 
       - name: Check review-round limit
         id: review-round-limit
+        if: steps.review-freshness.outputs.proceed == 'true'
         uses: ./_agentic-workflow/.github/actions/check-review-round-limit
         with:
           token: ${{ steps.setup.outputs.token }}
@@ -358,7 +365,7 @@ jobs:
           admin-assignees: ${{ inputs.admin-assignees }}
 
       - name: Resolve linked issue from PR body
-        if: steps.review-round-limit.outputs.proceed == 'true'
+        if: steps.review-freshness.outputs.proceed == 'true' && steps.review-round-limit.outputs.proceed == 'true'
         id: linked-issue
         uses: ./_agentic-workflow/.github/actions/find-linked-issue
         with:
@@ -367,7 +374,7 @@ jobs:
           pr-number: ${{ inputs.pr-number }}
 
       - name: Resolve Claude model from issue labels
-        if: steps.review-round-limit.outputs.proceed == 'true' && steps.linked-issue.outputs.proceed == 'true'
+        if: steps.review-freshness.outputs.proceed == 'true' && steps.review-round-limit.outputs.proceed == 'true' && steps.linked-issue.outputs.proceed == 'true'
         id: model
         uses: ./_agentic-workflow/.github/actions/resolve-model
         with:
@@ -379,14 +386,14 @@ jobs:
           agent-type: developer
 
       - name: Prepare agent log directory
-        if: steps.review-round-limit.outputs.proceed == 'true'
+        if: steps.review-freshness.outputs.proceed == 'true' && steps.review-round-limit.outputs.proceed == 'true'
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/agent-logs"
           chmod 0777 "${RUNNER_TEMP}/agent-logs"
 
       - name: Run agent
-        if: steps.review-round-limit.outputs.proceed == 'true'
+        if: steps.review-freshness.outputs.proceed == 'true' && steps.review-round-limit.outputs.proceed == 'true'
         uses: ./_agentic-workflow/.github/actions/run-agent
         env:
           # Pre-commit checks backstop: set per-deployment so the Docker image

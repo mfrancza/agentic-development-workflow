@@ -178,7 +178,7 @@ export function makeDependencies(options: {
     async listEvents() { return await octokit.paginate(octokit.rest.issues.listEvents, { ...issue, per_page: 100 }) as Event[]; },
     async listReviews() { return await octokit.paginate(octokit.rest.pulls.listReviews, { ...pull, per_page: 100 }); },
     async feedback(current, review) {
-      return checkReviewerFeedback({ state: review.state, body: review.body ?? "", reviewId, prNumber, owner, repo, reviewAuthor: review.user?.login ?? "", prAuthor: current.author, headSha: current.head, reviewCommitId: review.commit_id ?? "" }, {
+      return checkReviewerFeedback({ state: review.state, body: review.body ?? "", reviewId, prNumber, owner, repo, reviewAuthor: review.user?.login ?? "", prAuthor: current.author }, {
         getPrState: async () => current.state,
         countUnresolvedThreads: makeUnresolvedThreadCounter(octokit, owner, repo, prNumber),
         countInlineComments: makeInlineCommentCounter(octokit, owner, repo, prNumber, reviewId),

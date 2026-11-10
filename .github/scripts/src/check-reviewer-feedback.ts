@@ -12,13 +12,11 @@ async function run(): Promise<void> {
   const repo = core.getInput("repo_name", { required: true });
   const reviewAuthor = core.getInput("review_author", { required: true });
   const prAuthor = core.getInput("pr_author", { required: true });
-  const headSha = core.getInput("head_sha");
-  const reviewCommitId = core.getInput("review_commit_id");
 
   const octokit = getOctokit(token);
 
   const result = await checkReviewerFeedback(
-    { state, body, reviewId, prNumber, owner, repo, reviewAuthor, prAuthor, headSha, reviewCommitId },
+    { state, body, reviewId, prNumber, owner, repo, reviewAuthor, prAuthor },
     {
       getPrState: makePrStateGetter(octokit, owner, repo, prNumber),
       countUnresolvedThreads: makeUnresolvedThreadCounter(
