@@ -1884,60 +1884,112 @@ jobs:
 
 `.github/workflows/protected-approval-gate-dispatcher.yml` (reruns the
 publisher for the reviewed PR under the original `pull_request_target`
-context, so the resulting check attaches to the PR head SHA):
+context, so the resulting check attaches to the PR head SHA). Pin `vX.Y.Z`
+to the same release as the publisher; use a release containing the dispatcher
+helper. The helper reads the live PR head, selects a matching publisher run,
+and verifies the head again before rerunning it:
 
 ```yaml
 name: protected-approval-gate-dispatcher
 
+# Triggers a publisher rerun whenever a notifier run completes. This workflow
+# runs on the default-branch SHA (workflow_run behaviour), so it must not
+# publish checks directly — doing so would attach the auto-emitted job check to
+# the default branch instead of the reviewed PR head. Instead it locates the
+# current-head pull_request_target publisher run for the affected PR and calls the
+# rerun API so the publisher re-executes under its original pull_request_target
+# context and the resulting check attaches to the PR head SHA.
+# See docs/design/protected-approval-gate-job-check.md, Decision 5.
 on:
   workflow_run:
     workflows: ["protected-approval-gate-notify"]
     types: [completed]
 
 # actions: write is required to call POST /actions/runs/{run_id}/rerun.
+# pull-requests: read is required to read the PR's live head via the Pulls API.
 permissions:
   contents: read
   actions: write
+  pull-requests: read
 
 concurrency:
-  group: protected-approval-gate-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
+  # Fallback to run id prevents unrelated PR-less notifier runs from sharing
+  # one empty concurrency key. The job guard below skips when there is no PR.
+  group: protected-approval-gate-dispatcher-pr-${{ github.event.workflow_run.pull_requests[0].number || github.event.workflow_run.id }}
   cancel-in-progress: false
 
 jobs:
   dispatch:
+    # Skip if the notifier could not associate a PR (e.g. pull_requests is empty
+    # for some fork events where GitHub omits the pull_requests array).
     if: github.event.workflow_run.pull_requests[0] != null
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Find and rerun latest publisher run for PR
+      - name: Validate helpers-ref
         env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
-          REPO: ${{ github.repository }}
+          HELPERS_REF: vX.Y.Z
         run: |
           set -euo pipefail
-          run_id=""
-          page=1
-          while true; do
-            response="$(gh api \
-              "repos/${REPO}/actions/workflows/protected-approval-gate-publisher.yml/runs?event=pull_request_target&per_page=100&page=${page}")"
-            run_id="$(jq -r --argjson pr "${PR_NUMBER}" \
-              '[.workflow_runs[] | select((.pull_requests // [])[] | .number == $pr) | .id] | .[0] // ""' \
-              <<<"$response")"
-            if [[ -n "$run_id" ]]; then
-              break
-            fi
-            count="$(jq '.workflow_runs | length' <<<"$response")"
-            if (( count < 100 )); then
-              break
-            fi
-            (( page++ ))
-          done
-          if [[ -z "$run_id" ]]; then
-            echo "::warning::No prior publisher run found for PR #${PR_NUMBER}. The scheduled sweep will reconcile it."
-            exit 0
+          if [[ -z "${HELPERS_REF}" ]]; then
+            echo "::error::helpers-ref is required and must not be empty."
+            exit 1
           fi
-          gh api -X POST "repos/${REPO}/actions/runs/${run_id}/rerun"
+
+      - name: Resolve helpers-ref to commit SHA
+        id: resolve-ref
+        env:
+          HELPERS_REF: vX.Y.Z
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          resolved="$(gh api "repos/mfrancza/agentic-development-workflow/commits/${HELPERS_REF}" --jq '.sha')"
+          if [[ -z "${resolved}" ]]; then
+            echo "::error::helpers-ref '${HELPERS_REF}' did not resolve to a commit SHA."
+            exit 1
+          fi
+          echo "Resolved ${HELPERS_REF} → ${resolved}"
+          echo "sha=$(printf '%s' "${resolved}" | tr -d '\r\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Check out upstream helper actions
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: mfrancza/agentic-development-workflow
+          ref: ${{ steps.resolve-ref.outputs.sha }}
+          path: _agentic-workflow
+          persist-credentials: false
+
+      - name: Verify helper checkout HEAD matches resolved SHA
+        env:
+          EXPECTED_SHA: ${{ steps.resolve-ref.outputs.sha }}
+        run: |
+          set -euo pipefail
+          actual_sha="$(git -C _agentic-workflow rev-parse HEAD)"
+          if [[ "${actual_sha}" != "${EXPECTED_SHA}" ]]; then
+            echo "::error::Helper checkout HEAD (${actual_sha}) does not match the resolved SHA (${EXPECTED_SHA}). Aborting before any helper action runs."
+            exit 1
+          fi
+          echo "Helper checkout HEAD verified: ${actual_sha}"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: _agentic-workflow/.github/scripts/package-lock.json
+
+      - name: Install dependencies
+        working-directory: _agentic-workflow/.github/scripts
+        run: npm ci
+
+      - name: Find and rerun latest publisher run for PR
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+          PUBLISHER_WORKFLOW_FILE: protected-approval-gate-publisher.yml
+        working-directory: _agentic-workflow/.github/scripts
+        run: npx --no-install tsx src/rerun-publisher-for-pr.ts
 ```
 
 `.github/workflows/protected-approval-gate-backfill.yml` (dispatch it by hand
