@@ -14,8 +14,7 @@ on:
     types: [completed]
 
 # actions: write is required to call POST /actions/runs/{run_id}/rerun.
-# pull-requests: read is required so workflow run responses include the
-# pull_requests array used to match runs to the affected PR.
+# pull-requests: read is required to read the PR's live head via the Pulls API.
 permissions:
   contents: read
   actions: write
